@@ -37,7 +37,6 @@ import { platform } from "os";
 import { time } from "console";
 import { channel } from "diagnostics_channel";
 import { resourceLimits } from "worker_threads";
-import { CLIENT_RENEG_LIMIT } from "tls";
 
 const BOT_OAUTH = process.env.BOT_OAUTH; // bot oauth token for performing actions
 const COOKIE = process.env.COOKIE // <--- change this to your cookie
@@ -137,38 +136,38 @@ const sisterClient = new tmi.Client({
 sisterClient.connect();
 
 // interval timer for !join/!link/!1v1/!ticket
+// setInterval(async () => {
+//   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
+//   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
+
+//   if (SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
+//     var averageViewers = STREAMS.averageviewers;
+
+//     if (averageViewers == null) {
+//     } else if (averageViewers < 40) {
+//       MUTATED_JOIN_TIMER = JOIN_TIMER * 0.8;
+//     } else if (averageViewers > 60) {
+//       MUTATED_JOIN_TIMER = JOIN_TIMER * 1.5;
+//     }
+
+//     var currentMode = SETTINGS.currentMode.replace(".on", "");
+//     currentMode = currentMode.replace("!", "");
+
+ //    var timerCommands = SETTINGS.timer;
+
+//     for (const key in timerCommands) {
+//       if (key == currentMode) {
+//         client.say(CHANNEL_NAME, `${timerCommands[key]}`);
+//       }
+//     }
+//   }
+// }, 60 * 2.5 * 1000);
+
 setInterval(async () => {
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
-  if (SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
-    var averageViewers = STREAMS.averageviewers;
-
-    if (averageViewers == null) {
-    } else if (averageViewers < 40) {
-      MUTATED_JOIN_TIMER = JOIN_TIMER * 0.8;
-    } else if (averageViewers > 60) {
-      MUTATED_JOIN_TIMER = JOIN_TIMER * 1.5;
-    }
-
-    var currentMode = SETTINGS.currentMode.replace(".on", "");
-    currentMode = currentMode.replace("!", "");
-
-    var timerCommands = SETTINGS.timer;
-
-    for (const key in timerCommands) {
-      if (key == currentMode) {
-        client.say(CHANNEL_NAME, `${timerCommands[key]}`);
-      }
-    }
-  }
-}, 60 * 2.5 * 1000);
-
-setInterval(async () => {
-  STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
-  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
-  if (SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
+ 
+  if (SETTINGS.currentMode == "!gamble.on" && SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
     var averageViewers = STREAMS.averageviewers;
 
     if (averageViewers == null) {
@@ -189,43 +188,7 @@ setInterval(async () => {
   }
 }, 30 * 7 * 1000);
 
-setInterval(async () => {
-  STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
-  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 
-  const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
-  const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
-
-  if (SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
-
-    if (SETTINGS.currentMode == "!sponsor.on" || SETTINGS.currentMode == "!gamble.on") {
-      return client.say(
-        CHANNEL_NAME,
-        `` // nothing
-        )
-      };
-    
-    if (location == '[UPDATE] Ability Wars') { return client.say(CHANNEL_NAME, `Tibb is currently playing Ability Wars.`)};
-    if (location == '🌀NEW MAP🌀 Super Golf!') { return client.say(CHANNEL_NAME, `Tibb is currently playing Super Golf.`)};
-    if (location == '[SUMMER] Criminality') { return client.say(CHANNEL_NAME, `Tibb is currently playing Criminality.`)};
-    if (location == 'Plates of Fate: Remastered') { return client.say(CHANNEL_NAME, `Tibb is currently playing Plates of Fate.`)};
-    if (location == 'Hoopz [VEHICLES] (Basketball)') { return client.say(CHANNEL_NAME, `Tibb is currently playing Hoopz.`)};
-    if (location == '[NEW GUN] Aimblox BETA') { return client.say(CHANNEL_NAME, `Tibb is currently playing Aimblox.`)};
-    if (location == '[☀] item asylum') { return client.say(CHANNEL_NAME, `Tibb is currently playing Item Asylum.`)};
-    if (location == '[NEW MAP] Escape The Darkness') { return client.say(CHANNEL_NAME, `Tibb is currently playing Escape The Darkness.`)};
-    if (location == '🚪 DOOR STUCK! | Funky Friday') { return client.say(CHANNEL_NAME, `Tibb is currently playing Funky Friday.`)};
-
-    if (onlineStatus > 30){
-      return client.say(CHANNEL_NAME,`Tibb is not playing anything right now.`)
-    }
-    console.log(location)
-    if(location != 'Website'){
-      return client.say(CHANNEL_NAME,`Tibb is currently playing ${location}.`)
-    }
-      return client.say(CHANNEL_NAME,`Tibb is currently switching games.`)
-
-  }
-}, 437500);
 
 setInterval(async () => {
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
@@ -403,7 +366,7 @@ async function ksHandler(client, lowerMessage, twitchUsername, userstate) {
     } else if (SETTINGS.ks == false) {
       SETTINGS.ks = true;
       fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-      return client.say(
+      return client.raw(
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, Killswitch is on, the bot will not be actively moderating.`
       );
     }
@@ -1383,6 +1346,15 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${joinTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
       "method": "POST"
       })
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      })
     }
     
     if (message.toLowerCase() == "!link.on"){
@@ -1393,6 +1365,15 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       },
       "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${linkTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
       "method": "POST"
+      })
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
       })
     }
 
@@ -1405,6 +1386,15 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${arsenalTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
       "method": "POST"
       })
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      })
     }
 
     if (message.toLowerCase() == "!ticket.on"){
@@ -1415,6 +1405,15 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       },
       "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${ticketTItle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
       "method": "POST"
+      })
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
       })
     }
 
@@ -1427,6 +1426,15 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${gambaTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
       "method": "POST"
       })
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      })
     }
 
     if (message.toLowerCase() == "!sponsor.on"){
@@ -1438,6 +1446,15 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       // "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"${sponsorGame}","status":"${sponsorTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
       // "method": "POST"
       // })
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      })
       client.say(
       CHANNEL_NAME, 
       `@${twitchUsername}, There is not currently a sponsor.`
@@ -1466,12 +1483,10 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       var currentMode = SETTINGS.currentMode.replace(".on", "");
       currentMode = currentMode.replace("!", "");
 
-      if (SETTINGS.currentMode == "!join.on") {
-         return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in join mode.`)};
+      if (SETTINGS.currentMode == "!join.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in join mode.`)};
       if (SETTINGS.currentMode == "!link.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in link mode.`)};
       if (SETTINGS.currentMode == "!ticket.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in ticket mode.`)};
       if (SETTINGS.currentMode == "!1v1.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in 1v1 mode.`)};
-      if (SETTINGS.currentMode == "!gamble.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in gamba mode.`)};
 
       client.say(CHANNEL_NAME, `@${twitchUsername}, The bot is in ${SETTINGS.currentMode}`);
       return
@@ -2278,7 +2293,7 @@ client.on("hosted", (channel, username, viewers, autohost) => {
 
 client.on("hosting", (channel, username, viewers, autohost) => {
   client.say(CHANNEL_NAME, `Tibb is now hosting ${username}.`)
-})
+});
 client.on("subscription", (channel, username, method, message, userstate) => {
 
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
@@ -2289,30 +2304,23 @@ client.on("subscription", (channel, username, method, message, userstate) => {
 });
 
 client.on("giftpaidupgrade", (channel, username, viewers, method) => {
-
-  client.say(CHANNEL_NAME, `${username} just contuied their gifted sub.`)
+  client.say(CHANNEL_NAME, `${username} just contuied their `)
 });
 
 client.on("subgift", (channel, username, viewers, method) => {
-  
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
-})
-
-client.on("connected", (channel, username, viewers, method) => {
-  
-  client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
 });
 
-client.on("")
+client.on("connected", (channel, username, viewers, method) => {
+  client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`)
+});
 
 client.on("disconnected", (channel, username, viewers, method) => {
-  
-  client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`);
+  client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`)
 });
 
 client.on("resub", (channel, username, viewers, method) => {
-  
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
@@ -2481,16 +2489,15 @@ client.on("cheer", async (channel, userstate, message) => {
     fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
   }
 });
-
 // Game Command
 client.on("message", async (channel, userstate, message, self, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
-  
   if (SETTINGS.ks == false) {
-
-    if (message.toLowerCase() == "!game") {
-
+  if (
+    message.toLowerCase() == "!game" ||
+    message.toLowerCase() == "1game"
+    ) {
     const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
     const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
     const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
@@ -2528,16 +2535,16 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
     if (locationId == '3233893879') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Bad Business.`)};
     if (locationId == '1224212277') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Mad City.`)};
 
-    
     if (SETTINGS.currentMode == "!gamble.on") {
-      return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing RblxWild`);
+      return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing RblxWild`)
     }
 
-    if (onlineStatus > 30) {
+
+    if (onlineStatus > 30){
       return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is not playing anything right now.`);
     }
     console.log(location)
-    if (location != 'Website') {
+    if(location != 'Website'){
      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing ${location}.`); 
     return
     }
@@ -2595,7 +2602,6 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       if (locationId == '4913331862') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Recoil Zombies for ${playtime}.`)};
       if (locationId == '3233893879') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Bad Business for ${playtime}.`)};
       if (locationId == '1224212277') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Mad City for ${playtime}.`)};
-
 
       if (SETTINGS.currentMode == "!gamble.on") {
         return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is playing RblxWild but sadly cant track playtime for this yet SadgeCry`)
@@ -2791,12 +2797,11 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 });
 
 client.on("message", async (channel, userstate, message, self, viewers) => {
-  const isMod = userstate["mod"];
 
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 
-  if (!isMod && SETTINGS.ks == false) {
+  if (SETTINGS.ks == false) {
     if (message.includes("clips.twitch.tv")) {
       client.raw(
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :You have sent a clip in chat as a reminder if you want tibb12 to watch it on stream you can donate 5 dollars or send 500 bits.`
@@ -2804,3 +2809,16 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
     }
   }
 });
+client.on("message", async (channel, userstate, message, self, viewers) => {
+
+  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
+  STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
+
+  if (SETTINGS.ks == false) {
+    if (message.toLowerCase() == "!onlyfans") {
+      mainClient.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :🤨`
+      );
+    }
+  }
+})

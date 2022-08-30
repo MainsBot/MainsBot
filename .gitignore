@@ -1,6 +1,2 @@
 /.env
 node_modules
-POLLDATA.json
-STREAMS.json
-package-lock.json
-package.json
