@@ -155,7 +155,7 @@ export const responses = {
       }
     }
   },
-  game: async(client, target, message=null) => {
+  game: async(client, target, message = null) => {
     const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
     const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
     const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
@@ -285,8 +285,8 @@ export const responses = {
   // picked(client, target, message=null) {
   //   client.say(CHANNEL_NAME, `!add @${target}`);
   // },
-  recordingsoftware(client, target, message=null) {
-    client.say(CHANNEL_NAME, `tibb12 uses obs studio @${target}.`);
+  recordingsoftware(client, target, message = null) {
+    client.say(CHANNEL_NAME, `Tibb uses obs studio @${target}.`);
   },
   reddit(client, target, message = null) {
     client.say(CHANNEL_NAME, `!reddit @${target}`);
@@ -464,7 +464,7 @@ export const responses = {
   youtube(client, target, message = null) {
     client.say(CHANNEL_NAME, `!youtube @${target} click here to sub to tibb12 on youtube`)
   },
-  crimid: async(client, target, message=null) => {
+  crimid: async(client, target, message = null) => {
     const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
 
     if(locationId == '4588604953'){
