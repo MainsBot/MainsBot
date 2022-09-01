@@ -1,2 +1,7 @@
 /.env
 node_modules
+/PREDICTIONDATA.json
+/ARCHIVEPOLLDATA.json
+/POLLDATA.json
+/STREAMS.json
+/TOUNFRIEND.json
