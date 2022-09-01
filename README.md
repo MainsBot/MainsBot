@@ -1,5 +1,5 @@
 # MainsBot
-### Current Version: 2.6.1
+### Current Version: 2.6.5
 ![](https://cdn.7tv.app/emote/61a157c215b3ff4a5bb7dcc0/4x.avif)
 ![](https://cdn.frankerfacez.com/emoticon/418189/4)
 
@@ -13,4 +13,4 @@
 
 ## Install
 
-Refer to the **[Install Docs](https://github.com/MrCheezz/MainsBot/tree/master/Install-Docs)**
+Refer to the **[Install Docs](https://github.com/Mr-Cheeezz/MainsBot/blob/master/Install-Docs/Insatall.md)**
