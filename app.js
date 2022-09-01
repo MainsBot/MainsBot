@@ -740,9 +740,16 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
       );
     } else if (friend != "success") {
       return client.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :[Error: Unknown Error Occured]`
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :[Error: Unknown Error Ocurred]`
       );
     }
+
+    TOUNFRIEND = JSON.parse(fs.readFileSync('./TOUNFRIEND.json'))
+
+    TOUNFRIEND[isValidUser.userId] = messageArray[1]
+    fs.writeFileSync('./TOUNFRIEND.json', JSON.stringify(TOUNFRIEND, null, 1))
+    TOUNFRIEND = JSON.parse(fs.readFileSync('./TOUNFRIEND.json'))
+
     client.raw(
       `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Sent a friend request to ${messageArray[1]}.`
     );

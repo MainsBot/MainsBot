@@ -1114,6 +1114,27 @@ export const isValidRobloxUser = async (username)=>{
         userId: d.data[0].id
     }
 }
+export function unfriendPlayer(userId, cb) {
+    monitorGetXcsrfCB(function (result) {
+        fetch(`https://friends.roblox.com/v1/users/${userId}/unfriend`, {
+            "headers": {
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-GB,en;q=0.5",
+                cookie: `.ROBLOSECURITY=${COOKIE}`,
+                "X-CSRF-TOKEN": result
+            },
+            "method": "POST"
+        }).then((r) => {
+            return r.json()
+        }).then((d) => {
+            console.log(d)
+
+            cb(d)
+        })
+
+    })
+
+}
 // module.exports(
 //   {
 //     basicPrivateServerListener,
