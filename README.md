@@ -13,4 +13,4 @@
 
 ## Install
 
-Refer to the **[Install Docs](https://github.com/MrCheezz/MainsBot/tree/master/Install-Docs)**
+Refer to the **[Install Docs](https://github.com/Mr-Cheeezz/MainsBot/blob/master/Install-Docs/Insatall.md)**
