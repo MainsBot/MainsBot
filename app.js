@@ -1039,6 +1039,7 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
       sisterClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hi welome to the stream tibb12Waving , how is your day going?`);
   }
 }
+
 async function filterHandler(client, message, twitchUsername, userstate) {
   const messageArray = ([] = message.toLowerCase().split(" "));
   message = messageArray[0];
@@ -2275,6 +2276,8 @@ var StartListener = function () {
               CHANNEL_NAME,
               `/subscribersoff`
             );
+            client.say(CHANNEL_NAME, `The chat is no logner in sub only. THE NON SUBS ARE FREE PagMan .`);
+            client.say(CHANNEL_NAME, 'EZY Clap non-subs')
           }
           if (redemptionId == emoteonly) {
             client.say(
@@ -2286,6 +2289,7 @@ var StartListener = function () {
               CHANNEL_NAME,
               `/emoteonlyoff`
             );
+            client.say(CHANNEL_NAME, `The chat is no longer in emote only.`);
           }
           if (redemptionId == remotesuboremote) {
             client.say(CHANNEL_NAME, `/emoteonlyoff`);

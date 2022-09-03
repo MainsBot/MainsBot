@@ -7,8 +7,12 @@
 
 ### **npm i pm2 -g**
 
+###  ㅤ
+
 ## **How To Run Code**
 
-First type: `cd MainsBot`
+ㅤ
 
-Second Type: `pm2 start app.js`
+First type: ```cd MainsBot```
+
+Next Type: ```pm2 start app.js```
