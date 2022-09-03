@@ -27,7 +27,7 @@ import * as FILTER_FUNCTIONS from "./FILTERS.js";
 
 const tibb12Id = 1576231486
 
-import buddyList from "spotify-buddylist";
+import buddyList, { wrapWebApi } from "spotify-buddylist";
 import { join } from "path";
 import { setEngine, verify } from "crypto";
 import { get } from "http";
@@ -2506,19 +2506,19 @@ client.on("cheer", async (channel, userstate, message) => {
     RandomMessages[Math.floor(Math.random() * RandomMessages.length)];
   var Bits = userstate.bits;
 
-    if (Bits >= 50) {
+    if (Bits >= 49) {
     client.say(CHANNEL_NAME, `${random}`)
-  } else if (Bits >= 100) {
+  } else if (Bits >= 99) {
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
-  } else if (Bits >= 500) {
+  } else if (Bits >= 499) {
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
-  } else if (Bits >= 1000) {
+  } else if (Bits >= 999) {
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
@@ -2540,7 +2540,7 @@ client.on("cheer", async (channel, userstate, message) => {
     SETTINGS["lengthFilter"] = true;
     fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
 
-  } else if (Bits >= 5000) {
+  } else if (Bits >= 4999) {
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
@@ -2577,7 +2577,7 @@ client.on("cheer", async (channel, userstate, message) => {
     SETTINGS["lengthFilter"] = true;
     fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
 
-  } else if (Bits >= 10000) {
+  } else if (Bits >= 99999) {
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
@@ -2815,7 +2815,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 });
 
 // Commands
-client.on("message", async (channel, userstate, message, self, viewers) => {
+client.on("message", async (channel, userstate, message, tags, self, viewers) => {
   const twitchDisplayName = userstate["display-name"];
   const twitchUsername = userstate["username"];
 
@@ -2828,6 +2828,11 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
     client.raw(
       `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.1`
     );
+  }
+  if (message.toLowerCase().startsWith("!dice")) {
+    client.say(CHANNEL_NAME, `Rolling Dice...`);
+    await setTimeout(3 * 1000)
+    client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The Dice lands on ${Math.floor(Math.random() * 6)}.`);
   }
   if (message.toLowerCase().startsWith("!bot")) {
     client.raw(
@@ -2977,7 +2982,7 @@ var block = false;
 
       if(self) return;
 
-      if(message.toLowerCase().includes("clips.twitch.tv")) {
+      if(message.includes("clips.twitch.tv")) {
         if (!block) {
             console.log(client.say(CHANNEL_NAME, `You have sent a clip in chat as a reminder if you want ${channel} to watch it on stream you can donate 5 dollars or send 500 bits.`, { 'reply-parent-msg-id': tags.id }));
             block = true;
