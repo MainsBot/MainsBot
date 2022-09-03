@@ -24,8 +24,6 @@ import * as TWITCH_FUNCTIONS from "./Functions/twitch.js";
 import * as FILTERS from "./FILTERS.js";
 import * as RESPONSES from "./Functions/responses.js";
 import * as FILTER_FUNCTIONS from "./FILTERS.js";
-import * as COMMANDS from " ./commands.js";
-import * as TIMERS from " ./timers.js";
 
 const tibb12Id = 1576231486
 
@@ -1030,13 +1028,13 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
     
     var randomGreeting =
       responses[Math.floor(Math.random() * responses.length)];
-    await setTimeout(7 * 1000)
+      await setTimeout(Math.floor(Math.random() * 10) * 1000)
       mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hello welcome to the stream tibb12Waving`);
-    await setTimeout(18 * 1000)
+      await setTimeout(Math.floor(Math.random() * 25) * 1000)
       client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :${randomGreeting}`);
-    await setTimeout(19 * 1000)
+      await setTimeout(Math.floor(Math.random() * 90) * 1000)
       blakeClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hey bro welcome to the stream tibb12Wave !`);
-    await setTimeout(34 * 1000)
+    await setTimeout(Math.floor(Math.random() * 90) * 1000)
       sisterClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hi welome to the stream tibb12Wave , how is your day going?`);
   }
 }
