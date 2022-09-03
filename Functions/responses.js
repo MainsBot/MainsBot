@@ -45,7 +45,7 @@ const WEB_ACCESS_TOKEN = process.env.WEB_ACCESS_TOKEN
 const SONG_TIMER = process.env.SONG_TIMER
 
 export const responses = {
-  join(client, target, userstate, message = null){
+  join(client, target, message = null){
     const SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"))
     var currentMode = SETTINGS.currentMode
     if (currentMode == "!link.on") {

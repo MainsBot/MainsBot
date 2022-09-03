@@ -12,7 +12,7 @@
     "regex": "^0.1.1",
     "spotify-buddylist": "^1.0.0",
     "string-similarity": "^4.0.4",
-    "tmi.js": "^1.8.5",
+    "tmi.js": "github:tmijs/tmi.js#feature-send-tags",
     "ws": "^8.8.1"
   },
   "type": "module",
