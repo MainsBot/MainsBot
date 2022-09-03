@@ -1014,6 +1014,7 @@ async function updateMode(client, message, twitchUsername, userstate) {
 
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 }
+
 async function newUserHandler(client, message, twitchUsername, isFirstMessage, userstate) {
   if (isFirstMessage) {
     var responses = [
@@ -1028,13 +1029,13 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
     
     var randomGreeting =
       responses[Math.floor(Math.random() * responses.length)];
-      await setTimeout(Math.floor(Math.random() * 10) * 1000)
+      await setTimeout(Math.floor(Math.random() * 15) * 1000)
       mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hello welcome to the stream tibb12Waving`);
-      await setTimeout(Math.floor(Math.random() * 25) * 1000)
+      await setTimeout(Math.floor(Math.random() * 45) * 1000)
       client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :${randomGreeting}`);
-      await setTimeout(Math.floor(Math.random() * 90) * 1000)
+      await setTimeout(Math.floor(Math.random() * 120) * 1000)
       blakeClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hey bro welcome to the stream tibb12Wave !`);
-    await setTimeout(Math.floor(Math.random() * 90) * 1000)
+      await setTimeout(Math.floor(Math.random() * 120) * 1000)
       sisterClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hi welome to the stream tibb12Wave , how is your day going?`);
   }
 }
@@ -2706,7 +2707,7 @@ client.on("message", async (channel, userstate, message, self, viewers, tags) =>
 });
 
 // Playtime Command
-client.on("message", async (channel, userstate, message, self, viewers) => {
+client.on("message", async (channel, userstate, tags, message, self, viewers) => {
 
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
@@ -2962,16 +2963,24 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   }
 });
 
-client.on("message", async (channel, userstate, message, self, viewers) => {
+var block = false;
+  client.on('message', async (channel, tags, userstate, message, self) => {
 
-  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-  STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
+    SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
+    STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 
-  if (SETTINGS.ks == false) {
-    if (message.toLowerCase().includes("clips.twitch.tv")) {
-      client.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :You have sent a clip in chat as a reminder if you want tibb12 to watch it on stream you can donate 5 dollars or send 500 bits.`
-      )
+    if (SETTINGS.ks == false) {
+
+      if(self) return;
+
+      if(message.toLowerCase().includes("clips.twitch.tv")) {
+        if (!block) {
+            console.log(client.say(CHANNEL_NAME, `You have sent a clip in chat as a reminder if you want ${channel} to watch it on stream you can donate 5 dollars or send 500 bits.`, { 'reply-parent-msg-id': tags.id }));
+            block = true;
+            setTimeout(() => {
+                block = false;
+            }, (120 * 1000));
+        }
+      }
     }
-  }
 });
