@@ -1030,13 +1030,13 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
     var randomGreeting =
       responses[Math.floor(Math.random() * responses.length)];
       await setTimeout(Math.floor(Math.random() * 15) * 1000)
-      mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hello welcome to the stream tibb12Waving`);
+      mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :hello welcome to the stream tibb12Waving`);
       await setTimeout(Math.floor(Math.random() * 45) * 1000)
       client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :${randomGreeting}`);
       await setTimeout(Math.floor(Math.random() * 120) * 1000)
-      blakeClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hey bro welcome to the stream tibb12Wave !`);
+      blakeClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hey bro welcome to the stream tibb12Waving !`);
       await setTimeout(Math.floor(Math.random() * 120) * 1000)
-      sisterClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hi welome to the stream tibb12Wave , how is your day going?`);
+      sisterClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Hi welome to the stream tibb12Waving , how is your day going?`);
   }
 }
 async function filterHandler(client, message, twitchUsername, userstate) {
