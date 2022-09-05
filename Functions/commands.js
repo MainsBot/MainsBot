@@ -44,4 +44,4 @@ const WEB_ACCESS_TOKEN = process.env.WEB_ACCESS_TOKEN
 
 const SONG_TIMER = process.env.SONG_TIMER
 
-export const commands = {}
+export const upTimeCommand = async () => {}
