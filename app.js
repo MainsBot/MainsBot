@@ -2529,8 +2529,7 @@ client.on("disconnected", (channel, username, viewers, method) => {
 });
 
 client.on("resub", (channel, username, viewers, method) => {
-  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
+  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json")); 
   if (SETTINGS.ks == false) {
 
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
@@ -2932,12 +2931,27 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   if (message.toLowerCase() == "!dice") {
     client.say(CHANNEL_NAME, `Rolling Dice...`);
     await setTimeout(1.5 * 1000)
-    client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The Dice lands on ${Math.floor(Math.random() * 6)}.`);
+    client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The Dice lands on ${Math.floor(Math.random() * 7)}.`);
   }
+  if (
+    message.toLowerCase() == "1join" ||
+    message.toLowerCase() == "?join" ||
+    message.toLowerCase() == "`join" ||
+    message.toLowerCase() == "|join" ||
+    message.toLowerCase() == "[join" ||
+    message.toLowerCase() == "[join" ||
+    message.toLowerCase() == ";join" ||
+    message.toLowerCase() == "$join"
+    ) {
+      client.say(
+        CHANNEL_NAME,
+        `/me : ${twitchUsername} -> FOLLOW MY TWITCH tibb12Gasm & Click here to play tibb12Exhausted : roblox.com/users/${tibb12Id} tibb12Tabbman (tibb12_TTV) // Join my Group tibb12Pls : roblox.com/groups/6225493`
+      )
+    }
 }
 });
 
-var block = false;
+var block1 = false;
   client.on("message", async (channel, userstate, message, self) => {
 
     const twitchUsername = userstate["username"];
@@ -2959,14 +2973,14 @@ var block = false;
         message.toLowerCase() == ";join" ||
         message.toLowerCase() == "$join"
         ) {
-        if (!block) {
+        if (!block1) {
             client.say(
               CHANNEL_NAME,
               `/me : ${twitchUsername} -> FOLLOW MY TWITCH tibb12Gasm & Click here to play tibb12Exhausted : roblox.com/users/1576231486 tibb12Tabbman (tibb12_TTV) // Join my Group tibb12Pls : roblox.com/groups/6225493`
             )
-            block = true;
+            block1 = true;
             setTimeout(() => {
-                block = false;
+                block1 = false;
             }, (30 * 1000));
         }
       }
@@ -3050,8 +3064,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
         ) {
         
         client.raw(
-          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :You need to join tibb from a link. Use the !link command to join tibb.`
-        );
+          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :You need to join tibb from a link. Use the !link command to join tibb.`);
         client.say(CHANNEL_NAME, `${responsesd[key]} @${twitchUsername}`)
       }
     }
@@ -3072,7 +3085,7 @@ var block = false;
 
       if (message.includes("clips.twitch.tv")) {
         if (!block) {
-            console.log(client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :You have sent a clip in chat as a reminder if you want ${channel} to watch it on stream you can donate 5 dollars or send 500 bits.`));
+            console.log(client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :You have sent a clip in chat as a reminder if you want ${CHANNEL_NAME} to watch it on stream you can donate 5 dollars or send 500 bits.`));
             block = true;
             setTimeout(() => {
                 block = false;
