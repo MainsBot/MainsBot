@@ -5,3 +5,4 @@ node_modules
 /POLLDATA.json
 /STREAMS.json
 /TOUNFRIEND.json
+.vscode/settings.json

@@ -128,13 +128,13 @@ export const robloxGameCommand = async (client, channel, message, self, userstat
         return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Doors.`)};
 
 
-        if (SETTINGS.ks == false) {
-            client.raw(
+        if (currentMode.ks == "!gamble.on") {
+            return client.raw(
                 `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing RblxWild.`
             );
         }
         if (onlineStatus > 30) {
-            client.raw(
+            return client.raw(
                 `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is not playing anything right now.`
             );
         }
@@ -144,7 +144,7 @@ export const robloxGameCommand = async (client, channel, message, self, userstat
                 ); 
               return
         }
-        client.raw(
+        return client.raw(
             `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`
         );
 }
@@ -157,5 +157,92 @@ export const robloxPlaytimeCommand = async (client, channel, message, self, user
     const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
     const playtime = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.timeString})
 
-    
+    if (locationId == '4588604953') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Criminality for ${playtime}.`)};
+    if (locationId == '8343259840') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Criminality for ${playtime}.`)};
+    if (locationId == '292439477') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Phantom Forces for ${playtime}.`)};
+    if (locationId == '2317712696') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing The Wild West for ${playtime}.`)};
+    if (locationId == '286090429') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Arsenal for ${playtime}.`)};
+    if (locationId == '8260276694') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Ability Wars for ${playtime}.`)};
+    if (locationId == '606849621') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Jailbreak for ${playtime}.`)};
+    if (locationId == '1962086868') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Tower of Hell for ${playtime}.`)};
+    if (locationId == '6808416928') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Aimblox for ${playtime}.`)};
+    if (locationId == '3527629287') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Big Paintball for ${playtime}.`)};
+    if (locationId == '2414851778') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Dungeon Quest for ${playtime}.`)};
+    if (locationId == '6403373529') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Slap Battles for ${playtime}.`)};
+    if (locationId == '3260590327') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Tower Defense Simulator for ${playtime}.`)};
+    if (locationId == '740581508') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Entry Point for ${playtime}.`)};
+    if (locationId == '5993942214') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Rush Point for ${playtime}.`)};
+    if (locationId == '4282985734') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Combat Warriors for ${playtime}.`)};
+    if (locationId == '734159876') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing SharkBite for ${playtime}.`)};
+    if (locationId == '863266079') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Apocalypse Rising 2 for ${playtime}.`)};
+    if (locationId == '8054462345') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Michael's Zombies for ${playtime}.`)};
+    if (locationId == '738339342') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Flood Escape 2 for ${playtime}.`)};
+    if (locationId == '9049840490') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Sonic Speed Simulator for ${playtime}.`)};
+    if (locationId == '6284583030') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Pet Simulator X for ${playtime}.`)};
+    if (locationId == '142823291') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Murder Mystery 2 for ${playtime}.`)};
+    if (locationId == '4572253581') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Murder for ${playtime}.`)};
+    if (locationId == '185655149') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Welcome to Bloxburg ${playtime}.`)};
+    if (locationId == '2534724415') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Emergency Response: Liberty County for ${playtime}.`)};
+    if (locationId == '4468711919') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Super Golf for ${playtime}.`)};
+    if (locationId == '998374377') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Super Nostalgia Zone for ${playtime}.`)};
+    if (locationId == '4872321990') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Islands for ${playtime}.`)};
+    if (locationId == '4913331862') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Recoil Zombies for ${playtime}.`)};
+    if (locationId == '3233893879') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Bad Business for ${playtime}.`)};
+    if (locationId == '1224212277') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Mad City for ${playtime}.`)};
+    if (locationId == '6839171747') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Doors for ${playtime}.`)};
+    if (locationId == '6516141723') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Doors for ${playtime}.`)};
+
+    if (SETTINGS.currentMode == "!gamble.on") {
+      return client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is playing RblxWild but sadly cant track playtime for this yet SadgeCry`
+        );
+    }
+    if (onlineStatus > 30) {
+      return client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is not playing anything right now.`
+        );
+    }
+    if (location != 'Website') {
+      client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing ${location} for ${playtime}.`
+        );
+      return
+    }
+    return client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`
+        );
 }
