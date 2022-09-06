@@ -11,7 +11,7 @@ const webhookClient = new WebhookClient({
   token: "OXZF43FQm6SAhRCFXjIJKKiQcVTdUIy38yx0fJuy_ptB5rGky_wXst4Xg9igFzWFz5is",
 });
 
-import fs, { link, readSync } from "fs";
+import fs, { lchown, link, readSync } from "fs";
 import tmi from "tmi.js";
 import fetch from "node-fetch";
 import WebSocket from "ws";
@@ -91,7 +91,7 @@ const client = new tmi.Client({
     username: BOT_NAME,
     password: `OAuth:${BOT_OAUTH}`,
   },
-  channels: [CHANNEL_NAME, 'mr_cheeezzbot']
+  channels: [CHANNEL_NAME, 'mr_cheeezzbot', 'xqc']
 });
 
 client.connect();
@@ -149,7 +149,7 @@ const badgerClient = new tmi.Client({
   channels: [CHANNEL_NAME]
 });
 
-badgerClient.connect();
+// badgerClient.connect();
 
 
 // interval timer for !join/!link/!1v1/!ticket
