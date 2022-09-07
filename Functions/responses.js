@@ -418,7 +418,7 @@ export const responses = {
         }
         return -1;
       }
-      var exemption1 = findItem(emoteData, 'tibb12Nerd', 'tibb12Howdy')
+      var exemption1 = findItem(emoteData, 'tibb12Howdy')
       emoteData.splice(exemption1, 1);
 
       const randomEmote1 = emoteData[Math.floor(Math.random() * emoteData.length)].name
