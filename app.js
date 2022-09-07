@@ -2475,22 +2475,30 @@ var runAuth = function () {
 //TIBB_TOKEN
 StartListener();
 
-client.on("hosted", (channel, username, viewers, autohost) => {})
+client.on("hosted", (channel, username, viewers, autohost) => {}); // dead feature of oct 3
 
-client.on("hosting", (channel, username, viewers, autohost) => {
+client.on("hosting", async (channel, username, viewers, autohost) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
   if (SETTINGS.ks == false) {
-
-    client.say(CHANNEL_NAME, `Tibb is now hosting ${username}. tibb12Ezy`)
-    client.say(username, `Tibb12 just raied with ${viewers}. tibb12Pls`)
+    client.say(CHANNEL_NAME, `Tibb is now hosting ${username}. tibb12Ezy`);
+  }
+  if (SETTINGS.ks == false) {
+  client.say(username, `Tibb12 just raied with ${viewers}. tibb12Pls`);
+  await setTimeout(5 * 1000)
+  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
+  await setTimeout(1 * 1000)
+  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
+  await setTimeout(1 * 1000)
+  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
+  await setTimeout(1 * 1000)
+  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
+  await setTimeout(1 * 1000)
+  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
   }
 });
 client.on("subscription", (channel, username, method, message, userstate) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
   if (SETTINGS.ks == false) {
-
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
@@ -2498,40 +2506,31 @@ client.on("subscription", (channel, username, method, message, userstate) => {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   }
 });
-
 client.on("giftpaidupgrade", (channel, username, viewers, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
   if (SETTINGS.ks == false) {
   client.say(CHANNEL_NAME, `.announce ${username} just contuied their gifted sub. thankyou so much ${username} tibb12Love !`)
   }
 });
-
 client.on("subgift", (channel, username, viewers, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
-
-  client.say(CHANNEL_NAME, `!thanks so much @${username} for gifting a sub to ${method}.`);
+  client.say(CHANNEL_NAME, `!thanks @${username} so much for gifting a sub to ${method}.`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`)
   }
 });
-
 client.on("connected", (channel, username, viewers, method) => {
-  // client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`)
+  client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`)
 });
-
 client.on("reconnect", (channel, username, viewers, method) => {
-  // client.say(CHANNEL_NAME, `Reconnected to channel ${CHANNEL_NAME}. tibb12Dance`)
+  client.say(CHANNEL_NAME, `Reconnected to channel ${CHANNEL_NAME}. tibb12Dance`)
 });
-
 client.on("disconnected", (channel, username, viewers, method) => {
-  // client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`)
+  client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`)
 });
-
 client.on("resub", (channel, username, viewers, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json")); 
   if (SETTINGS.ks == false) {
-
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
@@ -2539,12 +2538,9 @@ client.on("resub", (channel, username, viewers, method) => {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
   }
 });
-
 client.on("raided", async (channel, username, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
   if (SETTINGS.ks == false) {
-
   if (viewers > 9) {
     client.say(
       `${CHANNEL_NAME}`,
@@ -2567,7 +2563,7 @@ client.on("raided", async (channel, username, viewers) => {
 });
 
 client.on("clearchat", async (channel, userstate, message) => {
-  client.say(CHANNEL_NAME, `The chat has been cleared.`)
+  client.say(CHANNEL_NAME, `The chat has been cleared. SadgeCry`)
 })
 
 client.on("cheer", async (channel, userstate, message) => {

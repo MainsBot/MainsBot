@@ -49,13 +49,13 @@ export const responses = {
     const SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"))
     var currentMode = SETTINGS.currentMode
     if (currentMode == "!link.on") {
-      // client.say(CHANNEL_NAME, `!link @${target}, it would help if you put your roblox username in the chat before joining.`);
+      client.say(CHANNEL_NAME, `!link @${target}, it would help if you put your roblox username in the chat before joining.`);
     } else if (currentMode == "!1v1.on") {
-      // client.say(CHANNEL_NAME, `@${target}, tibb12 is randomly picking viewers to 1v1, type 1v1 in the chat once to have a chance of being picked.`);
+      client.say(CHANNEL_NAME, `@${target}, tibb12 is randomly picking viewers to 1v1, type 1v1 in the chat once to have a chance of being picked.`);
     } else if (currentMode == "!ticket.on") {
-      // client.say(CHANNEL_NAME, `!ticket @${target}`);
+      client.say(CHANNEL_NAME, `!ticket @${target}`);
     } else if (currentMode == "!join.on") {
-      // client.say(CHANNEL_NAME, `!join @${target}`);
+      client.say(CHANNEL_NAME, `!join @${target}`);
     } else if (currentMode == "!gamble.on") {
       // client.say(CHANNEL_NAME, `!wild @${target}`);
     }

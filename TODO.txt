@@ -1,5 +1,3 @@
 THINGS TO DO
 
  - make bot in go(lang)
-
- -
