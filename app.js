@@ -181,18 +181,9 @@ setInterval(async () => {
 }, MUTATED_JOIN_TIMER);
 
 setInterval(async () => {
-  STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
  
-  if (SETTINGS.timers == true && SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
-    var averageViewers = STREAMS.averageviewers;
-
-    if (averageViewers == null) {
-    } else if (averageViewers < 40) {
-      MUTATED_JOIN_TIMER = JOIN_TIMER * 0.8;
-    } else if (averageViewers > 60) {
-      MUTATED_JOIN_TIMER = JOIN_TIMER * 1.5;
-    }
+  if (SETTINGS.currentMode == "!gamble.on" || SETTINGS.timers == true && SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
 
     var promo = [
       `!discord`,
@@ -201,45 +192,17 @@ setInterval(async () => {
 
     var discordTimer =
       promo[Math.floor(Math.random() * promo.length)];
-    // client.say(CHANNEL_NAME, `${discordTimer}`);
+    client.say(CHANNEL_NAME, `${discordTimer}`);
   }
-}, 30 * 7 * 1000);
+}, 60 * 7 * 1000);
 
 setInterval(async () => {
-  STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
-  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
-  if (SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == false) {
+  
+  if ((await TWITCH_FUNCTIONS.isLive()) == false) {
     mainClient.say(CHANNEL_NAME, `!cookie`);
     mainClient.say(CHANNEL_NAME, `|poro`)
   }
 }, 2 * 60 * 61 * 1000);
-
-// setInterval(async () => {
-//   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
-//   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-
-//   if (SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
-
-//     var responses = [
-//       `how do I join you`,
-//       `am I allowed to play`,
-//       `can I play`,
-//       `how can I join you`,
-//       `how do i play with you`,
-//       `can we play`,
-//       `bro waht is this game in roblox`,
-//       `!link`,
-//       `can you send the game link to join`
-//     ];
-
-//     var canJoin =
-//       responses[Math.floor(Math.random() * responses.length)];
-//     blakeClient.say(CHANNEL_NAME, `${canJoin}`);
-//     await setTimeout(64 * 1000)
-//     sisterClient.say(CHANNEL_NAME, `${canJoin}`);
-//   }
-// }, 950000);
 
 
 //interval timer for spamming link
