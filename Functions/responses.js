@@ -476,7 +476,7 @@ export const responses = {
   }
   ,
   full(client, target, message = null) {
-    client.say(CHANNEL_NAME, `@${target}, if Tibb12's server is full please don't go yelling at other viewers to leave, be patient wait in the queue untill you get in.`)
+    // client.say(CHANNEL_NAME, `@${target}, wait in the queue.`)
   },
   song(client, target, message = null) {
     client.say(

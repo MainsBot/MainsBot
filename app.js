@@ -1039,7 +1039,7 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
       `Hello, ${twitchUsername} tibb12Waving welcome to the stream!`,
       `Hey, ${twitchUsername}, Welcome to the stream tibb12Waving!`,
       `Everyone welcome ${twitchUsername} to the stream. Welcome @${twitchUsername} tibb12Waving!`,
-      `Welcome tibb12Waving ${twitchUsername}, how are you doing!`,
+      `Welcome tibb12Waving ${twitchUsername}, how are you doing!`
     ];
     var mainResponses = [
       `Hello, welcome to the stream tibb12Waving !`,
@@ -1050,11 +1050,34 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
     var blakeResponses = [
       `tibb12Waving!!`,
       `tibb12Waving hi!!`,
+      `Hey welcome tibb12Waving`,
+      `tibb12Wave`,
+      `tibb12Waving hello`,
+      `Welcome! tibb12Waving tibb12Waving`,
+      `tibb12Waving tibb12Waving`,
+      `tibb12Waving`,
+      `Welcome tibb12Love`,
+      `Hi welcome`,
+      `welcome to the stream tibb12Waving`,
+      `hey bro welcome`
     ];
-    var sisterResponses = [];
+    var sisterResponses = [
+      `tibb12Waving!!`,
+      `tibb12Waving hi!!`,
+      `Hey welcome tibb12Waving`,
+      `tibb12Wave`,
+      `tibb12Waving hello`,
+      `Welcome! tibb12Waving tibb12Waving`,
+      `tibb12Waving tibb12Waving`,
+      `tibb12Waving`,
+      `Welcome tibb12Love`,
+      `Hi welcome`,
+      `welcome to the stream tibb12Waving`,
+      `hey bro welcome`
+    ];
 
       var randomGreetingMain =
-      responses[Math.floor(Math.random() * mainResponses.length)];
+      mainResponses[Math.floor(Math.random() * mainResponses.length)];
       await setTimeout(Math.floor(Math.random() * 20) * 1000)
       mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :${randomGreetingMain}`);
       var randomGreeting =
@@ -1062,11 +1085,11 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
       await setTimeout(Math.floor(Math.random() * 45) * 1000)
       client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :${randomGreeting}`);
       var randomGreetingBlake =
-      responses[Math.floor(Math.random() * blakeResponses.length)];
+      blakeResponses[Math.floor(Math.random() * blakeResponses.length)];
       await setTimeout(Math.floor(Math.random() * 150) * 1000)
       blakeClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :${randomGreetingBlake}`);
       var randomGreetingSister =
-      responses[Math.floor(Math.random() * sisterResponses.length)];
+      sisterResponses[Math.floor(Math.random() * sisterResponses.length)];
       await setTimeout(Math.floor(Math.random() * 150) * 1000)
       sisterClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :${randomGreetingSister}`);
   }
@@ -2543,7 +2566,7 @@ client.on("raided", async (channel, username, viewers) => {
     SETTINGS["spamFilter"] = false;
     SETTINGS["lengthFilter"] = false;
     fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-    await setTimeout(30 * 1000);
+    await setTimeout(60 * 1000);
     SETTINGS["spamFilter"] = true;
     SETTINGS["lengthFilter"] = true;
     fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
@@ -2957,7 +2980,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   }
   if (message == "!version") {
     client.raw(
-      `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.1`
+      `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.8`
     );
   }
   if (message.toLowerCase().startsWith("!bot")) {
