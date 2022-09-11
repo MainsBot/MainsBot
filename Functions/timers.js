@@ -3,7 +3,6 @@ import * as TWITCH_FUNCTIONS from "./twitch.js";
 import fs, { link } from 'fs'
 
 const tibb12Id = 1576231486
-import buddyList from 'spotify-buddylist'
 
 const BOT_OAUTH = process.env.BOT_OAUTH// bot oauth token for performing actions
 const COOKIE = process.env.COOKIE // <--- change this to your cookie

@@ -2567,7 +2567,10 @@ client.on("cheer", async (channel, userstate, message) => {
   var Bits = userstate.bits;
 
   if (Bits > 49) {
-   client.say(CHANNEL_NAME, `${random}`)
+   client.say(CHANNEL_NAME, `${random}`);
+   if (Bits > 99) {
+    client.say(CHANNEL_NAME, ``);
+   }
   } 
   if (Bits > 99) {
     client.say(CHANNEL_NAME, `${random}`);

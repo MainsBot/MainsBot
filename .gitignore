@@ -3,3 +3,5 @@ node_modules
 .vscode
 .vs
 package-lock.json
+package.json
+TODO.txt
