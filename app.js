@@ -1658,7 +1658,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     }
   }
 
-  if (!ModOrBroadcaster && SETTINGS.keywords == true && SETTINGS.ks == false) {
+  if (!ModOrBroadcaster && SETTINGS.ks == false) {
     joinHandler(message, twitchUsername, ModOrBroadcaster, twitchUserId);
   }
 
@@ -2970,9 +2970,9 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.8`
       );
     }
-    if (message.toLowerCase().startsWith("!bot")) {
+    if (message.toLowerCase().startsWith("!addbot")) {
       client.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #mr_cheeezzbot :To get the bot pleease contact SwitchingMains or Mr_Cheeezz in any room that the bot is in.`
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG ${channel} :To get the bot pleease contact SwitchingMains or Mr_Cheeezz in any room that the bot is in.`
       );
     }
     if (message.toLowerCase().includes("poof")) {
