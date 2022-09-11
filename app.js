@@ -2514,9 +2514,9 @@ client.on("subgift", (channel, username, viewers, method) => {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`)
   }
 });
-// client.on("connected", (channel) => {
-//   client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
-// });
+client.on("connected", (channel) => {
+  client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
+});
 client.on("reconnect", (channel) => {
   client.say(CHANNEL_NAME, `Reconnected to channel ${CHANNEL_NAME}. tibb12Dance`)
 });
@@ -2533,7 +2533,7 @@ client.on("resub", (channel, username, viewers, methods, method) => {
 client.on("raided", async (channel, username, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
-  if (viewers > 9) {
+  if (viewers >= 10) {
     client.say(
       `${CHANNEL_NAME}`,
       `/announce ${username}, just raided with ${viewers}, thank you so much. tibb12Love`
