@@ -25,7 +25,7 @@ import * as FILTERS from "./FILTERS.js";
 import * as RESPONSES from "./Functions/responses.js";
 import * as FILTER_FUNCTIONS from "./FILTERS.js";
 
-const tibb12Id = 1576231486
+const tibb12Id = 1576231486; // roblox id for getting game and playtime
 
 import buddyList, { wrapWebApi } from "spotify-buddylist";
 import { join } from "path";
@@ -40,7 +40,7 @@ import { resourceLimits } from "worker_threads";
 import { clearScreenDown } from "readline";
 
 const BOT_OAUTH = process.env.BOT_OAUTH; // bot oauth token for performing actions
-const COOKIE = process.env.COOKIE // <--- change this to your cookie
+const COOKIE = process.env.COOKIE; // <--- change this to your cookie
 
 const BOT_NAME = process.env.BOT_NAME; // bot username
 const CHANNEL_NAME = process.env.CHANNEL_NAME; // name of the channel for the bot to be in
@@ -65,17 +65,17 @@ let MUTATED_JOIN_TIMER = 240000; // timer that uses the JOIN_TIMER to change the
 const SONG_TIMER = process.env.SONG_TIMER;
 const WEB_ACCESS_TOKEN = process.env.WEB_ACCESS_TOKEN;
 
-const BLAKE_BOT_NAME = process.env.BLAKE_BOT_NAME
-const BLAKE_BOT_OAUTH = process.env.BLAKE_BOT_OAUTH
+const BLAKE_BOT_NAME = process.env.BLAKE_BOT_NAME;
+const BLAKE_BOT_OAUTH = process.env.BLAKE_BOT_OAUTH;
 
-const MAIN_BOT_NAME = process.env.MAIN_BOT_NAME
-const MAIN_BOT_OAUTH = process.env.MAIN_BOT_OAUTH
+const MAIN_BOT_NAME = process.env.MAIN_BOT_NAME;
+const MAIN_BOT_OAUTH = process.env.MAIN_BOT_OAUTH;
 
-const SISTER_BOT_NAME = process.env.SISTER_BOT_NAME
-const SISTER_BOT_OAUTH = process.env.SISTER_BOT_OAUTH
+const SISTER_BOT_NAME = process.env.SISTER_BOT_NAME;
+const SISTER_BOT_OAUTH = process.env.SISTER_BOT_OAUTH;
 
-const BADGER_OAUTH = 'sjyopvthkf6v2lpcykaox06ohq2xfs'
-const BADGER_NAME = 'badger_mecool'
+const BADGER_OAUTH = 'sjyopvthkf6v2lpcykaox06ohq2xfs';
+const BADGER_NAME = 'badger_mecool';
 
 let SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 let STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
@@ -116,8 +116,6 @@ const blakeClient = new tmi.Client({
   channels: [CHANNEL_NAME]
 });
 
-blakeClient.connect();
-
 const mainClient = new tmi.Client({
   options: { debug: true },
   identity: {
@@ -138,8 +136,6 @@ const sisterClient = new tmi.Client({
   channels: [CHANNEL_NAME]
 });
 
-sisterClient.connect();
-
 const badgerClient = new tmi.Client({
   options: { debug: true },
   identity: {
@@ -150,6 +146,16 @@ const badgerClient = new tmi.Client({
 });
 
 // badgerClient.connect();
+
+if (SETTINGS.ks == false) {
+  blakeClient.connect();
+  sisterClient.connect();
+};
+
+if (SETTINGS.ks == true) {
+  blakeClient.disconnect();
+  sisterClient.disconnect();
+};
 
 
 // interval timer for !join/!link/!1v1/!ticket
@@ -192,9 +198,9 @@ setInterval(async () => {
 
     var discordTimer =
       promo[Math.floor(Math.random() * promo.length)];
-    client.say(CHANNEL_NAME, `${discordTimer}`);
+    client.say(CHANNEL_NAME, ``);
   }
-}, 60 * 7 * 1000);
+}, 60 * 7.4 * 1000);
 
 setInterval(async () => {
   
@@ -1423,10 +1429,10 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     // CHANGE TITLE THING
     if (await TWITCH_FUNCTIONS.isLive() == true) {
 
-      const joinTitle = "🤑ᶦᵐ ⁿᵒᵗ GIVING AWAY ROBUX🤑🥺100000 ROBUX🥺🍑PLAYING W/FOLLOWERS🍑!JOIN to play🍁!schedule !socials !discord !yt🍁"
-      const linkTitle = "🤑ᶦᵐ ⁿᵒᵗ GIVING AWAY ROBUX🤑🥺100000 ROBUX🥺🍑PLAYING W/FOLLOWERS🍑!LINK to play🍁!schedule !socials !discord !yt🍁"
-      const arsenalTitle = "🤑ARSENAL 1V1'S FOR ⁿᵒ ROBUX🤑🥺100000 ROBUX🥺🍑ARSENAL 1V1'S W/FOLLOWERS🍑!1V1 to play🍁!schedule !socials !discord !yt🍁"
-      const ticketTItle = "🤑ᶦᵐ ⁿᵒᵗ GIVING AWAY ROBUX🤑🥺100000 ROBUX🥺🍑PLAYING W/FOLLOWERS🍑!TICKET to join🍁!schedule !socials !discord !yt🍁"
+      const joinTitle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!JOIN to play🍁!schedule !socials !discord !yt🍁"
+      const linkTitle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!LINK to play🍁!schedule !socials !discord !yt🍁"
+      const arsenalTitle = "🤑ARSENAL 1V1'S FOR ⁿᵒ ROBUX🤑🥺100000 ROBUX ⱼₖ🥺🍑ARSENAL 1V1'S W/FOLLOWERS🍑!1V1 to play🍁!schedule !socials !discord !yt🍁"
+      const ticketTItle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!TICKET to join🍁!schedule !socials !discord !yt🍁"
       const gambaTitle = "🤑GAMBLING 1 MIL ROBUX🤑💰ROBUX GIVEAWAY💰🍑!WILD🍑🍁!schedule !socials !discord !yt🍁 #ad"
 
       // Sponsor Title & Game [UPDATE]
@@ -2267,9 +2273,12 @@ var StartListener = function () {
           const timeout = "efa070b5-6d12-4cc6-8ef8-160eded1fdec";
           const subonly = "f799d602-205b-4865-94a3-18b939d4c8ae";
           const emoteonly = "27e600a4-1b2e-4ce3-b969-55e7cf89421f";
-          const remotesuboremote = "d08999ad-8338-4270-b306-f28d893a3676"
+          const remotesuboremote = "d08999ad-8338-4270-b306-f28d893a3676";
+          const removeoraddhat = "77ac0ea867ac50fb6e65f3839af51a31";
+
 
           const redemptionId = JSON.parse(pubMessage).data.redemption.reward.id;
+
 
           if (redemptionId == vipEntry) {
             SETTINGS = JSON.parse(fs.readFileSync('./SETTINGS.json'))
@@ -2349,10 +2358,15 @@ var StartListener = function () {
               CHANNEL_NAME,
               `${userInputSplit[0]} was timed out for 60 seconds by ${twitchUsername} via timeout redemption.`
             );
-            client.say(
-              CHANNEL_NAME,
-              `.timeout ${userInputSplit[0]} 60 [AUTOMATIC] ${twitchUsername} redeemed a timeout on you. You can redeem the timeout redemption and others by clicking the yellow ' T ' in the bottom left of the chat box.`
+            TWITCH_FUNCTIONS.timeoutUser(
+              userInputSplit[0],
+              60,
+              `[AUTOMATIC] ${twitchUsername} redeemed a timeout on you. You can redeem the timeout redemption and others by clicking the yellow ' T ' in the bottom left of the chat box.`
             );
+          }
+          if (redemptionId == removeoraddhat) {
+            await setTimeout(30 * 60 * 100)
+            client.say(CHANNEL_NAME, `@${CHANNEL_NAME} 30 miniutes has passed since ${twitchUsername} redeemed the hat redemption.`);
           }
         }
       }
@@ -2472,7 +2486,7 @@ client.on("hosting", async (channel, username, viewers, autohost) => {
   mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
   }
 });
-client.on("subscription", (channel, username, method, message, userstate) => {
+client.on("subscription", (channel, username, methods, message, userstate, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
@@ -2480,12 +2494,17 @@ client.on("subscription", (channel, username, method, message, userstate) => {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
+  client.say(CHANNEL_NAME, `${method}`);
+  client.say(CHANNEL_NAME, `${methods}`);
   }
 });
 client.on("giftpaidupgrade", (channel, username, viewers, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
-  client.say(CHANNEL_NAME, `.announce ${username} just contuied their gifted sub. thankyou so much ${username} tibb12Love !`)
+  client.say(
+    CHANNEL_NAME,
+    `.announce ${username} just contuied their gifted sub. thankyou so much ${username} tibb12Love !`
+    );
   }
 });
 client.on("subgift", (channel, username, viewers, method) => {
@@ -2495,23 +2514,20 @@ client.on("subgift", (channel, username, viewers, method) => {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`)
   }
 });
-client.on("connected", (channel, username, viewers, method) => {
-  client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`)
-});
-client.on("reconnect", (channel, username, viewers, method) => {
+// client.on("connected", (channel) => {
+//   client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
+// });
+client.on("reconnect", (channel) => {
   client.say(CHANNEL_NAME, `Reconnected to channel ${CHANNEL_NAME}. tibb12Dance`)
 });
-client.on("disconnected", (channel, username, viewers, method) => {
+client.on("disconnected", (channel) => {
   client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`)
 });
-client.on("resub", (channel, username, viewers, method) => {
+client.on("resub", (channel, username, viewers, methods, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json")); 
   if (SETTINGS.ks == false) {
-  client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
-  client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
-  client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
-  client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
-  client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
+    client.say(CHANNEL_NAME, `${method}`);
+    client.say(CHANNEL_NAME, `${methods}`);
   }
 });
 client.on("raided", async (channel, username, viewers) => {
@@ -2540,7 +2556,7 @@ client.on("raided", async (channel, username, viewers) => {
 
 client.on("clearchat", () => {
   client.say(CHANNEL_NAME, `The chat has been cleared. SadgeCry`)
-})
+});
 
 client.on("cheer", async (channel, userstate, message) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
@@ -2775,13 +2791,13 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
             return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Doors.`)};
     
     
-            if (SETTINGS.ks == false) {
-                client.raw(
+            if (SETTINGS.currentMode == "!gamble.on") {
+                return client.raw(
                     `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing RblxWild.`
                 );
             }
             if (onlineStatus > 30) {
-                client.raw(
+                return client.raw(
                     `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is not playing anything right now.`
                 );
             }
@@ -2791,7 +2807,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
                     ); 
                   return
             }
-            client.raw(
+            return client.raw(
                 `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`
             );
     }
@@ -2805,7 +2821,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 
   if (SETTINGS.ks == false) {
-    if (message == "!playtime") {
+    if (message.toLowerCase() == "!playtime") {
 
       const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
       const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
@@ -2899,36 +2915,40 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 });
 
 client.on("message", async (channel, userstate, message, self, viewers) => {
-
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 
-  if (SETTINGS.ks == false) {
-    if (message.toLowerCase().startsWith("!offlinetime")) {
-  
   const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
   const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
   const offlinetime = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.timeString})
 
-  if (onlineStatus > 30) {
-    return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been offline for ${offlinetime}.`);
+  if (SETTINGS.ks == false) {
+    if (message.toLowerCase() == "!offlinetime") {
+      if (onlineStatus > 30) {
+        return client.raw(
+          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been offline for ${offlinetime}.`
+        );
+      }
+    
+      console.log(offlinetime)
+      if (location != 'Website') {
+        client.raw(
+          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently online playing ${location}.`
+        );
+        return
+      }
+    
+      if (SETTINGS.currentMode == "!gamble.on") {
+        return client.raw(
+          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently online playing RblxWild.`
+        );
+      }
+    
+      return client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currenty online.`
+      );
+    }
   }
-
-  console.log(offlinetime)
-  if (location != 'Website') {
-    client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently online playing ${location}.`)
-    return
-  }
-
-  if (SETTINGS.currentMode == "!gamble.on") {
-    return client.raw(
-      `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently online playing RblxWild.`
-    );
-  }
-
-  return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currenty online.`)
-}
-}
 });
 
 // Commands
@@ -2936,58 +2956,66 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   const twitchDisplayName = userstate["display-name"];
   const twitchUsername = userstate["username"];
 
-  if (SETTINGS.ks == false) {
+  const isMod = userstate["mod"];
 
-  if (message == "!nocap") {
-    client.say(CHANNEL_NAME, `🚫 🧢`);
-  }
-  if (message == "!version") {
-    client.raw(
-      `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.8`
-    );
-  }
-  if (message.toLowerCase().startsWith("!bot")) {
-    client.raw(
-      `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #mr_cheeezzbot :To get the bot pleease contact SwitchingMains or Mr_Cheeezz in any room that the bot is in.`
-    );
-  }
-  if (message.includes("poof")) {
-    TWITCH_FUNCTIONS.timeoutUser(
-      twitchUsername,
-      "RNG Timeout 1 - 150",
-      Math.floor(Math.random() * 150)
-    );
-    client.say(CHANNEL_NAME, `ppPoof`);
-  }
-  if (message == "!vanish") {
-    TWITCH_FUNCTIONS.timeoutUser(
-      twitchUsername,
-      `${twitchUsername}, you are now invisible.`,
-      15
-    );
-    client.say(CHANNEL_NAME, `/me ${twitchUsername}, you are now invisible. tibb12Point OMEGALUL`)
-  }
-  if (message.toLowerCase() == "!dice") {
-    client.say(CHANNEL_NAME, `Rolling Dice...`);
-    await setTimeout(1.5 * 1000)
-    client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The Dice lands on ${Math.floor(Math.random() * 7)}.`);
-  }
-  if (
-    message.toLowerCase() == "1join" ||
-    message.toLowerCase() == "?join" ||
-    message.toLowerCase() == "`join" ||
-    message.toLowerCase() == "|join" ||
-    message.toLowerCase() == "[join" ||
-    message.toLowerCase() == "[join" ||
-    message.toLowerCase() == ";join" ||
-    message.toLowerCase() == "$join"
-    ) {
-      client.say(
-        CHANNEL_NAME,
-        `/me : ${twitchUsername} -> FOLLOW MY TWITCH tibb12Gasm & Click here to play tibb12Exhausted : roblox.com/users/${tibb12Id} tibb12Tabbman (tibb12_TTV) // Join my Group tibb12Pls : roblox.com/groups/6225493`
-      )
+  if (SETTINGS.ks == false) {
+    if (message == "!nocap") {
+      client.say(CHANNEL_NAME, `🚫 🧢`);
     }
-}
+    if (message == "!version") {
+      client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.8`
+      );
+    }
+    if (message.toLowerCase().startsWith("!bot")) {
+      client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #mr_cheeezzbot :To get the bot pleease contact SwitchingMains or Mr_Cheeezz in any room that the bot is in.`
+      );
+    }
+    if (message.toLowerCase().includes("poof")) {
+      TWITCH_FUNCTIONS.timeoutUser(
+        twitchUsername,
+        "RNG Timeout 1 - 150",
+        Math.floor(Math.random() * 150)
+      );
+      client.say(CHANNEL_NAME, `ppPoof`);
+    }
+    if (message.toLowerCase() == "!vanish") {
+      if (!isMod) {
+        TWITCH_FUNCTIONS.timeoutUser(
+          twitchUsername,
+          `${twitchUsername}, you are now invisible.`,
+          15
+        );
+        client.say(
+          CHANNEL_NAME,
+           `/me ${twitchUsername}, you are now invisible. tibb12Point OMEGALUL`
+           );
+      }
+    }
+    if (message.toLowerCase() == "!dice") {
+      client.say(CHANNEL_NAME, `Rolling Dice...`);
+      await setTimeout(1.5 * 1000)
+      client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The Dice lands on ${Math.floor(Math.random() * 7)}.`
+        );
+    }
+    if (
+      message.toLowerCase() == "1join" ||
+      message.toLowerCase() == "?join" ||
+      message.toLowerCase() == "`join" ||
+      message.toLowerCase() == "|join" ||
+      message.toLowerCase() == "[join" ||
+      message.toLowerCase() == "[join" ||
+      message.toLowerCase() == ";join" ||
+      message.toLowerCase() == "$join"
+      ) {
+        client.say(
+          CHANNEL_NAME,
+          `/me : ${twitchUsername} -> FOLLOW MY TWITCH tibb12Gasm & Click here to play tibb12Exhausted : roblox.com/users/${tibb12Id} tibb12Tabbman (tibb12_TTV) // Join my Group tibb12Pls : roblox.com/groups/6225493`
+        )
+      }
+  }
 });
 
 async function customModCommands(client, message, twitchUsername, userstate) {
