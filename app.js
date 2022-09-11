@@ -2981,7 +2981,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
         "RNG Timeout 1 - 150",
         Math.floor(Math.random() * 150)
       );
-      client.say(CHANNEL_NAME, `ppPoof`);
+      // client.say(CHANNEL_NAME, `ppPoof`);
     }
     if (message.toLowerCase() == "!vanish") {
       if (!isMod) {
