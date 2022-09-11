@@ -2360,8 +2360,8 @@ var StartListener = function () {
             );
             TWITCH_FUNCTIONS.timeoutUser(
               userInputSplit[0],
-              60,
-              `[AUTOMATIC] ${twitchUsername} redeemed a timeout on you. You can redeem the timeout redemption and others by clicking the yellow ' T ' in the bottom left of the chat box.`
+              `[AUTOMATIC] ${twitchUsername} redeemed a timeout on you. You can redeem the timeout redemption and others by clicking the yellow ' T ' in the bottom left of the chat box.`,
+              60
             );
           }
           if (redemptionId == removeoraddhat) {
