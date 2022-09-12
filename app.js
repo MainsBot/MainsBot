@@ -2962,10 +2962,10 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   const isMod = userstate["mod"];
 
   if (SETTINGS.ks == false) {
-    if (message == "!nocap") {
+    if (message.toLowerCase() == "!nocap") {
       client.say(CHANNEL_NAME, `🚫 🧢`);
     }
-    if (message == "!version") {
+    if (message.toLowerCase() == "!version") {
       client.raw(
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.8`
       );
@@ -2976,12 +2976,14 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       );
     }
     if (message.toLowerCase().includes("poof")) {
-      TWITCH_FUNCTIONS.timeoutUser(
-        twitchUsername,
-        "RNG Timeout 1 - 150",
-        Math.floor(Math.random() * 150)
-      );
-      // client.say(CHANNEL_NAME, `ppPoof`);
+      if (!isMod) {
+        TWITCH_FUNCTIONS.timeoutUser(
+          twitchUsername,
+          "RNG Timeout 1 - 150",
+          Math.floor(Math.random() * 150)
+        );
+        client.say(CHANNEL_NAME, `ppPoof`);
+      }
     }
     if (message.toLowerCase() == "!vanish") {
       if (!isMod) {
@@ -3016,7 +3018,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
         client.say(
           CHANNEL_NAME,
           `/me : ${twitchUsername} -> FOLLOW MY TWITCH tibb12Gasm & Click here to play tibb12Exhausted : roblox.com/users/${tibb12Id} tibb12Tabbman (tibb12_TTV) // Join my Group tibb12Pls : roblox.com/groups/6225493`
-        )
+        );
       }
   }
 });

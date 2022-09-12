@@ -2,4 +2,6 @@ THINGS TO DO
 
  - make bot in go(lang)
 
- - dick
+ - fix playtime command
+
+ - uptime command
