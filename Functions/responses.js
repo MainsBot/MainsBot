@@ -467,11 +467,17 @@ export const responses = {
   crimid: async(client, target, message = null) => {
     const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
 
-    if(locationId == '4588604953'){
-      return client.say(CHANNEL_NAME, `@${target} tibb is not currently in a criminality server.`)
+    if (locationId == '4588604953') {
+      return client.say(
+        CHANNEL_NAME,
+        `@${target} tibb is not currently in a criminality server.`
+        );
     }
-    if(locationId == '8343259840'){
-      return client.say(CHANNEL_NAME, `!crimid @${target}`)
+    if (locationId == '8343259840') {
+      return client.say(
+        CHANNEL_NAME,
+        `!crimid @${target}`
+        );
     }
   }
   ,
