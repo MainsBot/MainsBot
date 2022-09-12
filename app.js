@@ -193,12 +193,13 @@ setInterval(async () => {
 
     var promo = [
       `!discord`,
-      `!youtube`
+      `!youtube`,
+      `!facebook `
     ];
 
     var discordTimer =
       promo[Math.floor(Math.random() * promo.length)];
-    client.say(CHANNEL_NAME, ``);
+    client.say(CHANNEL_NAME, `${discordTimer}`);
   }
 }, 60 * 7.4 * 1000);
 
@@ -217,7 +218,7 @@ setInterval(() => {
   if (SETTINGS.ks == false) {
     if (SETTINGS.currentLink != null) {
       if (SETTINGS.currentMode == "!link.on") {
-        client.say(CHANNEL_NAME, `${SETTINGS.currentLink}`);
+
       }
     }
   }
@@ -750,7 +751,7 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
   }
 }
 
-async function customUserFunctions(client, message, twitchUsername, userid) {
+async function customUserFunctions(client, message, twitchUsername, userid, userstate) {
   var messageArray = ([] = message.toLowerCase().split(" "));
 
   if (messageArray[0] == "!cptotime") {
@@ -1422,7 +1423,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     filterHandler(client, message, twitchUsername, userstate);
     customModeHandler(client, message, twitchUsername, userstate);
     newLinkHandler(client, message, twitchUsername, userstate);
-    customUserFunctions(client, message, twitchUsername, twitchUserId);
+    customUserFunctions(client, message, twitchUsername, twitchUserId, userstate);
     customModFunctions(client, message, twitchUsername, userstate);
     customModCommands(client, message, twitchUsername, userstate);
 
@@ -1613,7 +1614,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     }
   } else if (SETTINGS.ks == false) {
     newUserHandler(client, message, twitchUsername, isFirstMessage, userstate);
-    customUserFunctions(client, message, twitchUsername, twitchUserId);
+    customUserFunctions(client, message, twitchUsername, twitchUserId, userstate);
     if (SETTINGS["spamFilter"] == true) {
       FILTERS.spamFilter(client, message, twitchUsername);
     }
@@ -2465,7 +2466,7 @@ var runAuth = function () {
 //TIBB_TOKEN
 StartListener();
 
-client.on("hosted", (channel, username, viewers, autohost) => {}); // dead feature as of oct 3
+client.on("hosted", (channel, username, viewers, autohost) => {}) // dead feature as of oct 3
 
 client.on("hosting", async (channel, username, viewers, autohost) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
@@ -2523,40 +2524,54 @@ client.on("reconnect", (channel) => {
 client.on("disconnected", (channel) => {
   client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`)
 });
-client.on("resub", (channel, username, viewers, methods, method) => {
-  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json")); 
+client.on("resub", (channel, username, viewers, methods, method, months, tags) => {
+  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
+
+  var plan = message.tags["msg-param-sub-plan"] || "";
+  var planName = _.unescapeIRC(_.get(message.tags["msg-param-sub-plan-name"], "")) || null;
+  var prime = plan.includes("Prime");
+
   if (SETTINGS.ks == false) {
-    client.say(CHANNEL_NAME, `${method}`);
-    client.say(CHANNEL_NAME, `${methods}`);
+    if (plan == prime) {
+      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
+      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
+      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
+      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
+      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
+    } else 
+    client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
+    client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
+    client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
+    client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
+    client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
   }
 });
+
 client.on("raided", async (channel, username, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
-  if (viewers >= 10) {
-    client.say(
-      `${CHANNEL_NAME}`,
-      `/announce ${username}, just raided with ${viewers}, thank you so much. tibb12Love`
-    );
-    client.say(CHANNEL_NAME, `/followers`);
-
-    // TO DO : here as well need to revert after raid to old setings
-
-    SETTINGS["spamFilter"] = false;
-    SETTINGS["lengthFilter"] = false;
-    fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-    await setTimeout(60 * 1000);
-    SETTINGS["spamFilter"] = true;
-    SETTINGS["lengthFilter"] = true;
-    fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-    client.say(CHANNEL_NAME, `/followersoff`);
-  }
+    if (viewers >= 10) {
+      client.say(
+        `${CHANNEL_NAME}`,
+        `/announce ${username}, just raided with ${viewers}, thank you so much. tibb12Love`
+      );
+      client.say(CHANNEL_NAME, `/followers`);
+  
+      // TO DO : here as well need to revert after raid to old setings
+  
+      SETTINGS["spamFilter"] = false;
+      SETTINGS["lengthFilter"] = false;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+      await setTimeout(60 * 1000);
+      SETTINGS["spamFilter"] = true;
+      SETTINGS["lengthFilter"] = true;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+      client.say(CHANNEL_NAME, `/followersoff`);
+    }
 }
 });
 
-client.on("clearchat", () => {
-  client.say(CHANNEL_NAME, `The chat has been cleared. SadgeCry`)
-});
+client.on("clearchat", () => {})
 
 client.on("cheer", async (channel, userstate, message) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
@@ -2568,15 +2583,12 @@ client.on("cheer", async (channel, userstate, message) => {
 
   if (Bits > 49) {
    client.say(CHANNEL_NAME, `${random}`);
-   if (Bits > 99) {
-    client.say(CHANNEL_NAME, ``);
-   }
-  } 
+  }
   if (Bits > 99) {
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
-  } 
+  }
   if (Bits > 499) {
     client.say(CHANNEL_NAME, `${random}`);
     client.say(CHANNEL_NAME, `${random}`);
@@ -3017,7 +3029,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       ) {
         client.say(
           CHANNEL_NAME,
-          `/me : ${twitchUsername} -> FOLLOW MY TWITCH tibb12Gasm & Click here to play tibb12Exhausted : roblox.com/users/${tibb12Id} tibb12Tabbman (tibb12_TTV) // Join my Group tibb12Pls : roblox.com/groups/6225493`
+          `/me : ${twitchUsername} -> FOLLOW MY TWITCH tibb12Gasm & Click here to play tibb12Exhausted : roblox.com/users/${tibb12Id} tibb12Tabbman (${CHANNEL_NAME}_TTV) // Join my Group tibb12Pls : roblox.com/groups/6225493`
         );
       }
   }
