@@ -91,7 +91,7 @@ const client = new tmi.Client({
     username: BOT_NAME,
     password: `OAuth:${BOT_OAUTH}`,
   },
-  channels: [CHANNEL_NAME, 'mr_cheeezzbot']
+  channels: [CHANNEL_NAME]
 });
 
 client.connect();
@@ -145,16 +145,16 @@ const badgerClient = new tmi.Client({
   channels: [CHANNEL_NAME]
 });
 
-// badgerClient.connect();
-
 if (SETTINGS.ks == false) {
   blakeClient.connect();
   sisterClient.connect();
+  // badgerClient.connect();
 };
 
 if (SETTINGS.ks == true) {
   blakeClient.disconnect();
   sisterClient.disconnect();
+  // badgerClient.connect();
 };
 
 
@@ -658,9 +658,8 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
 
   if (messageArray[0] == "!announce") {
     if (messageArray.length < 2)
-      return client.say(
-        CHANNEL_NAME,
-        `@${twitchUsername}, please include a message to announce, e.g. !announce test`
+      return client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Please include a message to announce, e.g. !announce test`
       );
 
     messageArray.splice(0, 1);
@@ -1566,15 +1565,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
   }
 
   if (message.toLowerCase() == "!fixtags") {
-    fetch("https://gql.twitch.tv/gql", {
-      "headers": {
-        "authorization": `OAuth ${BOT_OAUTH}`,
-        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-      },
-      "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
-      "method": "POST"
-    })
-
+    TWITCH_FUNCTIONS.streamTags();
     client.say(CHANNEL_NAME, `@${CHANNEL_NAME} Tags have been fixed.`)
   }
   if (message.toLowerCase().startsWith("!lockdown")) {
@@ -2516,7 +2507,7 @@ client.on("subgift", (channel, username, viewers, method) => {
   }
 });
 client.on("connected", (channel) => {
-  client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
+  // client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
 });
 client.on("reconnect", (channel) => {
   client.say(CHANNEL_NAME, `Reconnected to channel ${CHANNEL_NAME}. tibb12Dance`)
