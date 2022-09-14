@@ -1474,7 +1474,6 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     customModFunctions(client, message, twitchUsername, userstate);
 
     // CHANGE TITLE THING
-    if (await TWITCH_FUNCTIONS.isLive() == true) {
 
       const joinTitle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!JOIN to play🍁!schedule !socials !discord !yt🍁"
       const linkTitle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!LINK to play🍁!schedule !socials !discord !yt🍁"
@@ -1622,7 +1621,6 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
         "method": "POST"
         });
     }
-  }
 
   if (message.toLowerCase() == "!fixtags") {
     fetch("https://gql.twitch.tv/gql", {
@@ -2582,21 +2580,10 @@ client.on("reconnect", (channel) => {
 client.on("disconnected", (channel) => {
   client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`)
 });
-client.on("resub", (channel, username, viewers, methods, method, months ) => {
+client.on("resub", (channel, username, viewers, methods, method, months) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 
-  var plan = message.tags["msg-param-sub-plan"] || "";
-  var planName = _.unescapeIRC(_.get(message.tags["msg-param-sub-plan-name"], "")) || null;
-  var prime = plan.includes("Prime");
-
   if (SETTINGS.ks == false) {
-    if (plan == prime) {
-      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
-      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
-      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
-      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
-      client.say(CHANNEL_NAME, `tibb12Prime tibb12Imback tibb12Subhype`);
-    } else 
     client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
     client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
     client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
