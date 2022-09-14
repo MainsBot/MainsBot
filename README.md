@@ -10,3 +10,11 @@
 ㅤ•  Roblox game/playtime command
 
 ㅤ•  Twitch Stuff
+
+## NPM
+
+Run: ```npm i pm2 tmi.js ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js```
+
+## GIT 
+
+Run: ```git pull https://github.com/Mr-Cheeezz/MainsBot.git```

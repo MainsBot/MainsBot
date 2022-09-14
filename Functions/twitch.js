@@ -784,25 +784,15 @@ export const doesLinkExist = async () => {
   return false;
 };
 
-export const changeTitle = async (client, newTitle) => {
-  const SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"))
-  var currentMode = SETTINGS.currentMode.replace(".on", "");
-  currentMode = currentMode.replace("!", "");
-
-  var modeTitle = SETTINGS.titles;
-
-  for (const key in modeTitle) {
-    if (key == currentMode) {
-      fetch("https://gql.twitch.tv/gql", {
-        headers: {
-          authorization: "OAuth 7x8gw340wqhv0lm6grgv2hcfr3luu8",
-          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-        },
-        body: `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${modeTitle[key]}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
-        method: "POST",
-      });
-    }
-  }
+export const changeTitle = async (newTitle) => {
+  fetch("https://gql.twitch.tv/gql", {
+    headers: {
+      authorization: "OAuth 7x8gw340wqhv0lm6grgv2hcfr3luu8",
+      "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+    },
+    body: `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${newTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
+    method: "POST",
+  });
 }
 
 export const getLatestPredictionData = async () => {
@@ -820,7 +810,7 @@ export const getLatestPredictionData = async () => {
 };
 
 export const streamTags = async () => {
-  fetch("https://gql.twitch.tv/gql", {
+  const r = await fetch("https://gql.twitch.tv/gql", {
     "headers": {
       "authorization": `OAuth ${BOT_OAUTH}`,
       "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
@@ -828,4 +818,5 @@ export const streamTags = async () => {
     "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
     "method": "POST"
   })
+  return(await r.json())
 }
