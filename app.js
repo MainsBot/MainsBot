@@ -82,7 +82,7 @@ let STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 let WORDS = JSON.parse(fs.readFileSync("./WORDS.json"));
 let TOUNFRIEND = JSON.parse(fs.readFileSync("./TOUNFRIEND.json"));
 
-var commandsList = ["!join", "!link", "!ticket", "!1v1", "!wild", "!epic"];
+var commandsList = ["!join", "!link", "!ticket", "!1v1", "!wild"];
 
 var streamNumber = Object.keys(STREAMS).length;
 const client = new tmi.Client({
@@ -700,7 +700,7 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
   ) {
     client.say(CHANNEL_NAME, `/subscribersoff`);
   }
-  
+
   if (
     messageArray[0] == "!slow" ||
     messageArray[0] == "!slowmode"
@@ -759,6 +759,7 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
           ); 
       }
     }
+
 
   if (messageArray[0] == "!add") {
     if (messageArray[1] == null) {
@@ -1490,106 +1491,167 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     customUserFunctions(client, message, twitchUsername, twitchUserId, userstate);
     customModFunctions(client, message, twitchUsername, userstate);
 
-    // CHANGE TITLE THIN
+    // CHANGE TITLE THING
+    if (await TWITCH_FUNCTIONS.isLive() == true) {
 
-    const joinTitle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!JOIN to play🍁!schedule !socials !discord !yt🍁"
-    const linkTitle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!LINK to play🍁!schedule !socials !discord !yt🍁"
-    const arsenalTitle = "🤑ARSENAL 1V1'S FOR ⁿᵒ ROBUX🤑🥺100000 ROBUX ⱼₖ🥺🍑ARSENAL 1V1'S W/FOLLOWERS🍑!1V1 to play🍁!schedule !socials !discord !yt🍁"
-    const ticketTItle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!TICKET to join🍁!schedule !socials !discord !yt🍁"
-    const gambaTitle = "🤑GAMBLING 1 MIL ROBUX🤑💰ROBUX GIVEAWAY💰🍑!WILD🍑🍁!schedule !socials !discord !yt🍁 #ad"
-    const epicTitle = "🍑PLAYING W/FOLLOWERS🍑!EPIC to play🍁!schedule !socials !discord !yt🍁"
+      const joinTitle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!JOIN to play🍁!schedule !socials !discord !yt🍁"
+      const linkTitle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!LINK to play🍁!schedule !socials !discord !yt🍁"
+      const arsenalTitle = "🤑ARSENAL 1V1'S FOR ⁿᵒ ROBUX🤑🥺100000 ROBUX ⱼₖ🥺🍑ARSENAL 1V1'S W/FOLLOWERS🍑!1V1 to play🍁!schedule !socials !discord !yt🍁"
+      const ticketTItle = "🤑GIVING AWAY ROBUX ⱼₖ🤑🥺100000 ROBUX ⱼₖ🥺🍑PLAYING W/FOLLOWERS🍑!TICKET to join🍁!schedule !socials !discord !yt🍁"
+      const gambaTitle = "🤑GAMBLING 1 MIL ROBUX🤑💰ROBUX GIVEAWAY💰🍑!WILD🍑🍁!schedule !socials !discord !yt🍁 #ad"
+      const epicTitle = "🍑PLAYING W/FOLLOWERS🍑!EPIC to play🍁!schedule !socials !discord !yt🍁"
+      const epicGame = "Fortnite"
 
-    // Sponsor Title & Game [UPDATE]
-    const sponsorTitle = "🍑PLAYING W/FOLLOWERS🍑!FORTNITE to play🍁!schedule !socials !discord !yt🍁 #ad"
-    const sponsorGame = "Fortnite"
+      // Sponsor Title & Game [UPDATE]
+      const sponsorTitle = "🍑PLAYING W/FOLLOWERS🍑!FORTNITE to play🍁!schedule !socials !discord !yt🍁 #ad"
+      const sponsorGame = "Fortnite"
+ 
+    if (message.toLowerCase() == "!join.on") {
+      fetch("https://gql.twitch.tv/gql", {
+      "headers": {
+        "authorization": `OAuth ${BOT_OAUTH}`,
+        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      },
+      "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":[],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Fortnite","status":"${joinTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
+      "method": "POST"
+      });
 
-  if (message.toLowerCase() == "!join.on") {
-    fetch("https://gql.twitch.tv/gql", {
-    "headers": {
-      "authorization": `OAuth ${BOT_OAUTH}`,
-      "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-    },
-    "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${joinTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
-    "method": "POST"
-    })
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      });
+    }
+    
+    if (message.toLowerCase() == "!link.on") {
+      fetch("https://gql.twitch.tv/gql", {
+      "headers": {
+        "authorization": `OAuth ${BOT_OAUTH}`,
+        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      },
+      "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${linkTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
+      "method": "POST"
+      });
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      });
+    }
+
+    if (message.toLowerCase() == "!1v1.on") {
+      fetch("https://gql.twitch.tv/gql", {
+      "headers": {
+        "authorization": `OAuth ${BOT_OAUTH}`,
+        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      },
+      "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${arsenalTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
+      "method": "POST"
+      });
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      });
+    }
+
+    if (message.toLowerCase() == "!ticket.on") {
+      fetch("https://gql.twitch.tv/gql", {
+      "headers": {
+        "authorization": `OAuth ${BOT_OAUTH}`,
+        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      },
+      "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${ticketTItle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
+      "method": "POST"
+      });
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      });
+    }
+
+    if (message.toLowerCase() == "!gamble.on") {
+      fetch("https://gql.twitch.tv/gql", {
+      "headers": {
+        "authorization": `OAuth ${BOT_OAUTH}`,
+        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      },
+      "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${gambaTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
+      "method": "POST"
+      });
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      });
+    }
+
+    if (message.toLowerCase() == "!sponsor.on") {
+      // fetch("https://gql.twitch.tv/gql", {
+      // "headers": {
+      //   "authorization": `OAuth ${BOT_OAUTH}`,
+      //   "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      // },
+      // "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"${sponsorGame}","status":"${sponsorTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
+      // "method": "POST"
+      // })
+
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+        "method": "POST"
+      });
+      client.say(
+      CHANNEL_NAME, 
+      `@${twitchUsername}, There is not currently a sponsor.`
+      );
+    }
+
+    if (message.toLowerCase() == "!epic.on") {
+      fetch("https://gql.twitch.tv/gql", {
+        "headers": {
+          "authorization": `OAuth ${BOT_OAUTH}`,
+          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        },
+        "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"${epicGame}","status":"${epicTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
+        "method": "POST"
+        });
+    }
   }
-  
-  if (message.toLowerCase() == "!link.on") {
-    fetch("https://gql.twitch.tv/gql", {
-    "headers": {
-      "authorization": `OAuth ${BOT_OAUTH}`,
-      "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-    },
-    "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${linkTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
-    "method": "POST"
-    })
-  }
 
-  if (message.toLowerCase() == "!1v1.on") {
-    fetch("https://gql.twitch.tv/gql", {
-    "headers": {
-      "authorization": `OAuth ${BOT_OAUTH}`,
-      "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-    },
-    "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${arsenalTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
-    "method": "POST"
-    })
-  }
-
-  if (message.toLowerCase() == "!ticket.on") {
-    fetch("https://gql.twitch.tv/gql", {
-    "headers": {
-      "authorization": `OAuth ${BOT_OAUTH}`,
-      "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-    },
-    "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${ticketTItle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
-    "method": "POST"
-    })
-  }
-
-  if (message.toLowerCase() == "!gamble.on") {
-    fetch("https://gql.twitch.tv/gql", {
-    "headers": {
-      "authorization": `OAuth ${BOT_OAUTH}`,
-      "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-    },
-    "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"${gambaTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
-    "method": "POST"
-    })
-  }
-
-  if (message.toLowerCase() == "!epic.on") {
-    fetch("https://gql.twitch.tv/gql", {
-    "headers": {
-      "authorization": `OAuth ${BOT_OAUTH}`,
-      "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-    },
-    "body": `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"${sponsorGame}","status":"${epicTitle}","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
-    "method": "POST"
-    })
-  }
-
-  if (
-    message.toLowerCase() == "!fixtags" ||
-    message.toLowerCase() == "!join.on" ||
-    message.toLowerCase() == "!link.on" ||
-    message.toLowerCase() == "!ticket.on" ||
-    message.toLowerCase() == "!1v1.on" ||
-    message.toLowerCase() == "!epic.on" ||
-    message.toLowerCase() == "!gamble.on" ||
-    message.toLowerCase() == "!sponsor.on"
-    ) {
-    fetch("https://gql.twitch.tv/gql", {
-    "headers": {
-      "authorization": `OAuth ${BOT_OAUTH}`,
-      "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-    },
-    "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
-    "method": "POST"
-  })
   if (message.toLowerCase() == "!fixtags") {
-    client.say(CHANNEL_NAME, `@${CHANNEL_NAME}, Tags have been fixed.`);
-  }
+    fetch("https://gql.twitch.tv/gql", {
+      "headers": {
+        "authorization": `OAuth ${BOT_OAUTH}`,
+        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      },
+      "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Vtuber","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
+      "method": "POST"
+    });
+    client.say(CHANNEL_NAME, `@${CHANNEL_NAME} Tags have been fixed.`)
   }
   if (message.toLowerCase().startsWith("!lockdown")) {
     client.say(CHANNEL_NAME, `/subscribers`);
@@ -1616,14 +1678,14 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       if (SETTINGS.currentMode == "!ticket.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in ticket mode.`)};
       if (SETTINGS.currentMode == "!1v1.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in 1v1 mode.`)};
       if (SETTINGS.currentMode == "!gamble.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in GAMBA mode.`)};
-      if (SETTINGS.currentMode == "!epic.on") { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently in epic mode.`)};
+
       client.say(CHANNEL_NAME, `@${twitchUsername}, The bot is in ${SETTINGS.currentMode}`);
       return
     }
 
     if (message.toLowerCase() == "!validmodes") {
 
-      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Valid Modes: !join.on, !link.on, !1v1.on, !ticket.on, !gamble.on, !epic.on`)
+      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Valid Modes: !join.on, !link.on, !1v1.on, !ticket.on, !gamble.on`)
       return
     }
   } else if (SETTINGS.ks == false) {
@@ -2538,7 +2600,7 @@ client.on("reconnect", (channel) => {
 client.on("disconnected", (channel) => {
   client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`)
 });
-client.on("resub", (channel, username, viewers, methods, method, months, tags) => {
+client.on("resub", (channel, username, viewers, methods, method, months ) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 
   var plan = message.tags["msg-param-sub-plan"] || "";
@@ -2984,7 +3046,6 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 client.on("message", async (channel, userstate, message, self, viewers) => {
   const twitchDisplayName = userstate["display-name"];
   const twitchUsername = userstate["username"];
-
   const isMod = userstate["mod"];
 
   if (SETTINGS.ks == false) {
@@ -3049,10 +3110,15 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   }
 });
 
+
 // Corrections
 client.on("message", async (channel, userstate, message, self, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
+
+  const twitchDisplayName = userstate["display-name"];
+  const twitchUsername = userstate["username"];
+  const isMod = userstate["mod"];  
 
   var currentMode = SETTINGS.currentMode.replace('.on', '')
   currentMode = currentMode.replace('!', '')
@@ -3061,13 +3127,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 
   for (const key in responsesd) {
     if (key == currentMode) {
-      
-
-      const twitchUsername = userstate["username"];
-      const twitchDisplayName = userstate["display-name"];
-      const isMod = userstate["mod"];
-
-      if (!isMod && SETTINGS.ks == false) {
+      if (!isMod &&  SETTINGS.ks == false) {
         if (SETTINGS.currentMode == "!join.on") {
           if (
             message.toLowerCase() == "!link" ||
@@ -3100,24 +3160,24 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   }
 });
 
-var block = false;
-  client.on("message", async (channel, userstate, message, self) => {
+// var block = false;
+//   client.on("message", async (channel, userstate, message, self) => {
 
-    SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-    STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
+//     SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
+//     STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 
-    if (SETTINGS.ks == false) {
+//     if (SETTINGS.ks == false) {
 
-      if(self) return;
+//       if(self) return;
 
-      if (message.includes("clips.twitch.tv")) {
-        if (!block) {
-            console.log(client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :You have sent a clip in chat as a reminder if you want ${CHANNEL_NAME} to watch it on stream you can donate 5 dollars or send 500 bits.`));
-            block = true;
-            setTimeout(() => {
-                block = false;
-            }, (120 * 1000));
-        }
-      }
-    }
-});
+//       if (message.includes("clips.twitch.tv")) {
+//         if (!block) {
+//             console.log(client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :You have sent a clip in chat as a reminder if you want ${CHANNEL_NAME} to watch it on stream you can donate 5 dollars or send 500 bits.`));
+//             block = true;
+//             setTimeout(() => {
+//                 block = false;
+//             }, (120 * 1000));
+//         }
+//       }
+//     }
+// });

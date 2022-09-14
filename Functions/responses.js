@@ -58,6 +58,8 @@ export const responses = {
       client.say(CHANNEL_NAME, `!join @${target}`);
     } else if (currentMode == "!gamble.on") {
       // client.say(CHANNEL_NAME, `!wild @${target}`);
+    } else if (currentMode == "!epic.on") {
+      client.say(CHANNEL_NAME, `!epic @${target}`);
     }
   }
   ,
