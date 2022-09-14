@@ -74,8 +74,8 @@ const MAIN_BOT_OAUTH = process.env.MAIN_BOT_OAUTH;
 const SISTER_BOT_NAME = process.env.SISTER_BOT_NAME;
 const SISTER_BOT_OAUTH = process.env.SISTER_BOT_OAUTH;
 
-const BADGER_OAUTH = 'sjyopvthkf6v2lpcykaox06ohq2xfs';
-const BADGER_NAME = 'badger_mecool';
+// const BADGER_OAUTH = 'sjyopvthkf6v2lpcykaox06ohq2xfs';
+// const BADGER_NAME = 'badger_mecool';
 
 let SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 let STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
@@ -136,26 +136,8 @@ const sisterClient = new tmi.Client({
   channels: [CHANNEL_NAME]
 });
 
-const badgerClient = new tmi.Client({
-  options: { debug: true },
-  identity: {
-    username: BADGER_NAME,
-    password: `OAuth:${BADGER_OAUTH}`,
-  },
-  channels: [CHANNEL_NAME]
-});
-
-if (SETTINGS.ks == false) {
-  blakeClient.connect();
-  sisterClient.connect();
-  // badgerClient.connect();
-};
-
-if (SETTINGS.ks == true) {
-  blakeClient.disconnect();
-  sisterClient.disconnect();
-  // badgerClient.connect();
-};
+blakeClient.connect();
+sisterClient.connect();
 
 
 // interval timer for !join/!link/!1v1/!ticket
