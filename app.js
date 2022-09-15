@@ -2571,15 +2571,6 @@ client.on("subgift", (channel, username, viewers, method) => {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`)
   }
 });
-client.on("connected", (channel) => {
-  // client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
-});
-client.on("reconnect", (channel) => {
-  client.say(CHANNEL_NAME, `Reconnected to channel ${CHANNEL_NAME}. tibb12Dance`)
-});
-client.on("disconnected", (channel) => {
-  client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`)
-});
 client.on("resub", (channel, username, viewers, methods, method, months) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 
@@ -2952,9 +2943,19 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 
   if (SETTINGS.ks == false) {
     if (message.toLowerCase() == "!gamelink") {
-      if (locationId == '8343259840') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/4588604953`)};
-      if (locationId == '6839171747') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/6516141723`)};
+      if (locationId == '8343259840') {
+        return client.raw(
+          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/4588604953`)};
+      if (locationId == '6839171747') {
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/6516141723`)};
 
+      if (SETTINGS.currentMode == "!link.on") {
+        if (SETTINGS.currentLink != null) {
+          return client.raw(
+            `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> ${currentLink}`
+          );
+        }
+      }
       if (SETTINGS.currentMode == "!gamble.on") {
         return client.raw(
           `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> rblxwild.com`
@@ -2994,6 +2995,13 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       if (location != 'Website') {
         client.raw(
           `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently online playing ${location}.`
+        );
+        return
+      }
+
+      if (location == 'Website') {
+        client.raw(
+          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently online on the website.`
         );
         return
       }
