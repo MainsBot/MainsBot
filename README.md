@@ -13,8 +13,14 @@
 
 ## NPM
 
-Run: ```npm i pm2 tmi.js ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js```
+Run: 
+```
+npm i pm2 tmi.js-reply-fork tmijs/tmi.js#feature-send-tags ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js
+```
 
 ## GIT 
 
-Run: ```git clone https://github.com/Mr-Cheeezz/MainsBot.git```
+Run: 
+```
+git clone https://github.com/Mr-Cheeezz/MainsBot.git
+```
