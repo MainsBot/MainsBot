@@ -2415,10 +2415,9 @@ var StartListener = function () {
               CHANNEL_NAME,
               `${userInputSplit[0]} was timed out for 60 seconds by ${twitchUsername} via timeout redemption.`
             );
-            TWITCH_FUNCTIONS.timeoutUser(
-              userInputSplit[0],
-              `[AUTOMATIC] ${twitchUsername} redeemed a timeout on you. You can redeem the timeout redemption and others by clicking the yellow ' T ' in the bottom left of the chat box.`,
-              60
+            client.say(
+              CHANNEL_NAME,
+              `.timeout ${userInputSplit[0]} 60 [AUTOMATIC] ${twitchUsername} redeemed a timeout on you. You can redeem the timeout redemption and others by clicking the yellow ' T ' in the bottom left of the chat box.`
             );
           }
           if (redemptionId == removeoraddhat) {
