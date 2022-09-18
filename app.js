@@ -397,7 +397,7 @@ async function keywordHandler(client, lowerMessage, twitchUsername, userstate) {
 }
 
 async function timerHandler(client, lowerMessage, twitchUsername, userstate) {
-  if (lowerMessage == "!timer.on") {
+  if (lowerMessage == "!timer.on" || lowerMessage == "!timers.on") {
     if (SETTINGS.timers == true) {
       return client.raw(
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Timers are already on.`
@@ -409,7 +409,7 @@ async function timerHandler(client, lowerMessage, twitchUsername, userstate) {
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, Timers are now on.`
       );
     }
-  } else if (lowerMessage == "!timer.off") {
+  } else if (lowerMessage == "!timer.off" || lowerMessage == "!timers.off") {
     if (SETTINGS.timers == false) {
       return client.raw(
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Timers are already off.`
@@ -2550,8 +2550,6 @@ client.on("subscription", (channel, username, methods, message, userstate, metho
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
-  client.say(CHANNEL_NAME, `${method}`);
-  client.say(CHANNEL_NAME, `${methods}`);
   }
 });
 client.on("giftpaidupgrade", (channel, username, viewers, method) => {
