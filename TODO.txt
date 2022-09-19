@@ -4,4 +4,6 @@ THINGS TO DO
 
  - fix playtime command
 
+ - make command list [DONE]
+
  - uptime command
