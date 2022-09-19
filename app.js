@@ -74,6 +74,8 @@ const MAIN_BOT_OAUTH = process.env.MAIN_BOT_OAUTH;
 const SISTER_BOT_NAME = process.env.SISTER_BOT_NAME;
 const SISTER_BOT_OAUTH = process.env.SISTER_BOT_OAUTH;
 
+const ADMIN_ID = process.env.ADMIN_ID;
+
 // const BADGER_OAUTH = 'sjyopvthkf6v2lpcykaox06ohq2xfs';
 // const BADGER_NAME = 'badger_mecool';
 
@@ -1488,22 +1490,13 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       const sponsorGame = "Fortnite"
  
     if (message.toLowerCase() == "!join.on") {
-      fetch("https://gql.twitch.tv/gql", {
+      fetch("https://gql.twitch.tv/gql#origin=twilight", {
       "headers": {
         "authorization": `OAuth ${BOT_OAUTH}`,
-        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+        "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
       },
       body: `[{"operationName":"EditBroadcastContext_ChannelTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"USER","tagIDs":["6ea6bca4-4712-4ab9-a906-e3336a9d8039","ac763b17-7bea-4632-9eb4-d106689ff409","e90b5f6e-4c6e-4003-885b-4d0d5adeb580","8bbdb07d-df18-4f82-a928-04a9003e9a7e","64d9afa6-139a-48d5-ab4e-51d0a92b22de","52d7e4cc-633d-46f5-818c-bb59102d9549"],"authorID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"4dd3764af06e728e1b4082b4dc17947dd51ab1aabbd8371ff49c01e440dfdfb1"}}},{"operationName":"EditBroadcastContext_BroadcastSettingsMutation","variables":{"input":{"broadcasterLanguage":"en","game":"Roblox","status":"🍑PLAYING W/FOLLOWERS 🍑!EWFJUIEFWIJU to play🍁!schedule !socials !discord !yt🍁","userID":"197407231"}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"856e69184d9d3aa37529d1cec489a164807eff0c6264b20832d06b669ee80ea5"}}}]`,
       method: "POST"
-      });
-
-      fetch("https://gql.twitch.tv/gql", {
-        "headers": {
-          "authorization": `OAuth ${BOT_OAUTH}`,
-          "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-        },
-        "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Pro","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
-        "method": "POST"
       });
     }
     
@@ -1622,32 +1615,33 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
         });
     }
 
-  if (message.toLowerCase() == "!fixtags") {
-    fetch("https://gql.twitch.tv/gql", {
-      "headers": {
-        "authorization": `OAuth ${BOT_OAUTH}`,
-        "client-id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-      },
-      "body": `[{"operationName":"EditBroadcastContext_FreeformTagsMutation","variables":{"input":{"contentID":"197407231","contentType":"CHANNEL","freeformTagNames":["PlayingwithViewers","FamilyFriendly","LGBTQIAPlus","Pro","AuditoryASMR","Giveaway","Robux","Roblox","Anime","ADHD"]}},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"8aaac5a848941ff6a26bacb44b6b251909c77b84f39ce6eced8f4c694036fc08"}}}]`,
-      "method": "POST"
-    });
-    client.say(CHANNEL_NAME, `@${CHANNEL_NAME} Tags have been fixed.`)
-  }
-  if (message.toLowerCase().startsWith("!lockdown")) {
-    client.say(CHANNEL_NAME, `/subscribers`);
-    client.say(CHANNEL_NAME, `/followers 15`);
-    client.say(CHANNEL_NAME, `/uniquechat`);
-    client.say(CHANNEL_NAME, `/clear`);
-    client.say(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, lockdown mode has been enabled.`)
-  }
+    if (message.toLowerCase().startsWith("!lockdown")) {
+      client.say(CHANNEL_NAME, `/subscribers`);
+      client.say(CHANNEL_NAME, `/followers 15`);
+      client.say(CHANNEL_NAME, `/uniquechat`);
+      client.say(CHANNEL_NAME, `/clear`);
+      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, lockdown mode has been enabled.`)
+    }
+  
+    if (message.toLowerCase().startsWith("!endlockdown")) {
+      client.say(CHANNEL_NAME, `/subscribersoff`);
+      client.say(CHANNEL_NAME, `/followersoff`);
+      client.say(CHANNEL_NAME, `/uniquechatoff`);
+      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, The chat is no longer in lockdown.`)
+    }
+    if (lowerMessage == "!settings") {
+      SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 
-  if (message.toLowerCase().startsWith("!endlockdown")) {
-    client.say(CHANNEL_NAME, `/subscribersoff`);
-    client.say(CHANNEL_NAME, `/followersoff`);
-    client.say(CHANNEL_NAME, `/uniquechatoff`);
-    client.say(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, the chat is no longer in lockdown.`)
-  }
-
+      if (SETTINGS.ks == false && SETTINGS.timers == true && SETTINGS.keywords == true) {
+        client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current Settings: Killswitch - Off | Timers - On | Keywords - On`);
+      } else if (SETTINGS.ks == false && SETTINGS.timers == false && SETTINGS.keywords == true) {
+        client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current Settings: Killswitch - Off | Timers - Off | Keywords - On`);
+      } else if (SETTINGS.ks == false && SETTINGS.timers == false && SETTINGS.keywords == false) {
+        client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current Settings: Killswitch - Off | Timers - Off | Keywords - Off`);
+      } else if (SETTINGS.ks == false && SETTINGS.timers == false && SETTINGS.keywords == false) {
+        client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current Settings: Killswitch - Off | Timers - Off | Keywords - Off`);
+      }
+    }
     if (message.toLowerCase() == "!currentmode") {
       SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
       var currentMode = SETTINGS.currentMode.replace(".on", "");
@@ -1664,8 +1658,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     }
 
     if (message.toLowerCase() == "!validmodes") {
-
-      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Valid Modes: !join.on, !link.on, !1v1.on, !ticket.on, !gamble.on`)
+      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Valid Modes: !join.on, !link.on, !1v1.on, !ticket.on, !gamble.on, !epic.on`)
       return
     }
   } else if (SETTINGS.ks == false) {
@@ -3018,10 +3011,22 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   const twitchDisplayName = userstate["display-name"];
   const twitchUsername = userstate["username"];
   const isMod = userstate["mod"];
+  const isBroadcaster =
+  twitchUsername.toLowerCase() == CHANNEL_NAME.toLowerCase();
+  const ModOrBroadcaster = isMod || isBroadcaster;
+  const isVip = (() => {
+    if (userstate["badges"] && userstate["badges"].vip == 1) {
+      return true;
+    } else {
+      return false;
+    }
+  })();
 
   if (SETTINGS.ks == false) {
-    if (message.toLowerCase() == "!nocap") {
-      client.say(CHANNEL_NAME, `🚫 🧢`);
+    if (ModOrBroadcaster || isVip) {
+      if (message.toLowerCase() == "!nocap") {
+        client.say(CHANNEL_NAME, `🚫 🧢`);
+    }
     }
     if (message.toLowerCase() == "!version") {
       client.raw(
@@ -3089,7 +3094,10 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 
   const twitchDisplayName = userstate["display-name"];
   const twitchUsername = userstate["username"];
-  const isMod = userstate["mod"];  
+  const isMod = userstate["mod"];
+  const isBroadcaster =
+  twitchUsername.toLowerCase() == CHANNEL_NAME.toLowerCase();
+  const ModOrBroadcaster = isMod || isBroadcaster;
 
   var currentMode = SETTINGS.currentMode.replace('.on', '')
   currentMode = currentMode.replace('!', '')

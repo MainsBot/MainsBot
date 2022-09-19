@@ -13,12 +13,13 @@
 ## NPM
 
 Run: 
-```
+```bash
 npm i pm2 tmi.js-reply-fork tmijs/tmi.js#feature-send-tags ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js
 ```
 
 ## GIT 
 Run: 
-```
+```bash
 git clone https://github.com/Mr-Cheeezz/MainsBot.git
 ```
+

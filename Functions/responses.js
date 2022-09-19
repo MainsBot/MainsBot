@@ -484,7 +484,7 @@ export const responses = {
   }
   ,
   full(client, target, message = null) {
-    // client.say(CHANNEL_NAME, `@${target}, wait in the queue.`)
+    client.say(CHANNEL_NAME, `@${target}, wait in the queue.`)
   },
   song(client, target, message = null) {
     client.say(
