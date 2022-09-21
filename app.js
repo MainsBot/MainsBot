@@ -58,9 +58,11 @@ const COOLDOWN = process.env.COOLDOWN; // number of milliseconds, cool down for 
 // timers
 const WAIT_UNTIL_FOC_OFF = process.env.WAIT_UNTIL_FOC_OFF; // 2 minutes
 const WAIT_UNTIL_FOC_OFF_RAID = process.env.WAIT_UNTIL_FOC_OFF_RAID; // every 5 minutes
+const CHEEEZZ_BOT_CLIENT_ID = process.env.CHEEEZZ_BOT_CLIENT_ID;
 const SPAM_LINK = process.env.SPAM_LINK; // every 5 minutes
 const JOIN_TIMER = process.env.JOIN_TIMER; // every 2 minutes
 let MUTATED_JOIN_TIMER = 240000; // timer that uses the JOIN_TIMER to change the interval based on viewer count
+
 
 const SONG_TIMER = process.env.SONG_TIMER;
 const WEB_ACCESS_TOKEN = process.env.WEB_ACCESS_TOKEN;
@@ -93,7 +95,10 @@ const client = new tmi.Client({
     username: BOT_NAME,
     password: `OAuth:${BOT_OAUTH}`,
   },
-  channels: [CHANNEL_NAME]
+  channels: [
+    CHANNEL_NAME,
+    BOT_NAME
+  ]
 });
 
 client.connect();
@@ -2573,6 +2578,13 @@ client.on("resub", (channel, username, viewers, methods, method, months) => {
   }
 });
 
+client.on("connected", async () => {
+  client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
+});
+client.on("disconnected", async () => {
+  client.say(CHANNEL_NAME, `Left channle ${CHANNEL_NAME}. tibb12Fall`)
+});
+
 client.on("raided", async (channel, username, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
@@ -3012,7 +3024,9 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   const twitchUsername = userstate["username"];
   const isMod = userstate["mod"];
   const isBroadcaster =
-  twitchUsername.toLowerCase() == CHANNEL_NAME.toLowerCase();
+  twitchUsername == CHANNEL_NAME;
+  const isAdmin =
+  twitchUsername == MAIN_BOT_NAME;
   const ModOrBroadcaster = isMod || isBroadcaster;
   const isVip = (() => {
     if (userstate["badges"] && userstate["badges"].vip == 1) {
@@ -3033,11 +3047,11 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.8`
       );
     }
-    if (message.toLowerCase().startsWith("!addbot")) {
-      client.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG ${channel} :To get the bot pleease contact SwitchingMains or Mr_Cheeezz in any room that the bot is in.`
-      );
-    }
+    // if (message.toLowerCase().startsWith("!addbot")) {
+    //   client.raw(
+    //     `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG ${channel} :To get the bot pleease contact SwitchingMains or Mr_Cheeezz in any room that the bot is in.`
+    //   );
+    // }
     if (message.toLowerCase().includes("poof")) {
       if (!isMod) {
         TWITCH_FUNCTIONS.timeoutUser(
@@ -3083,6 +3097,14 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
           `/me : ${twitchUsername} -> FOLLOW MY TWITCH tibb12Gasm & Click here to play tibb12Exhausted : roblox.com/users/${tibb12Id} tibb12Tabbman (${CHANNEL_NAME}_TTV) // Join my Group tibb12Pls : roblox.com/groups/6225493`
         );
       }
+      if (isAdmin || isBroadcaster) {
+        if (message.toLowerCase() == "!part" || message.toLowerCase() == "!disconnect") {
+          client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}. tibb12Fall`);
+          console.log(client.disconnect());
+        } else if (message.toLowerCase() == "!joinchannel") {
+          console.log(client.connect());
+        }
+      }
   }
 });
 
@@ -3096,7 +3118,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   const twitchUsername = userstate["username"];
   const isMod = userstate["mod"];
   const isBroadcaster =
-  twitchUsername.toLowerCase() == CHANNEL_NAME.toLowerCase();
+  twitchUsername == CHANNEL_NAME;
   const ModOrBroadcaster = isMod || isBroadcaster;
 
   var currentMode = SETTINGS.currentMode.replace('.on', '')
@@ -3160,3 +3182,22 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 //       }
 //     }
 // });
+
+client.on("message", async (channel, userstate, message, self) => {
+  if (message.toLowerCase() == "!test") {
+
+    headers = {
+      'Authorization':`Bearer ${BOT_OAUTH}`,
+      'Client-Id':`${CHEEEZZ_BOT_CLIENT_ID}`,
+      'Content-Type':'application/json'
+    }
+  
+    data = {
+      'title':`:peach:PLAYING W/FOLLOWERS :peach:!JOIN to play:maple_leaf:!schedule !socials !discord !yt:maple_leaf:`
+    }
+  
+    axios.patch(`https://api.twitch.tv/helix/channels?broadcaster_id=${CHANNEL_ID}`, data, {'headers':headers}).then(resp => {
+      console.log(resp.data);
+    }).catch(err => console.error(err))
+  }
+});
