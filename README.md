@@ -22,4 +22,3 @@ Run:
 ```bash
 git clone https://github.com/Mr-Cheeezz/MainsBot.git
 ```
-

@@ -3062,6 +3062,9 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
         client.say(CHANNEL_NAME, `ppPoof`);
       }
     }
+    if (message.toLowerCase() == "!yep") {
+      mainClient.say(CHANNEL_NAME, `YEP COCK`)
+    }
     if (message.toLowerCase() == "!vanish") {
       if (!isMod) {
         TWITCH_FUNCTIONS.timeoutUser(
