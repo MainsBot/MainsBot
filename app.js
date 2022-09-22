@@ -78,9 +78,6 @@ const SISTER_BOT_OAUTH = process.env.SISTER_BOT_OAUTH;
 
 const ADMIN_ID = process.env.ADMIN_ID;
 
-// const BADGER_OAUTH = 'sjyopvthkf6v2lpcykaox06ohq2xfs';
-// const BADGER_NAME = 'badger_mecool';
-
 let SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 let STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 let WORDS = JSON.parse(fs.readFileSync("./WORDS.json"));
@@ -95,10 +92,7 @@ const client = new tmi.Client({
     username: BOT_NAME,
     password: `OAuth:${BOT_OAUTH}`,
   },
-  channels: [
-    CHANNEL_NAME,
-    BOT_NAME
-  ]
+  channels: [CHANNEL_NAME]
 });
 
 client.connect();
@@ -1982,89 +1976,89 @@ var StartListener = function () {
 
             const cpToHours = ROBLOX_FUNCTIONS.timeToAgo(test);
 
-            //             if (cp > 1000) {
-            //               client.say(
-            //                 CHANNEL_NAME,
-            //                 `@${username}, lost ${cp} channel points, since ${sub} thats ${cpToHours.timeString} of farming RIPBOZO`
-            //               );
-            //             }
+                        if (cp > 1000) {
+                          client.say(
+                            CHANNEL_NAME,
+                            `@${username}, lost ${cp} channel points, since ${sub} thats ${cpToHours.timeString} of farming RIPBOZO`
+                          );
+                        }
           }
         } else if (type == "POLL_TERMINATE" || type == "POLL_COMPLETE") {
-          //           const nodes = r.userNodes;
+                    const nodes = r.userNodes;
 
-          //           for (let i = 0; i < nodes.length; i++) {
-          //             const node = nodes[i];
-          //             const username = node.user.login;
-          //             const cp = node.tokens.communityPoints;
+                    for (let i = 0; i < nodes.length; i++) {
+                      const node = nodes[i];
+                      const username = node.user.login;
+                      const cp = node.tokens.communityPoints;
 
-          //             console.log(JSON.stringify(r, null, 1));
+                      console.log(JSON.stringify(r, null, 1));
 
-          //             let winning_choice_id;
-          //             let winning_choice_votes = 0;
+                      let winning_choice_id;
+                      let winning_choice_votes = 0;
 
-          //             r.choices.forEach(function (choice) {
-          //               if (choice.votes.total > winning_choice_votes) {
-          //                 winning_choice_votes = choice.votes.total;
-          //                 winning_choice_id = choice.id;
-          //               }
-          //             });
+                      r.choices.forEach(function (choice) {
+                        if (choice.votes.total > winning_choice_votes) {
+                          winning_choice_votes = choice.votes.total;
+                          winning_choice_id = choice.id;
+                        }
+                      });
 
-          //             //
+                      //
 
-          //             nodes.forEach(function (node) {
-          //               var packs = [];
-          //               node.choices.forEach(function (choice) {
-          //                 if (choice.id != winning_choice_id) {
-          //                   r.choices.forEach(function (mainChoice) {
-          //                     if (mainChoice.id == choice.id) {
-          //                       packs.push(mainChoice.title);
-          //                     }
-          //                   });
-          //                 }
-          //               });
-          //             });
+                      nodes.forEach(function (node) {
+                        var packs = [];
+                        node.choices.forEach(function (choice) {
+                          if (choice.id != winning_choice_id) {
+                            r.choices.forEach(function (mainChoice) {
+                              if (mainChoice.id == choice.id) {
+                                packs.push(mainChoice.title);
+                              }
+                            });
+                          }
+                        });
+                      });
 
-          //             nodes.forEach(function (node) {
-          //               var choiceArray = {};
+                      nodes.forEach(function (node) {
+                        var choiceArray = {};
 
-          //               const user = node.user.login;
+                        const user = node.user.login;
 
-          //               node.choices.forEach(function (choice) {
-          //                 if (!choiceArray[choice.pollChoice.id]) {
-          //                   choiceArray[choice.pollChoice.id] =
-          //                     choice.tokens.communityPoints;
-          //                 } else {
-          //                   choiceArray[choice.pollChoice.id] =
-          //                     choiceArray[choice.pollChoice.id] +
-          //                     choice.tokens.communityPoints;
-          //                 }
-          //               });
+                        node.choices.forEach(function (choice) {
+                          if (!choiceArray[choice.pollChoice.id]) {
+                            choiceArray[choice.pollChoice.id] =
+                              choice.tokens.communityPoints;
+                          } else {
+                            choiceArray[choice.pollChoice.id] =
+                              choiceArray[choice.pollChoice.id] +
+                              choice.tokens.communityPoints;
+                          }
+                        });
 
-          //               let mostVotedFor;
-          //               let mostedVoted = 0;
-          //               let mostVotedForName;
-          //               let total = 0;
+                        let mostVotedFor;
+                        let mostedVoted = 0;
+                        let mostVotedForName;
+                        let total = 0;
 
-          //               for (const key in choiceArray) {
-          //                 const amount = choiceArray[key];
-          //                 total += amount;
-          //                 if (amount > mostedVoted) {
-          //                   mostVotedFor = key;
-          //                 }
-          //               }
+                        for (const key in choiceArray) {
+                          const amount = choiceArray[key];
+                          total += amount;
+                          if (amount > mostedVoted) {
+                            mostVotedFor = key;
+                          }
+                        }
 
-          //               r.choices.forEach(function (mainChoice) {
-          //                 console.log(mostVotedFor);
-          //                 if (mainChoice.id == mostVotedFor) {
-          //                   mostVotedForName = mainChoice.title;
-          //                 }
-          //               });
+                        r.choices.forEach(function (mainChoice) {
+                          console.log(mostVotedFor);
+                          if (mainChoice.id == mostVotedFor) {
+                            mostVotedForName = mainChoice.title;
+                          }
+                        });
 
-          //               console.log(
-          //                 `${user} spent in total ${total} channel points, spending the most on ${mostVotedForName} which they spent ${choiceArray[mostVotedFor]} channel points on.`
-          //               );
-          //             });
-          //           }
+                        console.log(
+                          `${user} spent in total ${total} channel points, spending the most on ${mostVotedForName} which they spent ${choiceArray[mostVotedFor]} channel points on.`
+                        );
+                      });
+                    }
 
           var polldata = r;
           var choices = polldata.choices;
@@ -2443,6 +2437,7 @@ var runAuth = function () {
       // `campaign-events.${CHANNEL_ID}`,
       // `user-campaign-events.${CHANNEL_ID}`,
       // `celebration-events-v1.${CHANNEL_ID}`,
+      `channel-bits-badge-unlocks.${CHANNEL_ID}`,
       // `channel-bits-events-v1.${CHANNEL_ID}`,
       // `channel-bit-events-public.${CHANNEL_ID}`,
       // `channel-event-updates.${CHANNEL_ID}`,
@@ -3047,11 +3042,6 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current version is V2.6.8`
       );
     }
-    // if (message.toLowerCase().startsWith("!addbot")) {
-    //   client.raw(
-    //     `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG ${channel} :To get the bot pleease contact SwitchingMains or Mr_Cheeezz in any room that the bot is in.`
-    //   );
-    // }
     if (message.toLowerCase().includes("poof")) {
       if (!isMod) {
         TWITCH_FUNCTIONS.timeoutUser(
@@ -3185,22 +3175,3 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 //       }
 //     }
 // });
-
-client.on("message", async (channel, userstate, message, self) => {
-  if (message.toLowerCase() == "!test") {
-
-    headers = {
-      'Authorization':`Bearer ${BOT_OAUTH}`,
-      'Client-Id':`${CHEEEZZ_BOT_CLIENT_ID}`,
-      'Content-Type':'application/json'
-    }
-  
-    data = {
-      'title':`:peach:PLAYING W/FOLLOWERS :peach:!JOIN to play:maple_leaf:!schedule !socials !discord !yt:maple_leaf:`
-    }
-  
-    axios.patch(`https://api.twitch.tv/helix/channels?broadcaster_id=${CHANNEL_ID}`, data, {'headers':headers}).then(resp => {
-      console.log(resp.data);
-    }).catch(err => console.error(err))
-  }
-});
