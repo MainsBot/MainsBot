@@ -223,8 +223,10 @@ export const responses = {
   camera(client, target, message = null) {
     client.say(CHANNEL_NAME, `!camera @${target}`);
   },
-  cantjoin(client, target, message = null) {
+  cantjoin: async (client, target, message = null) => {
     const SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"))
+
+    const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
 
     var currentMode = SETTINGS.currentMode.replace('.on', '')
     currentMode = currentMode.replace('!', '')
@@ -235,7 +237,11 @@ export const responses = {
       console.log(key)
       console.log(currentMode)
       if (key == currentMode) {
-        // client.say(CHANNEL_NAME, `${responsesd[key]} @${target}`);
+        if (locationId == '8343259840') {
+          client.say(CHANNEL_NAME, `@${target}, you can't join tibb because you dont have prime or your on mobile.`);
+        } else {
+          client.say(CHANNEL_NAME, `${responsesd[key]} @${target}`);
+        }
       }
     }
   },
