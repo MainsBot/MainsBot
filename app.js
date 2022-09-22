@@ -318,7 +318,7 @@ setInterval(async () => {
                   word[0] + word[1] + "*".repeat(word.length - 2);
               } else {
                 finalArtistString +=
-                  " " + word[0] + word[1] + "*".repeat(word.length - 2);
+                  " " + word[0] + word[1] + "*".repeat(wford.length - 2);
               }
             } else {
               finalArtistString +=
@@ -1921,7 +1921,7 @@ var StartListener = function () {
         if (SETTINGS.ks == false) {
           client.say(
             CHANNEL_NAME,
-            `.announce A new moment tibb12Tabbman everyone claim it while you can tibb12Pog .`
+            `.announce A new moment PagMan everyone claim it while you can PogU .`
           )
         }
       } else if (
