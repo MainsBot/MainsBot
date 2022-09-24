@@ -2918,11 +2918,11 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 
       console.log(playtime)
       if (location != 'Website') {
-        client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing ${location} for ${playtime}.`)
+        client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing ${location} for ${playtime}.`);
         return
       }
       
-      return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`)
+      return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`);
     }
   }
 });
