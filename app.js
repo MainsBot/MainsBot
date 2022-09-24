@@ -2574,10 +2574,10 @@ client.on("resub", (channel, username, viewers, methods, method, months) => {
 });
 
 client.on("connected", async () => {
-  client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
+  client.say(CHANNEL_NAME, `.me Joined channel ${CHANNEL_NAME}. tibb12Pls`);
 });
 client.on("disconnected", async () => {
-  client.say(CHANNEL_NAME, `Left channle ${CHANNEL_NAME}. tibb12Fall`)
+  client.say(CHANNEL_NAME, `.me Left channle ${CHANNEL_NAME}. tibb12Fall`)
 });
 
 client.on("raided", async (channel, username, viewers) => {
