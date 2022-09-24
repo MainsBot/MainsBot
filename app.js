@@ -3044,11 +3044,12 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
     }
     if (message.toLowerCase().includes("poof")) {
       if (!isMod) {
-        TWITCH_FUNCTIONS.timeoutUser(
-          twitchUsername,
-          "RNG Timeout 1 - 150",
-          Math.floor(Math.random() * 150)
-        );
+        // TWITCH_FUNCTIONS.timeoutUser(
+        //   twitchUsername,
+        //   "RNG Timeout 1 - 150",
+        //   Math.floor(Math.random() * 150)
+        // );
+        client.say(CHANNEL_NAME, `.timeout ${twitchUsername} ${Math.floor(Math.random() * 150)} RNG TIMEOUT 1 - 150`);
         client.say(CHANNEL_NAME, `ppPoof`);
       }
     }
@@ -3057,11 +3058,12 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
     }
     if (message.toLowerCase() == "!vanish") {
       if (!isMod) {
-        TWITCH_FUNCTIONS.timeoutUser(
-          twitchUsername,
-          `${twitchUsername}, you are now invisible.`,
-          15
-        );
+        // TWITCH_FUNCTIONS.timeoutUser(
+        //   twitchUsername,
+        //   `${twitchUsername}, you are now invisible.`,
+        //   15
+        // );
+        client.say(CHANNEL_NAME, `.timeout ${twitchUsername} 15s ${twitchDisplayName}, you are now invisible.`);
         client.say(
           CHANNEL_NAME,
            `/me ${twitchUsername}, you are now invisible. tibb12Point OMEGALUL`
