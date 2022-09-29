@@ -6,6 +6,7 @@
     "discord.js": "^14.3.0",
     "dotenv": "^16.0.1",
     "fs": "^0.0.1-security",
+    "mathjs": "^11.2.1",
     "node-fetch": "^3.2.10",
     "nodemon": "^2.0.19",
     "pm2": "^5.2.0",

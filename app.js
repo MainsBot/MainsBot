@@ -425,6 +425,34 @@ async function timerHandler(client, lowerMessage, twitchUsername, userstate) {
   }
 }
 
+async function accountHandler(client, lowerMessage, twitchUsername, userstate) {
+  if (lowerMessage == "!account.bot") {
+    if (SETTINGS.account == "bot") {
+      return mainClient.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is already on the bot account.`
+      );
+    } else if (SETTINGS.account == "main") {
+      SETTINGS.account = "bot";
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+      return mainClient.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, The bot is now on the bot account.`
+      );
+    }
+  } else if (lowerMessage == "!account.main") {
+    if (SETTINGS.account == "main") {
+      return client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is already on the main account.`
+      );
+    } else if (SETTINGS.account == "bot") {
+      SETTINGS.account = "main";
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+      return client.raw(
+        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, The bot is now on the main account.`
+      );
+    }
+  }
+}
+
 async function logHandler(
   message,
   twitchUsername,
@@ -744,16 +772,14 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
     }
 
 
-  if (messageArray[0] == "!add") {
+  if (messageArray[0] == "!radd") {
     if (messageArray[1] == null) {
       return client.raw(
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Please specify a user to add.`
       );
     }
 
-    const isValidUser = await ROBLOX_FUNCTIONS.isValidRobloxUser(
-      messageArray[1]
-    );
+
 
     if (!isValidUser.isValidUser)
       return client.raw(
@@ -1467,6 +1493,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     ksHandler(client, lowerMessage, twitchUsername, userstate);
     keywordHandler(client, lowerMessage, twitchUsername, userstate);
     timerHandler(client, lowerMessage, twitchUsername, userstate);
+    accountHandler(client, lowerMessage, twitchUsername, userstate);
     updateMode(client, message, twitchUsername, userstate);
     filterHandler(client, message, twitchUsername, userstate);
     customModeHandler(client, message, twitchUsername, userstate);
@@ -1657,8 +1684,16 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     }
 
     if (message.toLowerCase() == "!validmodes") {
-      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Valid Modes: !join.on, !link.on, !1v1.on, !ticket.on, !gamble.on, !epic.on`)
+      client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Valid Modes: !join.on, !link.on, !1v1.on, !ticket.on, !gamble.on, !epic.on`);
       return
+    }
+    if (message.toLowerCase() == "!account") {
+      if (SETTINGS.account == "bot") {
+        client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently on the bot account.`);
+      } 
+      if (SETTINGS.account == "main") {
+        mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently on the main account.`);
+      }
     }
   } else if (SETTINGS.ks == false) {
     newUserHandler(client, message, twitchUsername, isFirstMessage, userstate);
@@ -2574,7 +2609,7 @@ client.on("resub", (channel, username, viewers, methods, method, months) => {
 });
 
 client.on("connected", async () => {
-  client.say(CHANNEL_NAME, `.me Joined channel ${CHANNEL_NAME}. tibb12Pls`);
+  client.action(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
 });
 client.on("disconnected", async () => {
   client.say(CHANNEL_NAME, `.me Left channle ${CHANNEL_NAME}. tibb12Fall`)
@@ -2614,141 +2649,278 @@ client.on("cheer", async (channel, userstate, message) => {
     RandomMessages[Math.floor(Math.random() * RandomMessages.length)];
   var Bits = userstate.bits;
 
-  if (Bits > 99) {
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
+  if (SETTINGS.account == "bot") {
+    if (Bits > 99) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+    }
+    if (Bits > 499) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+    }
+    if (Bits > 999) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+  
+      SETTINGS["spamFilter"] = false;
+      SETTINGS["lengthFilter"] = false;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+      
+      await setTimeout(15 * 1000);
+      SETTINGS["spamFilter"] = true;
+      SETTINGS["lengthFilter"] = true;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+  
+    }
+    if (Bits > 4999) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+  
+      SETTINGS["spamFilter"] = false;
+      SETTINGS["lengthFilter"] = false;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+  
+      
+      await setTimeout(30 * 1000);
+      SETTINGS["spamFilter"] = true;
+      SETTINGS["lengthFilter"] = true;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+  
+    } 
+    if (Bits > 9999) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+  
+      SETTINGS["spamFilter"] = false;
+      SETTINGS["lengthFilter"] = false;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+  
+      
+      await setTimeout(60 * 1000);
+      SETTINGS["spamFilter"] = true;
+      SETTINGS["lengthFilter"] = true;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+    }
   }
-  if (Bits > 499) {
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
+  if (SETTINGS.account == "main") {
+    if (Bits > 99) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+    }
+    if (Bits > 499) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+    }
+    if (Bits > 999) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+  
+      SETTINGS["spamFilter"] = false;
+      SETTINGS["lengthFilter"] = false;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+      
+      await setTimeout(15 * 1000);
+      SETTINGS["spamFilter"] = true;
+      SETTINGS["lengthFilter"] = true;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+  
+    }
+    if (Bits > 4999) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+  
+      SETTINGS["spamFilter"] = false;
+      SETTINGS["lengthFilter"] = false;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+  
+      
+      await setTimeout(30 * 1000);
+      SETTINGS["spamFilter"] = true;
+      SETTINGS["lengthFilter"] = true;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+  
+    } 
+    if (Bits > 9999) {
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+      client.say(CHANNEL_NAME, `${random}`);
+  
+      SETTINGS["spamFilter"] = false;
+      SETTINGS["lengthFilter"] = false;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+  
+      
+      await setTimeout(60 * 1000);
+      SETTINGS["spamFilter"] = true;
+      SETTINGS["lengthFilter"] = true;
+      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+    }
   }
-  if (Bits > 999) {
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-
-    SETTINGS["spamFilter"] = false;
-    SETTINGS["lengthFilter"] = false;
-    fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-    
-    await setTimeout(15 * 1000);
-    SETTINGS["spamFilter"] = true;
-    SETTINGS["lengthFilter"] = true;
-    fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-
-  }
-  if (Bits > 4999) {
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-
-    SETTINGS["spamFilter"] = false;
-    SETTINGS["lengthFilter"] = false;
-    fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-
-    
-    await setTimeout(30 * 1000);
-    SETTINGS["spamFilter"] = true;
-    SETTINGS["lengthFilter"] = true;
-    fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-
-  } 
-  if (Bits > 9999) {
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-    client.say(CHANNEL_NAME, `${random}`);
-
-    SETTINGS["spamFilter"] = false;
-    SETTINGS["lengthFilter"] = false;
-    fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-
-    
-    await setTimeout(60 * 1000);
-    SETTINGS["spamFilter"] = true;
-    SETTINGS["lengthFilter"] = true;
-    fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  }
-
 }
 });
 // Game Command
@@ -2757,106 +2929,203 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 
+  const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
+  const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
+  const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
+
   if (SETTINGS.ks == false) {
-    if (
-      message.toLowerCase() == "!game" || 
-      message.toLowerCase() == "1game"
-      ) {
-        const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
-        const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
-        const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
-    
-        if (locationId == '4588604953') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Criminality.`)};
-        if (locationId == '8343259840') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Criminality.`)};
-        if (locationId == '292439477') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Phantom Forces.`)};
-        if (locationId == '2317712696') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing The Wild West.`)};
-        if (locationId == '286090429') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Arsenal.`)};
-        if (locationId == '8260276694') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Ability Wars.`)};
-        if (locationId == '606849621') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Jailbreak.`)};
-        if (locationId == '1962086868') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Tower of Hell.`)};
-        if (locationId == '6808416928') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Aimblox.`)};
-        if (locationId == '3527629287') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Big Paintball.`)};
-        if (locationId == '2414851778') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Dungeon Quest.`)};
-        if (locationId == '6403373529') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Slap Battles.`)};
-        if (locationId == '3260590327') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Tower Defense Simulator.`)};
-        if (locationId == '740581508') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Entry Point.`)};
-        if (locationId == '5993942214') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Rush Point.`)};
-        if (locationId == '4282985734') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Combat Warriors.`)};
-        if (locationId == '734159876') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing SharkBite.`)};
-        if (locationId == '863266079') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Apocalypse Rising 2.`)};
-        if (locationId == '8054462345') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Michael's Zombies.`)};
-        if (locationId == '738339342') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Flood Escape 2.`)};
-        if (locationId == '9049840490') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Sonic Speed Simulator.`)};
-        if (locationId == '6284583030') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Pet Simulator X.`)};
-        if (locationId == '142823291') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Murder Mystery 2.`)};
-        if (locationId == '4572253581') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Murder.`)};
-        if (locationId == '185655149') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Welcome to Bloxburg.`)};
-        if (locationId == '2534724415') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Emergency Response: Liberty County.`)};
-        if (locationId == '4468711919') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Super Golf.`)};
-        if (locationId == '998374377') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Super Nostalgia Zone.`)};
-        if (locationId == '4872321990') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Islands.`)};
-        if (locationId == '4913331862') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Recoil Zombies.`)};
-        if (locationId == '3233893879') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Bad Business.`)};
-        if (locationId == '1224212277') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Mad City.`)};
-        if (locationId == '6839171747') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Doors.`)};
-        if (locationId == '6516141723') {
-            return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Doors.`)};
-    
-    
-            if (SETTINGS.currentMode == "!gamble.on") {
-                return client.raw(
-                    `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing RblxWild.`
-                );
-            }
-            if (onlineStatus > 30) {
-                return client.raw(
-                    `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is not playing anything right now.`
-                );
-            }
-            if (location != 'Website') {
-                client.raw(
-                    `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing ${location}.`
-                    ); 
-                  return
-            }
-            return client.raw(
-                `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`
-            );
+    if (SETTINGS.account == "bot") {
+      if (
+        message.toLowerCase() == "!game" || 
+        message.toLowerCase() == "1game"
+        ) {  
+      if (locationId == '4588604953') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Criminality.`)};
+      if (locationId == '8343259840') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Criminality.`)};
+      if (locationId == '292439477') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Phantom Forces.`)};
+      if (locationId == '2317712696') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing The Wild West.`)};
+      if (locationId == '286090429') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Arsenal.`)};
+      if (locationId == '8260276694') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Ability Wars.`)};
+      if (locationId == '606849621') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Jailbreak.`)};
+      if (locationId == '1962086868') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Tower of Hell.`)};
+      if (locationId == '6808416928') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Aimblox.`)};
+      if (locationId == '3527629287') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Big Paintball.`)};
+      if (locationId == '2414851778') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Dungeon Quest.`)};
+      if (locationId == '6403373529') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Slap Battles.`)};
+      if (locationId == '3260590327') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Tower Defense Simulator.`)};
+      if (locationId == '740581508') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Entry Point.`)};
+      if (locationId == '5993942214') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Rush Point.`)};
+      if (locationId == '4282985734') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Combat Warriors.`)};
+      if (locationId == '734159876') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing SharkBite.`)};
+      if (locationId == '863266079') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Apocalypse Rising 2.`)};
+      if (locationId == '8054462345') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Michael's Zombies.`)};
+      if (locationId == '738339342') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Flood Escape 2.`)};
+      if (locationId == '9049840490') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Sonic Speed Simulator.`)};
+      if (locationId == '6284583030') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Pet Simulator X.`)};
+      if (locationId == '142823291') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Murder Mystery 2.`)};
+      if (locationId == '4572253581') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Murder.`)};
+      if (locationId == '185655149') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Welcome to Bloxburg.`)};
+      if (locationId == '2534724415') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Emergency Response: Liberty County.`)};
+      if (locationId == '4468711919') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Super Golf.`)};
+      if (locationId == '998374377') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Super Nostalgia Zone.`)};
+      if (locationId == '4872321990') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Islands.`)};
+      if (locationId == '4913331862') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Recoil Zombies.`)};
+      if (locationId == '3233893879') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Bad Business.`)};
+      if (locationId == '1224212277') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Mad City.`)};
+      if (locationId == '6839171747') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Doors.`)};
+      if (locationId == '6516141723') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Doors.`)};
+  
+  
+          if (SETTINGS.currentMode == "!gamble.on") {
+              return client.raw(
+                  `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing RblxWild.`
+              );
+          }
+          if (onlineStatus > 30) {
+              return client.raw(
+                  `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is not playing anything right now.`
+              );
+          }
+          if (location != 'Website') {
+              client.raw(
+                  `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing ${location}.`
+                  ); 
+                return
+          }
+          return client.raw(
+              `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`
+          );
+  }
+    } else if (SETTINGS.account == "main") {
+      if (
+        message.toLowerCase() == "!game" || 
+        message.toLowerCase() == "1game"
+        ) {      
+          if (locationId == '4588604953') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Criminality.`)};
+          if (locationId == '8343259840') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Criminality.`)};
+          if (locationId == '292439477') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Phantom Forces.`)};
+          if (locationId == '2317712696') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing The Wild West.`)};
+          if (locationId == '286090429') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Arsenal.`)};
+          if (locationId == '8260276694') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Ability Wars.`)};
+          if (locationId == '606849621') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Jailbreak.`)};
+          if (locationId == '1962086868') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Tower of Hell.`)};
+          if (locationId == '6808416928') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Aimblox.`)};
+          if (locationId == '3527629287') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Big Paintball.`)};
+          if (locationId == '2414851778') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Dungeon Quest.`)};
+          if (locationId == '6403373529') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Slap Battles.`)};
+          if (locationId == '3260590327') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Tower Defense Simulator.`)};
+          if (locationId == '740581508') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Entry Point.`)};
+          if (locationId == '5993942214') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Rush Point.`)};
+          if (locationId == '4282985734') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Combat Warriors.`)};
+          if (locationId == '734159876') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing SharkBite.`)};
+          if (locationId == '863266079') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Apocalypse Rising 2.`)};
+          if (locationId == '8054462345') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Michael's Zombies.`)};
+          if (locationId == '738339342') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Flood Escape 2.`)};
+          if (locationId == '9049840490') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Sonic Speed Simulator.`)};
+          if (locationId == '6284583030') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Pet Simulator X.`)};
+          if (locationId == '142823291') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Murder Mystery 2.`)};
+          if (locationId == '4572253581') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Murder.`)};
+          if (locationId == '185655149') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Welcome to Bloxburg.`)};
+          if (locationId == '2534724415') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Emergency Response: Liberty County.`)};
+          if (locationId == '4468711919') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Super Golf.`)};
+          if (locationId == '998374377') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Super Nostalgia Zone.`)};
+          if (locationId == '4872321990') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Islands.`)};
+          if (locationId == '4913331862') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Recoil Zombies.`)};
+          if (locationId == '3233893879') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Bad Business.`)};
+          if (locationId == '1224212277') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Mad City.`)};
+          if (locationId == '6839171747') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Doors.`)};
+          if (locationId == '6516141723') {
+              return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing Doors.`)};
+      
+      
+              if (SETTINGS.currentMode == "!gamble.on") {
+                  return mainClient.raw(
+                      `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing RblxWild.`
+                  );
+              }
+              if (onlineStatus > 30) {
+                  return mainClient.raw(
+                      `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is not playing anything right now.`
+                  );
+              }
+              if (location != 'Website') {
+                mainClient.raw(
+                      `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently playing ${location}.`
+                      ); 
+                    return
+              }
+              return mainClient.raw(
+                  `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`
+              );
+      }
     }
-  } 
+  }
 });
 
 // Playtime Command
@@ -2865,14 +3134,13 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
 
+  const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
+  const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
+  const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
+  const playtime = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.timeString})
+
   if (SETTINGS.ks == false) {
     if (message.toLowerCase() == "!playtime") {
-
-      const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation})
-      const locationId = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.placeId})
-      const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
-      const playtime = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.timeString})
-
       if (locationId == '4588604953') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Criminality for ${playtime}.`)};
       if (locationId == '8343259840') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Criminality for ${playtime}.`)};
       if (locationId == '292439477') { return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb has been playing Phantom Forces for ${playtime}.`)};
@@ -2936,35 +3204,69 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
 
   if (SETTINGS.ks == false) {
-    if (message.toLowerCase() == "!gamelink") {
-      if (locationId == '8343259840') {
-        return client.raw(
-          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/4588604953`)};
-      if (locationId == '6839171747') {
-        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/6516141723`)};
-
-      if (SETTINGS.currentMode == "!link.on") {
-        if (SETTINGS.currentLink != null) {
+    if (SETTINGS.account == "bot") {
+      if (message.toLowerCase() == "!gamelink") {
+        if (locationId == '8343259840') {
           return client.raw(
-            `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> ${currentLink}`
+            `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/4588604953`)};
+        if (locationId == '6839171747') {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/6516141723`)};
+  
+        if (SETTINGS.currentMode == "!link.on") {
+          if (SETTINGS.currentLink != null) {
+            return client.raw(
+              `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> ${currentLink}`
+            );
+          }
+        }
+        if (SETTINGS.currentMode == "!gamble.on") {
+          return client.raw(
+            `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> rblxwild.com`
           );
         }
+        if (onlineStatus > 30) {
+          return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currenly offline so there is no game link.`
+          );
+        }
+        if (location != 'Website') {
+          client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/${locationId}`
+          );
+          return
+        }
+        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`);
       }
-      if (SETTINGS.currentMode == "!gamble.on") {
-        return client.raw(
-          `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> rblxwild.com`
-        );
+    }
+    if (SETTINGS.account == "main") {
+      if (message.toLowerCase() == "!gamelink") {
+        if (locationId == '8343259840') {
+          return mainClient.raw(
+            `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/4588604953`)};
+        if (locationId == '6839171747') {
+          return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/6516141723`)};
+  
+        if (SETTINGS.currentMode == "!link.on") {
+          if (SETTINGS.currentLink != null) {
+            return mainClient.raw(
+              `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> ${currentLink}`
+            );
+          }
+        }
+        if (SETTINGS.currentMode == "!gamble.on") {
+          return mainClient.raw(
+            `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> rblxwild.com`
+          );
+        }
+        if (onlineStatus > 30) {
+          return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currenly offline so there is no game link.`
+          );
+        }
+        if (location != 'Website') {
+          mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/${locationId}`
+          );
+          return
+        }
+        return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`);
       }
-      if (onlineStatus > 30) {
-        return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currenly offline so there is no game link.`
-        );
-      }
-      if (location != 'Website') {
-        client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/${locationId}`
-        );
-        return
-      }
-      return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`);
     }
   }
 });
