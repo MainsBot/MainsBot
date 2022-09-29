@@ -1945,13 +1945,6 @@ var StartListener = function () {
             `An ad has been ran, subscribe with prime for free and enjoy watching with 0 ads all month for free, !prime for more info EZY PogU .`
           );
         }
-      } else if (pubTopic == `hype-train-events-v1.${CHANNEL_ID}`) {
-        if (SETTINGS.ks == false) {
-          client.say(
-            CHANNEL_NAME,
-            `.announce A HYPE TRAIN PagMan [test message]`
-          )
-        }
       } else if (pubTopic == `community-moments-channel-v1.${CHANNEL_ID}`) {
         if (SETTINGS.ks == false) {
           client.say(
@@ -2472,7 +2465,6 @@ var runAuth = function () {
       // `campaign-events.${CHANNEL_ID}`,
       // `user-campaign-events.${CHANNEL_ID}`,
       // `celebration-events-v1.${CHANNEL_ID}`,
-      `channel-bits-badge-unlocks.${CHANNEL_ID}`,
       // `channel-bits-events-v1.${CHANNEL_ID}`,
       // `channel-bit-events-public.${CHANNEL_ID}`,
       // `channel-event-updates.${CHANNEL_ID}`,
@@ -2501,7 +2493,7 @@ var runAuth = function () {
       // `extension-control.upload.${CHANNEL_ID}`,
       // `follows.${CHANNEL_ID}`,
       // `friendship.${CHANNEL_ID}`,
-      `hype-train-events-v1.${CHANNEL_ID}`,
+      // `hype-train-events-v1.${CHANNEL_ID}`,
       // `user-image-update.${CHANNEL_ID}`,
       // `low-trust-users.${CHANNEL_ID}`,
       // `midnight-squid-recipient-v1.${CHANNEL_ID}`,
