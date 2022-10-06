@@ -566,7 +566,7 @@ async function newLinkHandler(client, message, twitchUsername, userstate) {
 async function customModFunctions(client, message, twitchUsername, userstate) {
   var messageArray = ([] = message.toLowerCase().split(" "));
 
-  if (messageArray[0] == "!ping") {
+  if (messageArray[0] == "!gameping") {
     if (messageArray[1] == null) {
       return client.raw(
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Please specify a valid ping, Valid Pings: outlaster, arsenal, criminality, hoopz, sacrifice sanctuary, counter blox, phantom forces, expeditions, football, combat warriors, the trials, obby, horror games`
@@ -721,9 +721,9 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
           `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Please specify a amount of seconds.`
         );
       } else {
-        client.say(
+        client.slow(
           CHANNEL_NAME,
-          `/slow ${messageArray[1]}`
+          messageArray[1]
         );
         client.raw(
           `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Enabled ${messageArray[1]} second slowmode.`
@@ -734,9 +734,11 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
       message.toLowerCase() == "!slowoff" ||
       message.toLowerCase() == "!slowmodeoff"
     ) {
-      client.say(CHANNEL_NAME, `/slowoff`);
-      client.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Disabled slowmode.`
+      client.slowoff(CHANNEL_NAME);
+      client.reply(
+        CHANNEL_NAME,
+        `Disabled slowmode.`,
+        twitchUsername
       );
     }
 
@@ -2588,10 +2590,11 @@ client.on("subgift", (channel, username, viewers, method) => {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`)
   }
 });
-client.on("resub", (channel, username, viewers, methods, method, months) => {
+client.on("resub", async (channel, username, viewers, methods, method, months) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 
   if (SETTINGS.ks == false) {
+    await setTimeout(1500)
     client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
     client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
     client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
@@ -2611,6 +2614,7 @@ client.on("raided", async (channel, username, viewers) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
     if (viewers >= 10) {
+      await setTimeout(1500)
       client.say(
         `${CHANNEL_NAME}`,
         `/announce ${username}, just raided with ${viewers}, thank you so much. tibb12Love`
@@ -2636,284 +2640,147 @@ client.on("clearchat", () => {})
 client.on("cheer", async (channel, userstate, message) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
-  var RandomMessages = ["tibb12Bits tibb12Bits tibb12Bits"];
-  var random =
+    var RandomMessages = ["tibb12Bits tibb12Bits tibb12Bits"];
+    var random =
     RandomMessages[Math.floor(Math.random() * RandomMessages.length)];
-  var Bits = userstate.bits;
-
-  if (SETTINGS.account == "bot") {
-    if (Bits > 99) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-    }
-    if (Bits > 499) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-    }
-    if (Bits > 999) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-  
-      SETTINGS["spamFilter"] = false;
-      SETTINGS["lengthFilter"] = false;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-      
-      await setTimeout(15 * 1000);
-      SETTINGS["spamFilter"] = true;
-      SETTINGS["lengthFilter"] = true;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  
-    }
-    if (Bits > 4999) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-  
-      SETTINGS["spamFilter"] = false;
-      SETTINGS["lengthFilter"] = false;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  
-      
-      await setTimeout(30 * 1000);
-      SETTINGS["spamFilter"] = true;
-      SETTINGS["lengthFilter"] = true;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  
-    } 
-    if (Bits > 9999) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-  
-      SETTINGS["spamFilter"] = false;
-      SETTINGS["lengthFilter"] = false;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  
-      
-      await setTimeout(60 * 1000);
-      SETTINGS["spamFilter"] = true;
-      SETTINGS["lengthFilter"] = true;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-    }
-  }
-  if (SETTINGS.account == "main") {
-    if (Bits > 99) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-    }
-    if (Bits > 499) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-    }
-    if (Bits > 999) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-  
-      SETTINGS["spamFilter"] = false;
-      SETTINGS["lengthFilter"] = false;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-      
-      await setTimeout(15 * 1000);
-      SETTINGS["spamFilter"] = true;
-      SETTINGS["lengthFilter"] = true;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  
-    }
-    if (Bits > 4999) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-  
-      SETTINGS["spamFilter"] = false;
-      SETTINGS["lengthFilter"] = false;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  
-      
-      await setTimeout(30 * 1000);
-      SETTINGS["spamFilter"] = true;
-      SETTINGS["lengthFilter"] = true;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  
-    } 
-    if (Bits > 9999) {
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-      client.say(CHANNEL_NAME, `${random}`);
-  
-      SETTINGS["spamFilter"] = false;
-      SETTINGS["lengthFilter"] = false;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-  
-      
-      await setTimeout(60 * 1000);
-      SETTINGS["spamFilter"] = true;
-      SETTINGS["lengthFilter"] = true;
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+    await setTimeout(1500)
+    if (SETTINGS.account == "bot") {
+      if (Bits > 99) {
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+      }
+      if (Bits > 499) {
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+      }
+      if (Bits > 999) {
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+    
+        SETTINGS["spamFilter"] = false;
+        SETTINGS["lengthFilter"] = false;
+        fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+        
+        await setTimeout(15 * 1000);
+        SETTINGS["spamFilter"] = true;
+        SETTINGS["lengthFilter"] = true;
+        fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+    
+      }
+      if (Bits > 4999) {
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+    
+        SETTINGS["spamFilter"] = false;
+        SETTINGS["lengthFilter"] = false;
+        fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+    
+        
+        await setTimeout(30 * 1000);
+        SETTINGS["spamFilter"] = true;
+        SETTINGS["lengthFilter"] = true;
+        fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+    
+      } 
+      if (Bits > 9999) {
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+        client.say(CHANNEL_NAME, `${random}`);
+    
+        SETTINGS["spamFilter"] = false;
+        SETTINGS["lengthFilter"] = false;
+        fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+    
+        
+        await setTimeout(60 * 1000);
+        SETTINGS["spamFilter"] = true;
+        SETTINGS["lengthFilter"] = true;
+        fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
+      }
     }
   }
-}
 });
 // Game Command
 client.on("message", async (channel, userstate, message, self, viewers) => {
@@ -3471,3 +3338,10 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 //       }
 //     }
 // });
+
+client.on('message', (channel, userstate, message, self, viewers) => {
+  const twitchUsername = userstate["username"];
+  if (message.toLowerCase() == "!test") {
+    client.reply(CHANNEL_NAME, `test`, twitchUsername)
+  }
+});

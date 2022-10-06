@@ -11,11 +11,13 @@
     "nodemon": "^2.0.19",
     "pm2": "^5.2.0",
     "regex": "^0.1.1",
-    "spotify-buddylist": "^1.0.0",
     "string-similarity": "^4.0.4",
     "tmi.js": "github:tmijs/tmi.js#feature-send-tags",
     "tmi.js-reply-fork": "^1.8.5",
     "ws": "^8.8.1"
+  },
+  "devDependencies": {
+    "spotify-buddylist": "^1.0.0"
   },
   "type": "module",
   "scripts": {

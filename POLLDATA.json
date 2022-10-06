@@ -102785,5 +102785,179 @@
     "__typename": "PollVoter"
    }
   ]
+ },
+ "5dad1c2d-30b3-48ea-ad64-cdb0a9c79ad7": {
+  "id": "5dad1c2d-30b3-48ea-ad64-cdb0a9c79ad7",
+  "status": "TERMINATED",
+  "totalCp": 1188,
+  "duration": 180,
+  "startedAt": "2022-10-06T02:09:52.290462272Z",
+  "endedAt": "2022-10-06T02:10:16.626191916Z",
+  "title": "TEST",
+  "totalBits": 0,
+  "totalVoters": 1,
+  "totalVotes": 13,
+  "boughtVotes": 12,
+  "cpVote": 99,
+  "bitVote": 0,
+  "cpVoteEnabled": true,
+  "bitVoteEnabled": false,
+  "choices": [
+   {
+    "id": "0e28bbfe-f7ee-48e9-97b0-8be5ec77c735",
+    "title": "SDSDFSDFSDF",
+    "tokens": {
+     "bits": 0,
+     "communityPoints": 1188,
+     "id": "0e28bbfe-f7ee-48e9-97b0-8be5ec77c735",
+     "__typename": "PollTokenBreakdown"
+    },
+    "totalVoters": 1,
+    "votes": {
+     "total": 13,
+     "bits": 0,
+     "communityPoints": 12,
+     "base": 1,
+     "id": "0e28bbfe-f7ee-48e9-97b0-8be5ec77c735",
+     "__typename": "PollVoteBreakdown"
+    },
+    "__typename": "PollChoice"
+   },
+   {
+    "id": "b9d90fff-ff37-4e1d-b73d-8d8bba989262",
+    "title": "VTRDG RGRHRHRDG",
+    "tokens": {
+     "bits": 0,
+     "communityPoints": 0,
+     "id": "b9d90fff-ff37-4e1d-b73d-8d8bba989262",
+     "__typename": "PollTokenBreakdown"
+    },
+    "totalVoters": 0,
+    "votes": {
+     "total": 0,
+     "bits": 0,
+     "communityPoints": 0,
+     "base": 0,
+     "id": "b9d90fff-ff37-4e1d-b73d-8d8bba989262",
+     "__typename": "PollVoteBreakdown"
+    },
+    "__typename": "PollChoice"
+   },
+   {
+    "id": "827bd1e1-6fca-476a-ae1a-dd061a50107f",
+    "title": "GYHT YH TRDFGH GRTDF",
+    "tokens": {
+     "bits": 0,
+     "communityPoints": 0,
+     "id": "827bd1e1-6fca-476a-ae1a-dd061a50107f",
+     "__typename": "PollTokenBreakdown"
+    },
+    "totalVoters": 0,
+    "votes": {
+     "total": 0,
+     "bits": 0,
+     "communityPoints": 0,
+     "base": 0,
+     "id": "827bd1e1-6fca-476a-ae1a-dd061a50107f",
+     "__typename": "PollVoteBreakdown"
+    },
+    "__typename": "PollChoice"
+   },
+   {
+    "id": "86670fc9-ae08-4a1e-b471-04650cddb996",
+    "title": "DFGHDFGHRTYDF G",
+    "tokens": {
+     "bits": 0,
+     "communityPoints": 0,
+     "id": "86670fc9-ae08-4a1e-b471-04650cddb996",
+     "__typename": "PollTokenBreakdown"
+    },
+    "totalVoters": 0,
+    "votes": {
+     "total": 0,
+     "bits": 0,
+     "communityPoints": 0,
+     "base": 0,
+     "id": "86670fc9-ae08-4a1e-b471-04650cddb996",
+     "__typename": "PollVoteBreakdown"
+    },
+    "__typename": "PollChoice"
+   },
+   {
+    "id": "e79ae8f1-94c9-452e-b2b0-ebf806d72547",
+    "title": "FDFGH GDFH",
+    "tokens": {
+     "bits": 0,
+     "communityPoints": 0,
+     "id": "e79ae8f1-94c9-452e-b2b0-ebf806d72547",
+     "__typename": "PollTokenBreakdown"
+    },
+    "totalVoters": 0,
+    "votes": {
+     "total": 0,
+     "bits": 0,
+     "communityPoints": 0,
+     "base": 0,
+     "id": "e79ae8f1-94c9-452e-b2b0-ebf806d72547",
+     "__typename": "PollVoteBreakdown"
+    },
+    "__typename": "PollChoice"
+   }
+  ],
+  "multichoice": true,
+  "userNodes": [
+   {
+    "id": "5dad1c2d-30b3-48ea-ad64-cdb0a9c79ad7:505216805",
+    "choices": [
+     {
+      "id": "0e28bbfe-f7ee-48e9-97b0-8be5ec77c735:505216805",
+      "pollChoice": {
+       "id": "0e28bbfe-f7ee-48e9-97b0-8be5ec77c735",
+       "__typename": "PollChoice"
+      },
+      "tokens": {
+       "bits": 0,
+       "communityPoints": 1188,
+       "id": "0e28bbfe-f7ee-48e9-97b0-8be5ec77c735:505216805",
+       "__typename": "PollTokenBreakdown"
+      },
+      "votes": {
+       "total": 13,
+       "bits": 0,
+       "communityPoints": 12,
+       "base": 1,
+       "id": "0e28bbfe-f7ee-48e9-97b0-8be5ec77c735:505216805",
+       "__typename": "PollVoteBreakdown"
+      },
+      "__typename": "PollVoterChoice"
+     }
+    ],
+    "poll": {
+     "id": "5dad1c2d-30b3-48ea-ad64-cdb0a9c79ad7",
+     "__typename": "Poll"
+    },
+    "tokens": {
+     "bits": 0,
+     "communityPoints": 1188,
+     "id": "5dad1c2d-30b3-48ea-ad64-cdb0a9c79ad7:505216805",
+     "__typename": "PollTokenBreakdown"
+    },
+    "user": {
+     "id": "505216805",
+     "login": "mr_cheeezz",
+     "displayName": "Mr_Cheeezz",
+     "__typename": "User"
+    },
+    "votes": {
+     "total": 13,
+     "bits": 0,
+     "communityPoints": 12,
+     "base": 1,
+     "id": "5dad1c2d-30b3-48ea-ad64-cdb0a9c79ad7:505216805",
+     "__typename": "PollVoteBreakdown"
+    },
+    "__typename": "PollVoter"
+   }
+  ]
  }
 }

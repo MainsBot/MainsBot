@@ -51,7 +51,7 @@ export const responses = {
     if (currentMode == "!link.on") {
       client.say(CHANNEL_NAME, `!link @${target}, it would help if you put your roblox username in the chat before joining.`);
     } else if (currentMode == "!1v1.on") {
-      client.say(CHANNEL_NAME, `@${target}, tibb12 is randomly picking viewers to 1v1, type 1v1 in the chat once to have a chance of being picked.`);
+      client.say(CHANNEL_NAME, `@${target}, tibb is randomly picking viewers to 1v1, type 1v1 in the chat once to have a chance of being picked.`);
     } else if (currentMode == "!ticket.on") {
       client.say(CHANNEL_NAME, `!ticket @${target}`);
     } else if (currentMode == "!join.on") {
@@ -198,28 +198,22 @@ export const responses = {
 
 
     if (onlineStatus > 30){
-      return client.say(CHANNEL_NAME,`@${target}, Tibb is not playing anything right now.`)
+      return client.say(CHANNEL_NAME,` @${target}, Tibb is not playing anything right now.`)
     }
     console.log(location)
     if(location != 'Website'){
-      return client.say(CHANNEL_NAME,`@${target}, Tibb is currently playing ${location}.`)
+      return client.say(CHANNEL_NAME, `@${target}, Tibb is currently playing ${location}.`)
     }
     if (SETTINGS.currentMode == "!gamble.on") {
-      return client.say(
-        CHANNEL_NAME,
-        `@${target}, Tibb is currently playing Rblx Wild. Type !wild to join.`
-      )
+      return client.say(CHANNEL_NAME, `@${target}, Tibb is currently playing Rblx Wild. Type !wild to join.`)
     }
-
-      return client.say(CHANNEL_NAME,`@${target}, Tibb is currently switching games.`)
-
-    
+      return client.say(CHANNEL_NAME, `@${target}, Tibb is currently switching games.`)
   }
   ,
-  // selfpromotion(client, target, message = null) {
-    // client.say(CHANNEL_NAME, `.timeout ${target} 3s Self Promotion`)
-    // client.say(CHANNEL_NAME, `@${target}, do not self-promote.`)
-  // },
+  selfpromotion(client, target, message = null) {
+    client.say(CHANNEL_NAME, `.timeout ${target} 3s Self Promotion`)
+    client.say(CHANNEL_NAME, `@${target}, do not self-promote.`)
+  },
   camera(client, target, message = null) {
     client.say(CHANNEL_NAME, `!camera @${target}`);
   },
@@ -238,9 +232,9 @@ export const responses = {
       console.log(currentMode)
       if (key == currentMode) {
         if (locationId == '8343259840') {
-          client.say(CHANNEL_NAME, `@${target}, you can't join tibb because you dont have prime or your on mobile.`);
+          return client.say(CHANNEL_NAME, `@${target}, you can't join tibb because you dont have prime or your on mobile.`);
         } else {
-          client.say(CHANNEL_NAME, `${responsesd[key]} @${target}`);
+          return client.say(CHANNEL_NAME, `${responsesd[key]} @${target}`);
         }
       }
     }
