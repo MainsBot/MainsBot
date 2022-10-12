@@ -2408,7 +2408,7 @@ var StartListener = function () {
               CHANNEL_NAME,
               `/subscribersoff`
             );
-            client.say(CHANNEL_NAME, `The chat is no logner in sub only. THE NON SUBS ARE FREE PagMan`);
+            client.say(CHANNEL_NAME, `The chat is no longer in sub only. THE NON SUBS ARE FREE PagMan`);
           }
           if (redemptionId == emoteonly) {
             client.say(
