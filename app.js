@@ -2415,6 +2415,7 @@ var StartListener = function () {
               CHANNEL_NAME,
               `/emoteonly`
             );
+            client.say(CHANNEL_NAME, `The chat is now in emote only for 5 minutes.`)
             await setTimeout(5 * 60 * 1000)
             client.say(
               CHANNEL_NAME,
