@@ -28,5 +28,5 @@ git clone https://github.com/Mr-Cheeezz/MainsBot.git
 
 RUn:
 ```bash
-cd Mainsbot && pm2 start app.js && cd ..
+cd MainsBot && pm2 start app.js && cd ..
 ```
