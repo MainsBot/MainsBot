@@ -18,7 +18,15 @@ npm i pm2 tmi.js-reply-fork tmijs/tmi.js#feature-send-tags ws fs spotify-buddyli
 ```
 
 ## GIT 
+
 Run: 
 ```bash
 git clone https://github.com/Mr-Cheeezz/MainsBot.git
+```
+
+## START
+
+RUn:
+```bash
+cd Mainsbot && pm2 start app.js && cd ..
 ```
