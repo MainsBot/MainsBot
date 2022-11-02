@@ -26,7 +26,7 @@ git clone https://github.com/Mr-Cheeezz/MainsBot.git
 
 ## START
 
-RUn:
+Run:
 ```bash
 cd MainsBot && pm2 start app.js && cd ..
 ```
