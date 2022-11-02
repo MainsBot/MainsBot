@@ -14,7 +14,7 @@
 
 Run: 
 ```bash
-npm i pm2 tmi.js-reply-fork tmijs/tmi.js#feature-send-tags ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js
+npm i pm2 tmijs ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js
 ```
 
 ## GIT 
@@ -33,7 +33,7 @@ cd MainsBot && pm2 start app.js && cd ..
 
 ## ENV
 
-Run:
+Paste:
 ```javascript
 TOTO
 ```
