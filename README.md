@@ -30,3 +30,10 @@ Run:
 ```bash
 cd MainsBot && pm2 start app.js && cd ..
 ```
+
+## ENV
+
+Run:
+```javascript
+TOTO
+```
