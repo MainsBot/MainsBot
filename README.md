@@ -13,7 +13,7 @@
 ## NPM
 
 Run: 
-```bash
+```py
 sudo npm install pm2 -g
 npm i pm2 tmijs ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js
 ```
