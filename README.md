@@ -14,11 +14,64 @@
 
 Run: 
 ```bash
+<<<<<<< HEAD
 npm i pm2 tmi.js ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js
+=======
+sudo npm install pm2 -g
+cd MainsBot && npm i pm2 tmi.js ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js && cd..
+>>>>>>> eab5d31ea317e3b9bb81b64d61f89e469de3fe2b
 ```
 
 ## GIT 
+
 Run: 
 ```bash
 git clone https://github.com/Mr-Cheeezz/MainsBot.git
+```
+
+## START
+
+Run:
+```bash
+cd MainsBot && pm2 start app.js && cd ..
+```
+
+## ENV
+
+Paste:
+```javascript
+COOKIE = 
+
+BOT_OAUTH = 
+BOT_NAME = 
+CHANNEL_NAME = 
+CHANNEL_ID = 
+BOT_ID = 
+WEB_ACCESS_TOKEN = 
+
+MAINSMONITOR_COOKIE = ''
+
+ADMIN_ID = '505216805'
+
+WAIT_REGISTER = 300000
+
+COOLDOWN = 90000
+MESSAGE_MEMORY = 5000
+
+MAX_MESSAGE_LENGTH = 495
+BASE_LENGTH_TIMEOUT = 15 
+MAX_LENGTH_TIMEOUT = 300
+
+BASE_SPAM_TIMEOUT = 30 
+MAX_SPAM_TIMEOUT = 300 
+
+MINIMUM_CHARACTERS = 0
+MAXIMUM_SIMILARITY = 0
+MINIMUM_MESSAGE_COUNT = 4
+
+WAIT_UNTIL_FOC_OFF = 60000
+WAIT_UNTIL_FOC_OFF_RAID = 300000
+SPAM_LINK = 300000
+JOIN_TIMER = 150000
+SONG_TIMER = 4000
 ```
