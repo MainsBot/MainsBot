@@ -81,11 +81,15 @@ export async function lengthFilter(client,message, twitchUsername) {
           twitchUsername.toLowerCase()
         ] = 1;
       }
-      client.say(CHANNEL_NAME,`@${twitchUsername} Message is too long, exceeds max character limit. tibb12Cringe tibb12Pepeg tibb12Fall`)
+      // client.say(CHANNEL_NAME,`@${twitchUsername} Message is too long, exceeds max character limit. tibb12Cringe tibb12Pepeg tibb12Fall`)
       TWITCH_FUNCTIONS.timeoutUser(
         twitchUsername,
         "[AUTOMATIC] Message exceeds max character limit. -MainsBot",
         timeout_length
+      );
+      client.say(
+        CHANNEL_NAME,
+        `.timeout ${twitchUsername} ${timeout_length} [AUTOMATIC] Message exceeds max character limit. -MainsBot` 
       );
       fs.writeFileSync("./STREAMS.json", JSON.stringify(STREAMS));
     }
