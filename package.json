@@ -6,18 +6,10 @@
     "discord.js": "^14.6.0",
     "dotenv": "^16.0.3",
     "fs": "^0.0.1-security",
-    "mathjs": "^11.2.1",
     "node-fetch": "^3.2.10",
-    "nodemon": "^2.0.20",
-    "pm2": "^5.2.2",
-    "regex": "^0.1.1",
     "string-similarity": "^4.0.4",
-    "tmi.js": "github:tmijs/tmi.js#feature-send-tags",
-    "tmi.js-reply-fork": "^1.8.5",
-    "ws": "^8.10.0"
-  },
-  "devDependencies": {
-    "spotify-buddylist": "^1.0.0"
+    "tmi.js": "^1.8.5",
+    "ws": "^8.11.0"
   },
   "type": "module",
   "scripts": {
