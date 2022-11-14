@@ -3179,3 +3179,25 @@ client.on('message', (channel, userstate, message, self, viewers) => {
     client.reply(CHANNEL_NAME, `test`, twitchUsername)
   }
 });
+
+client.on("message", (channel, userstate, message, self) => {
+  const twitchUserId = userstate["user-id"];
+  if (twitchUserId == ADMIN_ID) {
+    if (message.toLowerCase() == "!pb1restart") {
+      // restart
+      mainClient.say('tibb12', `!quit`);
+      mainClient.say('sin_exalted', `!quit`);
+      mainClient.say('cardboard_kitten', `!quit`);
+      mainClient.say('junglaxr', `!quit`);
+      mainClient.say('mattxdude', `!quit`);
+      mainClient.say('mr_cheeezz', `!quit`);     
+      // restart msg
+      mainClient.say('tibb12', `[🤖]: All pajbots restarted.`);
+      mainClient.say('sin_exalted', `[🤖]: All pajbots restarted.`);
+      mainClient.say('cardboard_kitten', `[🤖]: All pajbots restarted.`);
+      mainClient.say('junglaxr', `[🤖]: All pajbots restarted.`);
+      mainClient.say('mattxdude', `[🤖]: All pajbots restarted.`);
+      mainClient.say('mr_cheeezz', `[🤖]: All pajbots restarted.`);      
+    }
+  }
+});
