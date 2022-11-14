@@ -14,12 +14,10 @@
 
 Run: 
 ```bash
-<<<<<<< HEAD
 npm i pm2 tmi.js ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js
-=======
+
 sudo npm install pm2 -g
 cd MainsBot && npm i pm2 tmi.js ws fs spotify-buddylist string-similarity nodemon dotenv node-fetch discord.js && cd..
->>>>>>> eab5d31ea317e3b9bb81b64d61f89e469de3fe2b
 ```
 
 ## GIT 
