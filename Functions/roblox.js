@@ -742,7 +742,7 @@ export function getPresenceSync (userId,cb) {
   
   export function monitorGetPresenceSync (userId,cb) {
   
-      fetch(`https://presence.roblox.com/v1/presence/users`,{method:'POST',headers:{"Content-Type": "application/json", cookie: `.ROBLOSECURITY=${MAINSMONITOR_COOKIE}`, "X-CSRF-TOKEN": monitorGetXcsrfCB(function(result){return result})},body:`{"userIds": [${userId}]}`})
+      fetch(`https://presence.roblox.com/v1/presence/users`,{method:'POST',headers:{"Content-Type": "application/json", cookie: `.ROBLOSECURITY=${COOKIE}`, "X-CSRF-TOKEN": monitorGetXcsrfCB(function(result){return result})},body:`{"userIds": [${userId}]}`})
       .then((r)=>{
           return r.json()
       })
@@ -1113,27 +1113,6 @@ export const isValidRobloxUser = async (username)=>{
         isValidUser: true,
         userId: d.data[0].id
     }
-}
-export function unfriendPlayer(userId, cb) {
-    monitorGetXcsrfCB(function (result) {
-        fetch(`https://friends.roblox.com/v1/users/${userId}/unfriend`, {
-            "headers": {
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "en-GB,en;q=0.5",
-                cookie: `.ROBLOSECURITY=${COOKIE}`,
-                "X-CSRF-TOKEN": result
-            },
-            "method": "POST"
-        }).then((r) => {
-            return r.json()
-        }).then((d) => {
-            console.log(d)
-
-            cb(d)
-        })
-
-    })
-
 }
 // module.exports(
 //   {

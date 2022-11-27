@@ -25,7 +25,9 @@ import * as FILTERS from "./FILTERS.js";
 import * as RESPONSES from "./Functions/responses.js";
 import * as FILTER_FUNCTIONS from "./FILTERS.js";
 
-const tibb12Id = 1576231486; // roblox id for getting game and playtime
+const tibb12Id = 1576231486; // roblox id for getting game and playtime 
+
+let targetId = process.env.TARGET_ID // id for tracking join and leave 
 
 import buddyList, { wrapWebApi } from "spotify-buddylist";
 import { join } from "path";
@@ -40,25 +42,32 @@ import { resourceLimits } from "worker_threads";
 import { clearScreenDown } from "readline";
 
 const BOT_OAUTH = process.env.BOT_OAUTH; // bot oauth token for performing actions
+const BOT_NAME = process.env.BOT_NAME; // bot username
+const BOT_ID = process.env.BOT_ID; // bot user-id
+
 const COOKIE = process.env.COOKIE; // <--- change this to your cookie
 
-const BOT_NAME = process.env.BOT_NAME; // bot username
 const CHANNEL_NAME = process.env.CHANNEL_NAME; // name of the channel for the bot to be in
+const CHANNEL_NAME_DISPLAY = process.env.CHANNEL_NAME_DISPLAY;
 const CHANNEL_ID = process.env.CHANNEL_ID; // id of channel for the bot to be in
-const BOT_ID = process.env.BOT_ID;
+
 const SPOTIFY_BOT_OAUTH = process.env.SPOTIFY_BOT_OAUTH;
 const SPOTIFY_BOT_NAME = process.env.SPOTIFY_BOT_NAME;
+
 const TIBB_TOKEN = process.env.TIBB_TOKEN;
 
 // const MAINSMONITOR_COOKIE = process.env.MAINSMONITOR_COOKIE
+
 const WAIT_REGISTER = 5 * 60 * 1000; // number of milliseconds, to wait before starting to get stream information
 
 const COOLDOWN = process.env.COOLDOWN; // number of milliseconds, cool down for replying to people
 
-// timers
+
 const WAIT_UNTIL_FOC_OFF = process.env.WAIT_UNTIL_FOC_OFF; // 2 minutes
 const WAIT_UNTIL_FOC_OFF_RAID = process.env.WAIT_UNTIL_FOC_OFF_RAID; // every 5 minutes
+
 const CHEEEZZ_BOT_CLIENT_ID = process.env.CHEEEZZ_BOT_CLIENT_ID;
+
 const SPAM_LINK = process.env.SPAM_LINK; // every 5 minutes
 const JOIN_TIMER = process.env.JOIN_TIMER; // every 2 minutes
 let MUTATED_JOIN_TIMER = 240000; // timer that uses the JOIN_TIMER to change the interval based on viewer count
@@ -76,6 +85,13 @@ const MAIN_BOT_OAUTH = process.env.MAIN_BOT_OAUTH;
 const SISTER_BOT_NAME = process.env.SISTER_BOT_NAME;
 const SISTER_BOT_OAUTH = process.env.SISTER_BOT_OAUTH;
 
+const PAJBOT_NAME = process.env.PAJBOT_NAME;
+const PAJBOT_OAUTH = process.env.PAJBOT_OAUTH;
+const PAJBOT_CLIENT_ID = process.env.PAJBOT_CLIENT_ID;
+
+const LUIGI_NAME = process.env.LUIGI_NAME;
+const LUIGI_OAUTH = process.env.LUIGI_OAUTH;
+
 const ADMIN_ID = process.env.ADMIN_ID;
 
 let SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
@@ -84,6 +100,15 @@ let WORDS = JSON.parse(fs.readFileSync("./WORDS.json"));
 let TOUNFRIEND = JSON.parse(fs.readFileSync("./TOUNFRIEND.json"));
 
 var commandsList = ["!join", "!link", "!ticket", "!1v1", "!wild"];
+
+const current = await ROBLOX_FUNCTIONS.monitorGetPresence(targetId).then((r) => { return r })
+
+let gameArray = {
+  oldGame: current.placeId,
+  newGame: current.placeId,
+  oldGameName: current.lastLocation,
+  newGameName: current.lastLocation
+}
 
 var streamNumber = Object.keys(STREAMS).length;
 const client = new tmi.Client({
@@ -95,7 +120,30 @@ const client = new tmi.Client({
   channels: [CHANNEL_NAME]
 });
 
-client.connect();
+const pajbot = new tmi.Client({
+  options: {
+    debug: true,
+    clientId: PAJBOT_CLIENT_ID
+  },
+
+  identity: {
+    username: PAJBOT_NAME,
+    password: `OAuth:${PAJBOT_OAUTH}`
+  },
+
+  channels: [
+    CHANNEL_NAME,
+    BOT_NAME
+  ]
+});
+
+const luigi = new tmi.Client({
+  options: { debug: true},
+  identity: {
+    username: LUIGI_NAME,
+    password: `OAuth:${LUIGI_OAUTH}`
+  }
+});
 
 const songClient = new tmi.Client({
   options: { debug: true },
@@ -106,8 +154,6 @@ const songClient = new tmi.Client({
   channels: [CHANNEL_NAME]
 });
 
-songClient.connect();
-
 const blakeClient = new tmi.Client({
   options: { debug: true },
   identity: {
@@ -116,17 +162,6 @@ const blakeClient = new tmi.Client({
   },
   channels: [CHANNEL_NAME]
 });
-
-const mainClient = new tmi.Client({
-  options: { debug: true },
-  identity: {
-    username: MAIN_BOT_NAME,
-    password: `OAuth:${MAIN_BOT_OAUTH}`,
-  },
-  channels: [CHANNEL_NAME]
-});
-
-mainClient.connect();
 
 const sisterClient = new tmi.Client({
   options: { debug: true },
@@ -137,14 +172,31 @@ const sisterClient = new tmi.Client({
   channels: [CHANNEL_NAME]
 });
 
+client.connect();
+pajbot.connect();
+luigi.connect();
+songClient.connect();
 blakeClient.connect();
 sisterClient.connect();
 
+
+client.on("connected", async () => {
+  client.action(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
+  client.action(BOT_NAME, `Bot is online in ${CHANNEL_NAME}'s chat. FeelsGoodMan`);
+});
+
+client.on("disconnected", async () => {
+  client.action(CHANNEL_NAME, `Left channle ${CHANNEL_NAME}. tibb12Fall`)
+});
+
+// --------------------------------------------------------------------------------------------------
 
 // interval timer for !join/!link/!1v1/!ticket
 setInterval(async () => {
   STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
+
+  const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation});   
 
   if (SETTINGS.timers == true && SETTINGS.ks == false && (await TWITCH_FUNCTIONS.isLive()) == true) {
     var averageViewers = STREAMS.averageviewers;
@@ -163,7 +215,9 @@ setInterval(async () => {
 
     for (const key in timerCommands) {
       if (key == currentMode) {
-        client.say(CHANNEL_NAME, `${timerCommands[key]}`);
+        if (location != 'Website') {
+          client.action(CHANNEL_NAME, `${timerCommands[key]}`);
+        }
       }
     }
   }
@@ -182,17 +236,17 @@ setInterval(async () => {
 
     var promoTimer =
       promo[Math.floor(Math.random() * promo.length)];
-    client.say(CHANNEL_NAME, `/me ${promoTimer}`);
+    client.action(CHANNEL_NAME, `${promoTimer}`);
   }
 }, 60 * 7.4 * 1000);
 
-setInterval(async () => {
-
-  if ((await TWITCH_FUNCTIONS.isLive() == false)) {
-    mainClient.say(CHANNEL_NAME, `!cookie`);
-    mainClient.say(CHANNEL_NAME, `|poro`);
-  }
-}, 2 * 60 * 60 * 1000);
+// setInterval(async () => {
+//   if ((await TWITCH_FUNCTIONS.isLive() == false)) {
+//     cheeezz.say(CHANNEL_NAME, `!cookie`);
+//     cheeezz.say(CHANNEL_NAME, `|poro`);
+//     // console.log('poro and cookies gotten');
+//   }
+// }, 2 * 60 * 60 * 1000);
 
 
 //interval timer for spamming link
@@ -425,34 +479,6 @@ async function timerHandler(client, lowerMessage, twitchUsername, userstate) {
   }
 }
 
-async function accountHandler(client, lowerMessage, twitchUsername, userstate) {
-  if (lowerMessage == "!account.bot") {
-    if (SETTINGS.account == "bot") {
-      return mainClient.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is already on the bot account.`
-      );
-    } else if (SETTINGS.account == "main") {
-      SETTINGS.account = "bot";
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-      return mainClient.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, The bot is now on the bot account.`
-      );
-    }
-  } else if (lowerMessage == "!account.main") {
-    if (SETTINGS.account == "main") {
-      return client.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is already on the main account.`
-      );
-    } else if (SETTINGS.account == "bot") {
-      SETTINGS.account = "main";
-      fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
-      return client.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, The bot is now on the main account.`
-      );
-    }
-  }
-}
-
 async function logHandler(
   message,
   twitchUsername,
@@ -672,17 +698,16 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
     fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS));
     SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   }
+  // if (messageArray[0] == "!announce") {
+  //   if (messageArray.length < 2)
+  //     return client.raw(
+  //       `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Please include a message to announce, e.g. !announce test`
+  //     );
 
-  if (messageArray[0] == "!announce") {
-    if (messageArray.length < 2)
-      return client.raw(
-        `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Please include a message to announce, e.g. !announce test`
-      );
+  //   messageArray.splice(0, 1);
 
-    messageArray.splice(0, 1);
-
-    TWITCH_FUNCTIONS.makeAnnouncement(messageArray.join(" "));
-  }
+  //   TWITCH_FUNCTIONS.makeAnnouncement(messageArray.join(" "));
+  // }
 
   if (messageArray[0] == "!delpoll") {
     TWITCH_FUNCTIONS.deleteCurrentPoll();
@@ -696,7 +721,6 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
   if (messageArray[0] == "!emoteonlyoff") {
     client.say(CHANNEL_NAME, `/emoteonlyoff`);
   }
-
   if (
     message.toLowerCase() == "!soc" ||
     message.toLowerCase() == "!soc on" ||
@@ -704,14 +728,12 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
   ) {
     client.say(CHANNEL_NAME, `/subscribers`);
   }
-
   if (
     message.toLowerCase() == "!soc off" ||
     message.toLowerCase() == "!socoff"
   ) {
     client.say(CHANNEL_NAME, `/subscribersoff`);
   }
-
   if (
     messageArray[0] == "!slow" ||
     messageArray[0] == "!slowmode"
@@ -741,7 +763,6 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
         twitchUsername
       );
     }
-
     if (messageArray[0] == "!restrict") {
       if (messageArray[1] == null) {
         return client.raw(
@@ -772,9 +793,7 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
           ); 
       }
     }
-
-
-  if (messageArray[0] == "!radd") {
+  if (messageArray[0] == "!friend") {
     if (messageArray[1] == null) {
       return client.raw(
         `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Please specify a user to add.`
@@ -1067,7 +1086,7 @@ async function updateMode(client, message, twitchUsername, userstate) {
   // }
 
   client.raw(
-    `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, ${messageArray[0]} mode is now on.`
+    `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :@${CHANNEL_NAME}, ${twitchUsername} has turned ${messageArray[0]} mode on.`
   );
   SETTINGS.currentMode = messageArray[0];
 
@@ -1087,12 +1106,12 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
       `Everyone welcome ${twitchUsername} to the stream. Welcome @${twitchUsername} tibb12Waving!`,
       `Welcome tibb12Waving ${twitchUsername}, how are you doing!`
     ];
-    var mainResponses = [
-      `Hello, welcome to the stream tibb12Waving !`,
-      `Welcome to the chat tibb12Waving!`,
-      `Hello welcome to the stream tibb12Waving`,
-      `Hey welcome tibb12Waving`
-    ];
+    // var mainResponses = [
+    //   `Hello, welcome to the stream tibb12Waving !`,
+    //   `Welcome to the chat tibb12Waving!`,
+    //   `Hello welcome to the stream tibb12Waving`,
+    //   `Hey welcome tibb12Waving`
+    // ];
     var blakeResponses = [
       `tibb12Waving!!`,
       `tibb12Waving hi!!`,
@@ -1122,10 +1141,6 @@ async function newUserHandler(client, message, twitchUsername, isFirstMessage, u
       `hey bro welcome`
     ];
 
-      var randomGreetingMain =
-      mainResponses[Math.floor(Math.random() * mainResponses.length)];
-      await setTimeout(Math.floor(Math.random() * 20) * 1000)
-      mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :${randomGreetingMain}`);
       var randomGreeting =
       responses[Math.floor(Math.random() * responses.length)];
       await setTimeout(Math.floor(Math.random() * 45) * 1000)
@@ -1434,6 +1449,42 @@ async function updatePredictionLeaderboard() {
   console.log(averagePredictionLength);
   console.log(titleLeaderboard);
 }
+
+let shouldMonitor = false
+
+setInterval(async () => {
+  const location = await ROBLOX_FUNCTIONS.getPresence(tibb12Id).then((r)=>{return r.lastLocation});
+  const onlineStatus = await ROBLOX_FUNCTIONS.getLastOnline(tibb12Id).then((r)=>{return r.diffTimeMinutes})
+    ROBLOX_FUNCTIONS.monitorGetPresenceSync(targetId, function (presence) {
+      const placeId = presence.placeId
+      const universeId = presence.universeId   
+
+      gameArray['oldGame'] = gameArray['newGame']
+      gameArray['newGame'] = placeId
+      gameArray['oldGameName'] = gameArray['newGameName']
+      gameArray['newGameName'] = presence.lastLocation
+
+      if (SETTINGS.ks == false) {
+        if (gameArray['oldGame'] != gameArray['newGame']) {
+          if (gameArray['newGame'] == null) {
+            console.log('target left game with placeid = ' + gameArray['oldGame'])
+            client.action(
+              CHANNEL_NAME, 
+              `${CHANNEL_NAME_DISPLAY} left the game.`
+            );
+  
+        } else if (gameArray['oldGame'] != gameArray['newGame']) {
+          console.log('target joined new game with placeid = ' + gameArray['newGame'])
+          client.action(
+            CHANNEL_NAME, 
+            `${CHANNEL_NAME_DISPLAY} is now playing ${gameArray['newGameName']}.`
+          );
+        }
+      }
+    }
+  })
+}, 4000);
+
 client.on("message", async (channel, userstate, message, self, viewers, target) => {
   if (self) return;
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
@@ -1495,7 +1546,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     ksHandler(client, lowerMessage, twitchUsername, userstate);
     keywordHandler(client, lowerMessage, twitchUsername, userstate);
     timerHandler(client, lowerMessage, twitchUsername, userstate);
-    accountHandler(client, lowerMessage, twitchUsername, userstate);
+    // accountHandler(client, lowerMessage, twitchUsername, userstate);
     updateMode(client, message, twitchUsername, userstate);
     filterHandler(client, message, twitchUsername, userstate);
     customModeHandler(client, message, twitchUsername, userstate);
@@ -1693,9 +1744,6 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       if (SETTINGS.account == "bot") {
         client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently on the bot account.`);
       } 
-      if (SETTINGS.account == "main") {
-        mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :The bot is currently on the main account.`);
-      }
     }
   } else if (SETTINGS.ks == false) {
     newUserHandler(client, message, twitchUsername, isFirstMessage, userstate);
@@ -2541,7 +2589,6 @@ var runAuth = function () {
     BOT_OAUTH
   );
 };
-//TIBB_TOKEN
 StartListener();
 
 client.on("hosted", (channel, username, viewers, autohost) => {}) // dead feature as of oct 3
@@ -2553,18 +2600,9 @@ client.on("hosting", async (channel, username, viewers, autohost) => {
   }
   if (SETTINGS.ks == false) {
   client.say(username, `Tibb12 just raied with ${viewers}. tibb12Pls`);
-  await setTimeout(5 * 1000)
-  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
-  await setTimeout(1 * 1000)
-  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
-  await setTimeout(1 * 1000)
-  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
-  await setTimeout(1 * 1000)
-  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
-  await setTimeout(1 * 1000)
-  mainClient.say(username, `tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd TIBB RAID tibb12Nerd`);
   }
 });
+
 client.on("subscription", (channel, username, methods, message, userstate, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
@@ -2575,6 +2613,7 @@ client.on("subscription", (channel, username, methods, message, userstate, metho
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`);
   }
 });
+
 client.on("giftpaidupgrade", (channel, username, viewers, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
@@ -2584,6 +2623,7 @@ client.on("giftpaidupgrade", (channel, username, viewers, method) => {
     );
   }
 });
+
 client.on("subgift", (channel, username, viewers, method) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
   if (SETTINGS.ks == false) {
@@ -2591,6 +2631,7 @@ client.on("subgift", (channel, username, viewers, method) => {
   client.say(CHANNEL_NAME, `tibb12Subhype tibb12Subhype tibb12Subhype`)
   }
 });
+
 client.on("resub", async (channel, username, viewers, methods, method, months) => {
   SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
 
@@ -2602,13 +2643,6 @@ client.on("resub", async (channel, username, viewers, methods, method, months) =
     client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
     client.say(CHANNEL_NAME, `tibb12Subhype tibb12Imback tibb12Subhype`);
   }
-});
-
-client.on("connected", async () => {
-  client.action(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}. tibb12Pls`);
-});
-client.on("disconnected", async () => {
-  client.say(CHANNEL_NAME, `.me Left channle ${CHANNEL_NAME}. tibb12Fall`)
 });
 
 client.on("raided", async (channel, username, viewers) => {
@@ -2929,38 +2963,6 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
         return client.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`);
       }
     }
-    if (SETTINGS.account == "main") {
-      if (message.toLowerCase() == "!gamelink") {
-        if (locationId == '8343259840') {
-          return mainClient.raw(
-            `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/4588604953`)};
-        if (locationId == '6839171747') {
-          return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/6516141723`)};
-  
-        if (SETTINGS.currentMode == "!link.on") {
-          if (SETTINGS.currentLink != null) {
-            return mainClient.raw(
-              `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> ${currentLink}`
-            );
-          }
-        }
-        if (SETTINGS.currentMode == "!gamble.on") {
-          return mainClient.raw(
-            `@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> rblxwild.com`
-          );
-        }
-        if (onlineStatus > 30) {
-          return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currenly offline so there is no game link.`
-          );
-        }
-        if (location != 'Website') {
-          mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Current game link -> roblox.com/games/${locationId}`
-          );
-          return
-        }
-        return mainClient.raw(`@client-nonce=${userstate['client-nonce']};reply-parent-msg-id=${userstate['id']} PRIVMSG #${CHANNEL_NAME} :Tibb is currently switching games.`);
-      }
-    }
   }
 });
 
@@ -3049,7 +3051,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       }
     }
     if (message.toLowerCase() == "!yep") {
-      mainClient.say(CHANNEL_NAME, `YEP COCK`)
+      client.say(CHANNEL_NAME, `YEP COCK`)
     }
     if (message.toLowerCase() == "!vanish") {
       if (!isMod) {
@@ -3151,6 +3153,43 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
   }
 });
 
+const luigiAcc1 = new tmi.Client({
+  options: {debug: true},
+  identity: {
+    username: 'killthatdamnluigi',
+    password: 'OAuth:f1mx8jaj4lakie90bv06iu7lpgtoel'
+  }
+});
+
+const luigiAcc2 = new tmi.Client({
+  options: {debug: true},
+  identity: {
+    username: 'luigihhcohub',
+    password: 'OAuth:dlikfi9a5e91szvc2d8fessprzuunc'
+  }
+});
+
+luigiAcc1.connect();
+luigiAcc2.connect();
+
+client.on("message", async (channel, userstate, message, self, viewers) => {
+  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
+  STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
+
+  const twitchDisplayName = userstate["display-name"];
+  const twitchUsername = userstate["username"];
+
+  if (SETTINGS.ks == false) {
+    if (twitchUsername == LUIGI_NAME) {
+      if (message.toLowerCase() == '!hhcohub') {
+        luigi.say(CHANNEL_NAME, 'HHCO HUB');
+        luigiAcc1.say(CHANNEL_NAME, 'HHCO HUB');
+        luigiAcc2.say(CHANNEL_NAME, 'HHCO HUB');
+      }
+    }
+  }
+});
+
 // var block = false;
 //   client.on("message", async (channel, userstate, message, self) => {
 
@@ -3172,32 +3211,3 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
 //       }
 //     }
 // });
-
-client.on('message', (channel, userstate, message, self, viewers) => {
-  const twitchUsername = userstate["username"];
-  if (message.toLowerCase() == "!test") {
-    client.reply(CHANNEL_NAME, `test`, twitchUsername)
-  }
-});
-
-client.on("message", (channel, userstate, message, self) => {
-  const twitchUserId = userstate["user-id"];
-  if (twitchUserId == ADMIN_ID) {
-    if (message.toLowerCase() == "!pb1restart") {
-      // restart
-      mainClient.say('tibb12', `!quit`);
-      mainClient.say('sin_exalted', `!quit`);
-      mainClient.say('cardboard_kitten', `!quit`);
-      mainClient.say('junglaxr', `!quit`);
-      mainClient.say('mattxdude', `!quit`);
-      mainClient.say('mr_cheeezz', `!quit`);     
-      // restart msg
-      mainClient.say('tibb12', `[🤖]: All pajbots restarted.`);
-      mainClient.say('sin_exalted', `[🤖]: All pajbots restarted.`);
-      mainClient.say('cardboard_kitten', `[🤖]: All pajbots restarted.`);
-      mainClient.say('junglaxr', `[🤖]: All pajbots restarted.`);
-      mainClient.say('mattxdude', `[🤖]: All pajbots restarted.`);
-      mainClient.say('mr_cheeezz', `[🤖]: All pajbots restarted.`);      
-    }
-  }
-});

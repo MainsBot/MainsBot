@@ -1,6 +1,6 @@
 # MainsBot
 ### Current Version: 2.6.8
-![](https://cdn.7tv.app/emote/61a157c215b3ff4a5bb7dcc0/4x.avif)
+<!-- ![](https://cdn.7tv.app/emote/61a157c215b3ff4a5bb7dcc0/4x.avif) --> 
 
 ## Bot Features
 
@@ -36,20 +36,23 @@ cd MainsBot && pm2 start app.js && cd ..
 
 ## ENV
 
-Paste:
+**Paste:**
 ```javascript
-COOKIE = 
+COOKIE = ''
 
-BOT_OAUTH = 
-BOT_NAME = 
-CHANNEL_NAME = 
-CHANNEL_ID = 
+BOT_OAUTH = ''
+BOT_NAME = ''
 BOT_ID = 
-WEB_ACCESS_TOKEN = 
+
+CHANNEL_NAME = ''
+CHANNEL_NAME_DISPLAY = ''
+CHANNEL_ID = 
+
+WEB_ACCESS_TOKEN = ''
 
 MAINSMONITOR_COOKIE = ''
 
-ADMIN_ID = '505216805'
+ADMIN_ID = 505216805
 
 WAIT_REGISTER = 300000
 
