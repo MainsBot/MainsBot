@@ -1,0 +1,85 @@
+{
+  "categories": [
+    {
+      "name": "KillSwitch",
+      "commands": [
+        { "cmd": "!ks.on", "desc": "Enables killswitch.", "modOnly": true },
+        { "cmd": "!ks.off", "desc": "Disables killswitch.", "modOnly": true }
+      ]
+    },
+    {
+      "name": "Modes",
+      "commands": [
+        { "cmd": "!join.on", "desc": "Enables join mode.", "modOnly": true },
+        { "cmd": "!link.on", "desc": "Enables link mode (will also enable with post of valid vip link in chat).", "modOnly": true },
+        { "cmd": "!ticket.on", "desc": "Enables ticket mode.", "modOnly": true },
+        { "cmd": "!1v1.on", "desc": "Enables 1v1 mode for Arsenal.", "modOnly": true },
+        { "cmd": "!val.on", "desc": "Enables valorant mode.", "modOnly": true },
+        { "cmd": "!reddit.on", "desc": "Enables reddit recap mode.", "modOnly": true }
+      ]
+    },    
+    {
+      "name": "Filters",
+      "commands": [
+        { "cmd": "!spamfilter.[on/off]", "desc": "Enables/Disables the spam filter.", "modOnly": true },
+        { "cmd": "!lengthfilter.[on/off]", "desc": "Enables/Disables the length filter.", "modOnly": true },
+        { "cmd": "!linkfilter.[on/off]", "desc": "Enables/Disables the link filter.", "modOnly": true }
+      ]
+    },
+    {
+      "name": "Handlers",
+      "commands": [
+        { "cmd": "!timers.[on/off]", "desc": "Enables/Disables sending automated timers..", "modOnly": true },
+        { "cmd": "!keywords.[on/off]", "desc": "Enables/Disables keyword responses.", "modOnly": true }
+      ]
+    },
+    {
+      "name": "Spotify",
+      "commands": [
+        { "cmd": "!song", "desc": "Shows the currently playing track.", "modOnly": false, "cooldown": "shared" },
+        { "cmd": "!lastsong / !last song", "desc": "Shows the last song the streamer listened to.", "modOnly": false, "cooldown": "shared" },
+        { "cmd": "!nextsong / !next song", "desc": "Shows the next song coming on.", "modOnly": false, "cooldown": "shared" },
+        { "cmd": "!songqueue / !song queue", "desc": "Shows the next 3 songs in the queue.", "modOnly": false, "cooldown": "shared" },
+        { "cmd": "!addsong [song-name/id/link]", "desc": "Adds a song to the queue.", "modOnly": true },
+        { "cmd": "!skipsong", "desc": "Skips the currently playing song.", "modOnly": true },
+        { "cmd": "!songvol [0-100]", "desc": "Changes the volume of Spotify for the streamer.", "modOnly": true }
+      ]
+    },
+    {
+      "name": "Roblox",
+      "commands": [
+        { "cmd": "!game", "desc": "Shows what Roblox game the streamer is in.", "modOnly": false, "cooldown": "shared" },
+        { "cmd": "!playtime", "desc": "Shows how long the streamer has been playing the current Roblox game.", "modOnly": false, "cooldown": "shared" },
+        { "cmd": "!gamelink", "desc": "Sends the link to the current game the streamer is in.", "modOnly": false, "cooldown": "shared" },
+        { "cmd": "!friend [username]", "desc": "Adds a temporary tracked Roblox friend request (eligible for temp cleanup).", "modOnly": true, "cooldown": "friend" },
+        { "cmd": "!permadd [username]", "desc": "Adds a permanent tracked Roblox friend request (not removed by temp cleanup).", "modOnly": true, "cooldown": "friend" },
+        { "cmd": "!unfriendtemp / !unfriendall", "desc": "Removes all tracked temporary friends from the streamer account.", "modOnly": true },
+        { "cmd": "!friendstats", "desc": "Shows temp vs permanent tracked friend counts.", "modOnly": true },
+        { "cmd": "!gamesplayed", "desc": "Top games played this stream.", "modOnly": false, "cooldown": "shared+games" },
+        { "cmd": "!gamesplayedall", "desc": "Top 3 games played all-time.", "modOnly": false, "cooldown": "shared+games" },
+        { "cmd": "!gamesplayedweek", "desc": "Top 3 games played this week.", "modOnly": false, "cooldown": "shared+games" },
+        { "cmd": "!gamesplayedmonth", "desc": "Top 3 games played this month.", "modOnly": false, "cooldown": "shared+games" },
+        { "cmd": "!gamesplayedyesterday", "desc": "Top 3 games played yesterday.", "modOnly": false, "cooldown": "shared+games" },
+        { "cmd": "!gamesplayedcount", "desc": "Shows how many games are currently shown.", "modOnly": false, "cooldown": "shared" },
+        { "cmd": "!gamesplayedcount [1-10] / !gamesplayed count [1-10]", "desc": "Sets how many games to show for gamesplayed.", "modOnly": true, "cooldown": "shared" }
+      ]
+    },
+    {
+      "name": "Channel Point/Sub",
+      "commands": [
+        { "cmd": "!cptotime [amount] [tier1/tier2/tier3/nosub]", "desc": "Shows how long it would take you to farm x amount of SAND!", "modOnly" : false, "cooldown": "shared" },
+        { "cmd": "!whogiftedme", "desc": "Shows who gifted you a sub if you got gifted.", "modOnly" : false, "cooldown": "shared" }
+        
+      ]
+    },
+    {
+      "name": "Extra Commands",
+      "commands": [
+        { "cmd": "!dice", "desc": "Roll a dice!", "modOnly" : false, "cooldown": "shared" },
+        { "cmd": "!version", "desc": "Displays the current version of the bot.", "modOnly" : false, "cooldown": "shared" },
+        { "cmd": "!commands", "desc": "Sends the command list website.", "modOnly" : false, "cooldown": "shared" }
+        
+      ]
+    }
+  ]
+}

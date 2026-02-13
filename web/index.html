@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MainsBot</title>
+
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header__left">
+        <h1 class="title">Mainsbot</h1>
+        <div class="subtitle">Commands + live status</div>
+        <div class="live-row">
+          <span class="live-dot" id="liveDot" aria-hidden="true"></span>
+          <span class="live-text" id="liveText">Offline</span>
+        </div>
+        <div class="left-status">
+          <div><span class="muted">Twitch:</span> <span id="leftTwitch">-</span></div>
+          <div><span class="muted">Roblox:</span> <span id="leftRoblox">-</span></div>
+          <div><span class="muted">Spotify:</span> <span id="leftSpotify">-</span></div>
+        </div>
+      </div>
+
+      <div class="status" id="status">
+        <div class="status__pill status__pill--loading" id="statusPill">Loading...</div>
+        <div class="status__meta">
+          <div><span class="muted">Uptime:</span> <span id="uptime">-</span></div>
+          <div><span class="muted">Kill Switch:</span> <span id="twitchConn">-</span></div>
+          <div><span class="muted">Timers:</span> <span id="timers">-</span></div>
+          <div><span class="muted">Mode:</span> <span id="mode">-</span></div>
+          <div><span class="muted">Keywords:</span> <span id="keywords">-</span></div>
+          <div class="status__error"><span class="muted">Last Error:</span> <span id="lastErr">-</span></div>
+        </div>
+      </div>
+    </header>
+
+    <section class="controls">
+      <input class="input" id="search" placeholder="Search commands... (song, points, vip, poll)" />
+      <div class="select-wrap">
+        <select class="select" id="category">
+          <option value="all">All categories</option>
+        </select>
+      </div>
+    </section>
+
+    <main id="commandsRoot" class="commands"></main>
+
+    <footer class="footer" id="footerText">MainsBot</footer>
+  </div>
+
+
+  <script type="module" src="/static/base.js"></script>
+</body>
+</html>

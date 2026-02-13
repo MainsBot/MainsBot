@@ -1,0 +1,22 @@
+## Example nginx site (reverse proxy -> unix socket)
+## Update:
+## - `server_name`
+## - TLS bits (certs)
+## - `proxy_pass` socket path to match your `WEB_SOCKET_PATH`
+
+server {
+  listen 80;
+  server_name example.com;
+
+  # If you're terminating TLS elsewhere, ensure these headers are set.
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+  location / {
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_pass http://unix:/run/mainsbot-example.sock:;
+  }
+}
+

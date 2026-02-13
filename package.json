@@ -1,0 +1,28 @@
+{
+  "name": "mainsbotv2",
+  "lockfileVersion": 2,
+  "requires": true,
+  "dependencies": {
+    "clean-css": "^5.3.3",
+    "discord.js": "^14.7.1",
+    "dotenv": "^16.0.3",
+    "fs": "^0.0.1-security",
+    "node-fetch": "^3.3.0",
+    "pg": "^8.18.0",
+    "sass": "^1.97.3",
+    "socket.io-client": "^4.8.3",
+    "spotify-buddylist": "^1.0.0",
+    "string-similarity": "^4.0.4",
+    "terser": "^5.46.0",
+    "tmi.js": "^1.8.5",
+    "undici": "^7.20.0",
+    "ws": "^8.11.0"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "engines": {
+    "node": "16.x"
+  }
+}

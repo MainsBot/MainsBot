@@ -1,0 +1,21 @@
+# junk
+/archive/
+/chat.log
+
+# secrets (keep only an example if you want)
+secrets/*
+!secrets/instance.example.json
+
+# per-instance config (keep the example)
+config/*.ini
+!config/instance.example.ini
+
+# runtime data (ignore everything)...
+data/**
+# ...but keep your postgres code folder tracked
+!data/postgres/
+!data/postgres/**
+
+# deps/build
+node_modules/
+web/static/gen/

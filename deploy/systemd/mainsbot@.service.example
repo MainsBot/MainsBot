@@ -1,0 +1,19 @@
+[Unit]
+Description=MainsBot instance %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/MainsBot
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/MainsBot/main.js --config /opt/MainsBot/config/%i.ini
+Restart=always
+RestartSec=3
+
+# If you use unix sockets, systemd can manage the runtime dir:
+RuntimeDirectory=mainsbot
+
+[Install]
+WantedBy=multi-user.target
+
