@@ -192,6 +192,12 @@ function applyInstanceDefaults(ini) {
 
 function applyWebConfig(ini) {
   const web = ini?.web && typeof ini.web === "object" ? ini.web : {};
+  if (web.auth_mode || web.authMode) setEnvOverride("WEB_AUTH_MODE", web.auth_mode || web.authMode);
+  if (web.admin_username || web.adminUsername) setEnvOverride("WEB_ADMIN_USERNAME", web.admin_username || web.adminUsername);
+  if (web.admin_password || web.adminPassword) setEnvOverride("WEB_ADMIN_PASSWORD", web.admin_password || web.adminPassword);
+  if (web.admin_password_hash || web.adminPasswordHash) {
+    setEnvOverride("WEB_ADMIN_PASSWORD_HASH", web.admin_password_hash || web.adminPasswordHash);
+  }
   if (web.listen) setEnvOverride("WEB_LISTEN", web.listen);
   if (web.port) setEnvOverride("WEB_PORT", web.port);
   if (web.host) setEnvOverride("WEB_HOST", web.host);
@@ -226,7 +232,12 @@ function applyModulesConfig(ini) {
   if (mods.gameping != null) setEnvOverride("MODULE_GAMEPING", mods.gameping);
   if (mods.pubsub != null) setEnvOverride("MODULE_PUBSUB", mods.pubsub);
   if (mods.alerts != null) setEnvOverride("MODULE_ALERTS", mods.alerts);
+  if (mods.tab != null) setEnvOverride("MODULE_AUBREYTAB", mods.tab);
+  // backward compatible name (deprecated)
   if (mods.aubreytab != null) setEnvOverride("MODULE_AUBREYTAB", mods.aubreytab);
+  if (mods.custom_commands != null || mods.customCommands != null) {
+    setEnvOverride("MODULE_CUSTOM_COMMANDS", mods.custom_commands ?? mods.customCommands);
+  }
 }
 
 function applyGamepingSection(ini) {
@@ -372,6 +383,51 @@ function applyDiscordSection(ini) {
   if (dc.webhook_url || dc.webhookUrl) setEnvOverride("DISCORD_WEBHOOK_URL", dc.webhook_url || dc.webhookUrl);
   if (dc.bot_token || dc.botToken) setEnvOverride("DISCORD_BOT_TOKEN", dc.bot_token || dc.botToken);
   if (dc.guild_id || dc.guildId) setEnvOverride("GUILD_ID", dc.guild_id || dc.guildId);
+  if (dc.channel_id || dc.channelId) setEnvOverride("DISCORD_CHANNEL_ID", dc.channel_id || dc.channelId);
+  if (dc.announce_channel_id || dc.announceChannelId) {
+    setEnvOverride("DISCORD_ANNOUNCE_CHANNEL_ID", dc.announce_channel_id || dc.announceChannelId);
+  }
+  if (dc.log_channel_id || dc.logChannelId) {
+    setEnvOverride("DISCORD_LOG_CHANNEL_ID", dc.log_channel_id || dc.logChannelId);
+  }
+  if (dc.commands_enabled != null || dc.commandsEnabled != null) {
+    setEnvOverride("DISCORD_COMMANDS_ENABLED", dc.commands_enabled ?? dc.commandsEnabled);
+  }
+  if (dc.command_channel_ids || dc.commandChannelIds) {
+    setEnvOverride("DISCORD_COMMAND_CHANNEL_IDS", dc.command_channel_ids || dc.commandChannelIds);
+  }
+  if (dc.mod_role_ids || dc.modRoleIds) {
+    setEnvOverride("DISCORD_MOD_ROLE_IDS", dc.mod_role_ids || dc.modRoleIds);
+  }
+  if (dc.relay_mode || dc.relayMode) {
+    setEnvOverride("DISCORD_RELAY_MODE", dc.relay_mode || dc.relayMode);
+  }
+  if (dc.relay_debug != null || dc.relayDebug != null) {
+    setEnvOverride("DISCORD_RELAY_DEBUG", dc.relay_debug ?? dc.relayDebug);
+  }
+
+  // Optional: Twitch chat -> Discord embed logs (batched).
+  if (dc.twitch_chat_log_enabled != null || dc.twitchChatLogEnabled != null) {
+    setEnvOverride("DISCORD_TWITCH_CHAT_LOG_ENABLED", dc.twitch_chat_log_enabled ?? dc.twitchChatLogEnabled);
+  }
+  if (dc.twitch_chat_log_commands_only != null || dc.twitchChatLogCommandsOnly != null) {
+    setEnvOverride(
+      "DISCORD_TWITCH_CHAT_LOG_COMMANDS_ONLY",
+      dc.twitch_chat_log_commands_only ?? dc.twitchChatLogCommandsOnly
+    );
+  }
+  if (dc.twitch_chat_log_mode || dc.twitchChatLogMode) {
+    setEnvOverride("DISCORD_TWITCH_CHAT_LOG_MODE", dc.twitch_chat_log_mode || dc.twitchChatLogMode);
+  }
+  if (dc.twitch_chat_log_flush_ms != null || dc.twitchChatLogFlushMs != null) {
+    setEnvOverride("DISCORD_TWITCH_CHAT_LOG_FLUSH_MS", dc.twitch_chat_log_flush_ms ?? dc.twitchChatLogFlushMs);
+  }
+  if (dc.twitch_chat_log_max_lines != null || dc.twitchChatLogMaxLines != null) {
+    setEnvOverride("DISCORD_TWITCH_CHAT_LOG_MAX_LINES", dc.twitch_chat_log_max_lines ?? dc.twitchChatLogMaxLines);
+  }
+  if (dc.twitch_chat_log_channel_id || dc.twitchChatLogChannelId) {
+    setEnvOverride("DISCORD_TWITCH_CHAT_LOG_CHANNEL_ID", dc.twitch_chat_log_channel_id || dc.twitchChatLogChannelId);
+  }
 }
 
 function applyPajbotSection(ini) {

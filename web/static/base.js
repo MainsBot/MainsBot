@@ -146,6 +146,42 @@ function setLastErrorDisplay(lastError) {
 }
 
 /* =========================
+   SESSION (TOPBAR)
+   ========================= */
+
+function renderTopbarSession(session) {
+  const right = document.querySelector(".topbar__right");
+  if (!right) return;
+
+  const allowed = !!session?.allowed;
+  const login = String(session?.login || "").trim();
+
+  if (allowed && login) {
+    right.innerHTML = `
+      <div class="row" style="justify-content:flex-end">
+        <a class="btn btn--sm btn--ghost" href="/swagger" target="_blank" rel="noreferrer">Swagger</a>
+        <span class="muted" style="font-size:13px">Logged in as</span>
+        <strong>${escapeHtml(login)}</strong>
+        <a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a>
+      </div>
+    `;
+    return;
+  }
+
+  right.innerHTML = `<a class="btn btn--sm" href="/admin/login">Login</a>`;
+}
+
+async function initTopbarSession() {
+  try {
+    const res = await fetch("/api/admin/session", { cache: "no-store" });
+    const data = await res.json().catch(() => null);
+    renderTopbarSession(data);
+  } catch {
+    renderTopbarSession({ allowed: false });
+  }
+}
+
+/* =========================
    THEME
    ========================= */
 
@@ -271,7 +307,7 @@ async function refreshStatus() {
   if (!els.pill || !els.lastErr) return;
 
   try {
-    const r = await fetch("/status", { cache: "no-store" });
+    const r = await fetch("/api/status", { cache: "no-store" });
     if (!r.ok) throw new Error(`status http ${r.status}`);
 
     const s = await r.json();
@@ -406,6 +442,7 @@ async function refreshStatus() {
    ========================= */
 
 async function main() {
+  initTopbarSession();
   initThemeToggle();
 
   try {

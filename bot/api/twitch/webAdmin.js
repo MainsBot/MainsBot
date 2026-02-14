@@ -137,11 +137,18 @@ export function createWebAdminAuth({
   function encodeSession({ userId, login, now = Date.now() } = {}) {
     if (!secret) throw new Error("WEB_COOKIE_SECRET is missing");
     const exp = now + Math.max(60_000, Number(ttlMs) || DEFAULT_TTL_MS);
+    const session = arguments[0] && typeof arguments[0] === "object" ? arguments[0] : {};
+    const extra = { ...session };
+    delete extra.userId;
+    delete extra.login;
+    delete extra.now;
+
     const payload = {
       userId: String(userId || "").trim(),
       login: String(login || "").trim().toLowerCase(),
       iat: now,
       exp,
+      ...extra,
     };
     const payloadText = JSON.stringify(payload);
     const payloadB64 = base64urlEncode(payloadText);

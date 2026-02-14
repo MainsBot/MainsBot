@@ -1,56 +1,105 @@
 let chatArray = {}
-
-const BOT_OAUTH = process.env.BOT_OAUTH// bot oauth token for performing actions
-const COOKIE = process.env.COOKIE // <--- change this to your cookie
-
-const BOT_NAME = process.env.BOT_NAME// bot username
-const CHANNEL_NAME = process.env.CHANNEL_NAME// name of the channel for the bot to be in
-const CHANNEL_ID = process.env.CHANNEL_ID // id of channel for the bot to be in
-const BOT_ID = process.env.BOT_ID
-const SPOTIFY_BOT_OAUTH = process.env.SPOTIFY_BOT_OAUTH
-const SPOTIFY_BOT_NAME = process.env.SPOTIFY_BOT_NAME
-
-const WAIT_REGISTER = process.env.WAIT_REGISTER// number of milliseconds, to wait before starting to get stream information
-
-const COOLDOWN = process.env.COOLDOWN // number of milliseconds, cool down for replying to people
-const MESSAGE_MEMORY = process.env.MESSAGE_MEMORY // number of milliseconds, until bot forgots message for spam filter
-
-const MAX_MESSAGE_LENGTH = process.env.MAX_MESSAGE_LENGTH// max number of characters until timeout
-const BASE_LENGTH_TIMEOUT = process.env.BASE_LENGTH_TIMEOUT // base timeout for using too many characters
-const MAX_LENGTH_TIMEOUT = process.env.MAX_LENGTH_TIMEOUT// max timeout for using too many characters
-
-const BASE_SPAM_TIMEOUT = process.env.BASE_SPAM_TIMEOUT // base timeout for spam, this would be for first time offenders
-const MAX_SPAM_TIMEOUT = process.env.MAX_SPAM_TIMEOUT // max timeout for spam, this stops the timeout length doubling infinitely for repeat offenders
-
-const MINIMUM_CHARACTERS = process.env.MINIMUM_CHARACTERS // [NOT IMPLEMENTED RN] minimum message length for bot to log message
-const MAXIMUM_SIMILARITY = process.env.MAXIMUM_SIMILARITY // percentage similarity of spam for timeout to happen
-const MINIMUM_MESSAGE_COUNT = process.env.MINIMUM_MESSAGE_COUNT // minimum number of messages for spam filter to start punishing
-
-const MAINS_BOT_CLIENT_ID = process.env.MAINS_BOT_CLIENT_ID
-const CHEEEZZ_BOT_CLIENT_ID = process.env.CHEEEZZ_BOT_CLIENT_ID
-const APP_ACCESS_TOKEN = process.env.APP_ACCESS_TOKEN
-// timers
-const WAIT_UNTIL_FOC_OFF = process.env.WAIT_UNTIL_FOC_OFF // 2 minutes
-const WAIT_UNTIL_FOC_OFF_RAID = process.env.WAIT_UNTIL_FOC_OFF_RAID // every 5 minutes
-const SPAM_LINK = process.env.SPAM_LINK // every 5 minutes
-const JOIN_TIMER = process.env.JOIN_TIMER // every 2 minutes
-let MUTATED_JOIN_TIMER = 120000 // timer that uses the JOIN_TIMER to change the interval based on viewer count
-
-const SONG_TIMER = process.env.SONG_TIMER
-
-
-import fs from "fs";
-
-let SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-let STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
-
-import * as ROBLOX_FUNCTIONS from "../api/roblox/index.js";
 import * as TWITCH_FUNCTIONS from "../api/twitch/helix.js";
 
-const exemptions = SETTINGS.filterExemptions;
+const DEFAULT_FILTERS = {
+  spam: {
+    windowMs: 7000,
+    minMessages: 5,
+    strikeResetMs: 10 * 60 * 1000,
+    timeoutFirstSec: 30,
+    timeoutRepeatSec: 60,
+    reason: "[AUTOMATIC] Please stop excessively spamming - MainsBot",
+    messageFirst: "{atUser}, please stop excessively spamming.",
+    messageRepeat: "{atUser} Please STOP excessively spamming.",
+  },
+  length: {
+    maxChars: 400,
+    strikeResetMs: 10 * 60 * 1000,
+    timeoutFirstSec: 30,
+    timeoutRepeatSec: 60,
+    reason: "[AUTOMATIC] Message exceeds max character limit - MainsBot",
+    message: "{atUser} Message exceeds max character limit.",
+  },
+  link: {
+    strikeResetMs: 10 * 60 * 1000,
+    timeoutFirstSec: 1,
+    timeoutRepeatSec: 5,
+    reason: "[AUTOMATIC] No links allowed - MainsBot",
+    message: "{atUser} No links allowed in chat.",
+  },
+};
 
-var streamNumber = Object.keys(STREAMS).length;
-const bots = SETTINGS.bots
+function normalizeLogin(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getChannelLogin(channel) {
+  return normalizeLogin(String(channel || "").replace(/^#/, ""));
+}
+
+function formatTemplate(template, twitchUsername) {
+  const user = String(twitchUsername || "").trim();
+  const atUser = user ? `@${user}` : "";
+  return String(template || "")
+    .replace(/\{atUser\}/gi, atUser)
+    .replace(/\{user\}/gi, user)
+    .trim();
+}
+
+function getLists(settings) {
+  const exemptions = Array.isArray(settings?.filterExemptions)
+    ? settings.filterExemptions.map((x) => normalizeLogin(x)).filter(Boolean)
+    : [];
+  const bots = Array.isArray(settings?.bots)
+    ? settings.bots.map((x) => normalizeLogin(x)).filter(Boolean)
+    : [];
+  return { exemptions, bots };
+}
+
+function getFilterConfig(settings) {
+  const cfg = settings?.filters && typeof settings.filters === "object" ? settings.filters : {};
+  const spam = cfg?.spam && typeof cfg.spam === "object" ? cfg.spam : {};
+  const length = cfg?.length && typeof cfg.length === "object" ? cfg.length : {};
+  const link = cfg?.link && typeof cfg.link === "object" ? cfg.link : {};
+  const int = (v, fallback) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : fallback;
+  };
+  const str = (v, fallback) => (v == null ? fallback : String(v)).trim();
+  return {
+    spam: {
+      windowMs: int(spam.windowMs, DEFAULT_FILTERS.spam.windowMs),
+      minMessages: int(spam.minMessages, DEFAULT_FILTERS.spam.minMessages),
+      strikeResetMs: int(spam.strikeResetMs, DEFAULT_FILTERS.spam.strikeResetMs),
+      timeoutFirstSec: int(spam.timeoutFirstSec, DEFAULT_FILTERS.spam.timeoutFirstSec),
+      timeoutRepeatSec: int(spam.timeoutRepeatSec, DEFAULT_FILTERS.spam.timeoutRepeatSec),
+      reason: str(spam.reason, DEFAULT_FILTERS.spam.reason),
+      messageFirst: str(spam.messageFirst, DEFAULT_FILTERS.spam.messageFirst),
+      messageRepeat: str(spam.messageRepeat, DEFAULT_FILTERS.spam.messageRepeat),
+    },
+    length: {
+      maxChars: int(length.maxChars, DEFAULT_FILTERS.length.maxChars),
+      strikeResetMs: int(length.strikeResetMs, DEFAULT_FILTERS.length.strikeResetMs),
+      timeoutFirstSec: int(length.timeoutFirstSec, DEFAULT_FILTERS.length.timeoutFirstSec),
+      timeoutRepeatSec: int(length.timeoutRepeatSec, DEFAULT_FILTERS.length.timeoutRepeatSec),
+      reason: str(length.reason, DEFAULT_FILTERS.length.reason),
+      message: str(length.message, DEFAULT_FILTERS.length.message),
+    },
+    link: {
+      strikeResetMs: int(link.strikeResetMs, DEFAULT_FILTERS.link.strikeResetMs),
+      timeoutFirstSec: int(link.timeoutFirstSec, DEFAULT_FILTERS.link.timeoutFirstSec),
+      timeoutRepeatSec: int(link.timeoutRepeatSec, DEFAULT_FILTERS.link.timeoutRepeatSec),
+      reason: str(link.reason, DEFAULT_FILTERS.link.reason),
+      message: str(link.message, DEFAULT_FILTERS.link.message),
+    },
+  };
+}
+
+function isPrivileged(userstate, channel, twitchUsername) {
+  const isMod = !!userstate?.mod;
+  const isBroadcaster = normalizeLogin(twitchUsername) === getChannelLogin(channel);
+  return isMod || isBroadcaster;
+}
 
 function stripTrailingPunct(value) {
   return String(value || "").trim().replace(/[)\],.>]+$/g, "");
@@ -328,113 +377,113 @@ async function youtubeTimeoutUser(userstate, durationSeconds) {
 */
 
 
-export async function lengthFilter(client, message, twitchUsername, userstate) {
-  const user = String(twitchUsername || "").toLowerCase();
+const spamBuckets = new Map();
+const linkBuckets = new Map();
+const lengthBuckets = new Map();
+
+export async function lengthFilter(client, channel, message, twitchUsername, userstate, settingsOverride) {
+  const user = normalizeLogin(twitchUsername);
   if (!user) return;
 
+  const settings = settingsOverride && typeof settingsOverride === "object" ? settingsOverride : {};
+  const { exemptions, bots } = getLists(settings);
   if (exemptions.includes(user)) return;
   if (bots.includes(user)) return;
+  if (isPrivileged(userstate, channel, user)) return;
 
-  if (!message || message.length <= MAX_MESSAGE_LENGTH) return;
+  const cfg = getFilterConfig(settings).length;
+  const maxChars = Number(cfg.maxChars) || 0;
+  if (!message || (maxChars > 0 && message.length <= maxChars)) return;
 
-  // Ensure stream + map exist
-  STREAMS[streamNumber] ??= {};
-  STREAMS[streamNumber].repeatLengthOffenders ??= {};
+  const now = Date.now();
+  let bucket = lengthBuckets.get(user);
+  if (!bucket) {
+    bucket = { strikes: 0, lastStrikeAt: 0 };
+    lengthBuckets.set(user, bucket);
+  }
 
-  const offenders = STREAMS[streamNumber].repeatLengthOffenders;
+  if (bucket.lastStrikeAt && now - bucket.lastStrikeAt > cfg.strikeResetMs) {
+    bucket.strikes = 0;
+  }
 
-  const strikes = Number(offenders[user] || 0);
-  const timeoutLen = strikes > 0 ? 60 : 30;
+  const isRepeat = Number(bucket.strikes || 0) > 0;
+  const timeoutLen = isRepeat ? cfg.timeoutRepeatSec : cfg.timeoutFirstSec;
+  bucket.strikes = Number(bucket.strikes || 0) + 1;
+  bucket.lastStrikeAt = now;
 
-  offenders[user] = strikes + 1;
-
-  const reason = "[AUTOMATIC] Message exceeds max character limit - MainsBot";
-  const timeoutMessage = `@${twitchUsername} Message exceeds max character limit.`;
+  const reason = cfg.reason || DEFAULT_FILTERS.length.reason;
+  const timeoutMessage = formatTemplate(cfg.message || DEFAULT_FILTERS.length.message, twitchUsername);
 
   TWITCH_FUNCTIONS.timeoutEXP(twitchUsername, reason, timeoutLen, () => {
-    client.say(CHANNEL_NAME, timeoutMessage);
+    if (timeoutMessage) client.say(channel, timeoutMessage);
   });
-
-  fs.writeFileSync("./STREAMS.json", JSON.stringify(STREAMS));
 }
 
 export async function onUntimedOut(twitchUsername) {
-  for (const chatter in chatArray){
-    if (chatter == twitchUsername.toLowerCase()){
-      chatArray[chatter][1] = false
-    }
-  }
+  const user = normalizeLogin(twitchUsername);
+  if (!user) return;
+  spamBuckets.delete(user);
+  linkBuckets.delete(user);
+  lengthBuckets.delete(user);
 }
 
-const SPAM_WINDOW_MS = 7000;
-const STRIKE_RESET_MS = 10 * 60 * 1000; // reset strikes after 10 min of behaving
-
-const chatBuckets = new Map();
-const linkBuckets = new Map();
-const LINK_STRIKE_RESET_MS = 10 * 60 * 1000;
-
-export function spamFilter(client, message, twitchUsername, userstate) {
-  const user = String(twitchUsername || "").toLowerCase();
+export function spamFilter(client, channel, message, twitchUsername, userstate, settingsOverride) {
+  const user = normalizeLogin(twitchUsername);
   if (!user) return;
-  if (bots.includes(user)) return;
 
+  const settings = settingsOverride && typeof settingsOverride === "object" ? settingsOverride : {};
+  const { exemptions, bots } = getLists(settings);
+  if (exemptions.includes(user)) return;
+  if (bots.includes(user)) return;
+  if (isPrivileged(userstate, channel, user)) return;
+
+  const cfg = getFilterConfig(settings).spam;
   const now = Date.now();
 
-  let bucket = chatBuckets.get(user);
+  let bucket = spamBuckets.get(user);
   if (!bucket) {
     bucket = { msgs: [], cooling: false, strikes: 0, lastStrikeAt: 0 };
-    chatBuckets.set(user, bucket);
+    spamBuckets.set(user, bucket);
   }
 
-  if (bucket.lastStrikeAt && now - bucket.lastStrikeAt > STRIKE_RESET_MS) {
+  if (bucket.lastStrikeAt && now - bucket.lastStrikeAt > cfg.strikeResetMs) {
     bucket.strikes = 0;
   }
 
   bucket.msgs.push(now);
-
-  while (bucket.msgs.length && now - bucket.msgs[0] > SPAM_WINDOW_MS) {
+  while (bucket.msgs.length && now - bucket.msgs[0] > cfg.windowMs) {
     bucket.msgs.shift();
   }
-
   if (bucket.cooling) return;
 
-  const minCount = Number(MINIMUM_MESSAGE_COUNT) || 5;
+  const minCount = Number(cfg.minMessages) || 0;
   if (bucket.msgs.length <= minCount) return;
 
   bucket.cooling = true;
 
-  const strikes = Number(bucket.strikes || 0);
-  const timeoutLen = strikes > 0 ? 60 : 30;
-
-  bucket.strikes = strikes + 1;
+  const isRepeat = Number(bucket.strikes || 0) > 0;
+  const timeoutLen = isRepeat ? cfg.timeoutRepeatSec : cfg.timeoutFirstSec;
+  bucket.strikes = Number(bucket.strikes || 0) + 1;
   bucket.lastStrikeAt = now;
 
-  const reason = "[AUTOMATIC] Please stop excessively spamming - MainsBot"
-  const timeoutMessage =
-    strikes > 0
-      ? `@${twitchUsername} Please STOP excessively spamming.`
-      : `@${twitchUsername}, please stop excessively spamming.`;
+  const reason = cfg.reason || DEFAULT_FILTERS.spam.reason;
+  const tmpl = isRepeat ? cfg.messageRepeat : cfg.messageFirst;
+  const timeoutMessage = formatTemplate(tmpl || (isRepeat ? DEFAULT_FILTERS.spam.messageRepeat : DEFAULT_FILTERS.spam.messageFirst), twitchUsername);
 
   TWITCH_FUNCTIONS.timeoutEXP(twitchUsername, reason, timeoutLen, () => {
-    client.say(CHANNEL_NAME, timeoutMessage);
-
+    if (timeoutMessage) client.say(channel, timeoutMessage);
     bucket.msgs.length = 0;
     bucket.cooling = false;
   });
 }
 
-export function linkFilter(client, message, twitchUsername, userstate, settingsOverride) {
-  const user = String(twitchUsername || "").toLowerCase();
+export function linkFilter(client, channel, message, twitchUsername, userstate, settingsOverride) {
+  const user = normalizeLogin(twitchUsername);
   if (!user) return false;
 
-  const settings = settingsOverride ?? SETTINGS ?? {};
-
+  const settings = settingsOverride && typeof settingsOverride === "object" ? settingsOverride : {};
   if (settings?.linkFilter === false) return false;
-
-  const isMod = !!userstate?.mod;
-  const isBroadcaster =
-    userstate?.username?.toLowerCase() === CHANNEL_NAME.toLowerCase();
-  if (isMod || isBroadcaster) return false;
+  if (isPrivileged(userstate, channel, user)) return false;
 
   const urls = extractUrls(message);
   if (!urls.length) return false;
@@ -444,11 +493,10 @@ export function linkFilter(client, message, twitchUsername, userstate, settingsO
     : Array.isArray(settings?.allowedLinks)
       ? settings.allowedLinks
       : [];
-
   const allAllowed = urls.every((u) => isUrlAllowedByAllowlist(u, allowlist));
   if (allAllowed) return false;
 
-  const reason = "[AUTOMATIC] No links allowed - MainsBot";
+  const cfg = getFilterConfig(settings).link;
   const now = Date.now();
 
   let linkState = linkBuckets.get(user);
@@ -457,25 +505,20 @@ export function linkFilter(client, message, twitchUsername, userstate, settingsO
     linkBuckets.set(user, linkState);
   }
 
-  if (linkState.lastStrikeAt && now - linkState.lastStrikeAt > LINK_STRIKE_RESET_MS) {
+  if (linkState.lastStrikeAt && now - linkState.lastStrikeAt > cfg.strikeResetMs) {
     linkState.strikes = 0;
   }
 
-  const isRepeatOffense = linkState.strikes >= 1;
-  linkState.strikes += 1;
+  const isRepeatOffense = Number(linkState.strikes || 0) >= 1;
+  linkState.strikes = Number(linkState.strikes || 0) + 1;
   linkState.lastStrikeAt = now;
 
-  // First strike: delete message only (1s timeout). After that: fixed 5s timeout.
-  const timeoutLen = isRepeatOffense ? 5 : 1;
+  const timeoutLen = isRepeatOffense ? cfg.timeoutRepeatSec : cfg.timeoutFirstSec;
+  const reason = cfg.reason || DEFAULT_FILTERS.link.reason;
+  const timeoutMessage = formatTemplate(cfg.message || DEFAULT_FILTERS.link.message, twitchUsername);
+
   TWITCH_FUNCTIONS.timeoutEXP(twitchUsername, reason, timeoutLen, () => {
-    if (!isRepeatOffense) {
-      client.say(
-        CHANNEL_NAME,
-        `@${twitchUsername} No links allowed in chat.`
-      );
-    } else {
-      client.say(CHANNEL_NAME, `@${twitchUsername} No links allowed in chat.`)
-    }
+    if (timeoutMessage) client.say(channel, timeoutMessage);
   });
   return true;
 }

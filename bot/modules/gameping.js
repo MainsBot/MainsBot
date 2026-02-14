@@ -32,6 +32,8 @@ export function registerGamepingModule({
   channelName,
   getChatPerms,
   webhookClient,
+  discordMessenger,
+  discordChannelId = "",
   EmbedBuilder,
   gamePingsPath = "",
   allowedUsers = process.env.GAMEPING_ALLOWED_USERS || "",
@@ -41,8 +43,13 @@ export function registerGamepingModule({
   if (!client || typeof client.on !== "function") {
     throw new Error("registerGamepingModule: missing tmi client");
   }
-  if (!webhookClient) {
-    logger?.warn?.("[gameping] DISCORD_WEBHOOK_URL missing; !gameping will reply but cannot send webhook.");
+  const resolvedDiscordChannelId = String(
+    discordChannelId || process.env.DISCORD_ANNOUNCE_CHANNEL_ID || process.env.DISCORD_CHANNEL_ID || ""
+  ).trim();
+  if (!webhookClient && !(discordMessenger && resolvedDiscordChannelId)) {
+    logger?.warn?.(
+      "[gameping] Discord not configured (set [discord].announce_channel_id or webhook_url); !gameping will reply but cannot send ping."
+    );
   }
 
   const CHANNEL_NAME = String(channelName || "").trim().replace(/^#/, "");
@@ -186,20 +193,6 @@ export function registerGamepingModule({
       const scamFlag = parts.some((p) => String(p).toLowerCase() === "scam");
       const roleMention = buildGamePingMentions(pingKey, pingCfg);
 
-      if (!webhookClient) {
-        return replyRaw("Discord webhook not configured (DISCORD_WEBHOOK_URL).");
-      }
-
-      await webhookClient.send({
-        content: [
-          roleMention,
-          `🎮 GAME PING: ${pingCfg.label}${scamFlag ? " [GAME WAS SCAMMED FOR]" : ""}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        username: "MainsBot",
-      });
-
       const streamUrl = `https://twitch.tv/${CHANNEL_NAME}`;
       const linkEmbed = new EmbedBuilder()
         .setColor(0x9146ff)
@@ -211,6 +204,33 @@ export function registerGamepingModule({
 
       const previewImg = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${CHANNEL_NAME.toLowerCase()}-1280x720.jpg`;
       linkEmbed.setImage(previewImg);
+
+      if (discordMessenger && resolvedDiscordChannelId) {
+        await discordMessenger.send(resolvedDiscordChannelId, {
+          content: [
+            roleMention,
+            `🎮 GAME PING: ${pingCfg.label}${scamFlag ? " [GAME WAS SCAMMED FOR]" : ""}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          embeds: [linkEmbed],
+        });
+        return replyRaw(`Ping sent (${pingCfg.label})`);
+      }
+
+      if (!webhookClient) {
+        return replyRaw("Discord not configured (set webhook_url or bot_token+announce_channel_id).");
+      }
+
+      await webhookClient.send({
+        content: [
+          roleMention,
+          `🎮 GAME PING: ${pingCfg.label}${scamFlag ? " [GAME WAS SCAMMED FOR]" : ""}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        username: "MainsBot",
+      });
 
       await webhookClient.send({
         embeds: [linkEmbed],

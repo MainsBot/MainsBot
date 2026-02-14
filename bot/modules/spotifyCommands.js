@@ -71,6 +71,7 @@ export function registerSpotifyCommands({
   streamerDisplayName = "Streamer",
   isSharedCommandCooldownActive,
   getChatPerms,
+  logModAction,
 } = {}) {
   if (!client || typeof client.on !== "function") {
     throw new Error("registerSpotifyCommands: missing tmi client");
@@ -129,7 +130,9 @@ export function registerSpotifyCommands({
       const progress = msToTime(np.progressMs);
       const total = msToTime(np.durationMs);
 
-      return reply(`Now playing: ${trackLabel}${explicitTag} [${progress}/${total}]`);
+      return reply(
+        `${streamerDisplayName} is currently listening to: ${trackLabel}${explicitTag} [${progress}/${total}]`
+      );
     }
 
     if (isLastSongCommand) {
@@ -171,6 +174,18 @@ export function registerSpotifyCommands({
 
     if (lower === "!skipsong") {
       const r = await SPOTIFY.skipNext().catch(() => null);
+      try {
+        await logModAction?.({
+          action: "spotify_skip",
+          ok: Boolean(r?.ok),
+          channelName,
+          user: {
+            login: String(userstate?.username || "").toLowerCase(),
+            id: String(userstate?.["user-id"] || ""),
+            displayName: String(userstate?.["display-name"] || userstate?.username || ""),
+          },
+        });
+      } catch {}
       return reply(r?.ok ? "Successfully skiped current song." : "❌ Skip failed.");
     }
 
@@ -180,6 +195,20 @@ export function registerSpotifyCommands({
 
       const vol = Math.max(0, Math.min(100, n));
       const r = await SPOTIFY.setVolume(vol).catch(() => null);
+
+      try {
+        await logModAction?.({
+          action: "spotify_volume",
+          ok: Boolean(r?.ok),
+          channelName,
+          user: {
+            login: String(userstate?.username || "").toLowerCase(),
+            id: String(userstate?.["user-id"] || ""),
+            displayName: String(userstate?.["display-name"] || userstate?.username || ""),
+          },
+          meta: { volume: vol },
+        });
+      } catch {}
 
       return reply(r?.ok ? `Successfully set spotify volume to ${vol}%` : "Set volume failed.");
     }
@@ -206,6 +235,23 @@ export function registerSpotifyCommands({
         }
 
         const r = await SPOTIFY.addToQueue(uri);
+        try {
+          await logModAction?.({
+            action: "spotify_addsong",
+            ok: Boolean(r?.ok),
+            channelName,
+            user: {
+              login: String(userstate?.username || "").toLowerCase(),
+              id: String(userstate?.["user-id"] || ""),
+              displayName: String(userstate?.["display-name"] || userstate?.username || ""),
+            },
+            meta: {
+              input,
+              trackName: String(track?.name || ""),
+              trackUri: String(track?.uri || uri || ""),
+            },
+          });
+        } catch {}
         return reply(
           r?.ok
             ? `Successfully added ${track?.name || "that song"} to the queue.`
@@ -213,6 +259,20 @@ export function registerSpotifyCommands({
         );
       } catch (err) {
         console.error("[SPOTIFY] !addsong crashed:", err);
+        try {
+          await logModAction?.({
+            action: "spotify_addsong",
+            ok: false,
+            channelName,
+            user: {
+              login: String(userstate?.username || "").toLowerCase(),
+              id: String(userstate?.["user-id"] || ""),
+              displayName: String(userstate?.["display-name"] || userstate?.username || ""),
+            },
+            meta: { input },
+            error: String(err?.message || err),
+          });
+        } catch {}
         return reply("Spotify error while adding song.");
       }
     }

@@ -4,6 +4,7 @@ import fs from "fs";
 const DEFAULT_PATH = String(process.env.PLAYTIME_PATH || "./playtime.json").trim();
 const DEFAULT_CHAT_MAX_MESSAGE_CHARS = 320;
 const DEFAULT_MAX_GAME_NAME_CHARS = 24;
+const DEBUG_PLAYTIME = /^(1|true|yes|on)$/i.test(String(process.env.PLAYTIME_DEBUG || "").trim());
 
 function normalizeState(s) {
   return {
@@ -35,12 +36,11 @@ function loadJSON(path = DEFAULT_PATH) {
 
 function saveJSON(data, path = DEFAULT_PATH) {
   try {
-    console.log("[playtime] cwd =", process.cwd());
-    console.log("[playtime] writing to =", path);
+    if (DEBUG_PLAYTIME) {
+      console.log("[playtime] saving state (backend handled by stateInterceptor)");
+    }
 
     fs.writeFileSync(path, JSON.stringify(data, null, 2), "utf8");
-
-    console.log("[playtime] OK wrote OK");
   } catch (e) {
     console.error("[playtime] ERROR write failed:", e?.message || e);
     console.error("[playtime] path was:", path);

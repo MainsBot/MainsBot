@@ -267,7 +267,7 @@ export function parseRawPrivmsg(rawLine) {
   };
 }
 
-function getHelixChatConfig(overrides = {}) {
+export function getHelixChatConfig(overrides = {}) {
   // Read token store per call so OAuth callback updates are picked up without restart.
   const runtimeStore = readTokenStore(getTokenStorePath());
   const runtimeBotStore =
@@ -385,6 +385,30 @@ function validateHelixChatConfig(config) {
     missing.push(`Streamer missing scopes: ${config.missingStreamerScopes.join(", ")} (reauth /auth/twitch/streamer)`);
   }
   return missing;
+}
+
+export function getHelixChatDiagnostics({ configOverrides = {} } = {}) {
+  const config = getHelixChatConfig(configOverrides);
+  const missing = validateHelixChatConfig(config);
+  return {
+    useHelix: config.useHelix,
+    useAppToken: Boolean(config.useAppToken),
+    allowIrcFallback: TWITCH_CHAT_ALLOW_IRC_FALLBACK,
+    requireTokenStore: config.requireTokenStore,
+    requireBotScopes: config.requireBotScopes,
+    requireStreamerScopes: config.requireStreamerScopes,
+    clientIdPresent: Boolean(String(config.clientId || "").trim()),
+    clientSecretPresent: Boolean(String(config.clientSecret || "").trim()),
+    tokenPresent: Boolean(String(config.token || "").trim()),
+    senderId: String(config.senderId || "").trim(),
+    broadcasterId: String(config.broadcasterId || "").trim(),
+    broadcasterLogin: String(config.broadcasterLogin || "").trim(),
+    botScopesOk: Boolean(config.botScopesOk),
+    streamerScopesOk: Boolean(config.streamerScopesOk),
+    missingBotScopes: Array.isArray(config.missingBotScopes) ? config.missingBotScopes : [],
+    missingStreamerScopes: Array.isArray(config.missingStreamerScopes) ? config.missingStreamerScopes : [],
+    missingConfig: missing,
+  };
 }
 
 function isChannelMatch(config, channelName) {
@@ -694,6 +718,28 @@ function resolveBroadcasterId(auth) {
   if (id) return id;
   if (auth?.role === TWITCH_ROLES.STREAMER && auth?.userId) return String(auth.userId);
   return "";
+}
+
+export async function isUserModerator({ broadcasterId, userId, preferredRole = "streamer" } = {}) {
+  const targetBroadcasterId = String(broadcasterId || "").trim();
+  const targetUserId = String(userId || "").trim();
+  if (!targetBroadcasterId || !targetUserId) return false;
+
+  const auth = await resolveHelixModeratorAuth({ preferred: preferredRole });
+  if (!auth?.accessToken || !auth?.clientId) return false;
+
+  const url = new URL("https://api.twitch.tv/helix/moderation/moderators");
+  url.searchParams.set("broadcaster_id", targetBroadcasterId);
+  url.searchParams.set("user_id", targetUserId);
+
+  const json = await fetchHelixJson({
+    url: url.toString(),
+    method: "GET",
+    clientId: auth.clientId,
+    accessToken: auth.accessToken,
+  });
+
+  return Array.isArray(json?.data) && json.data.length > 0;
 }
 
 const helixUserIdCache = new Map();

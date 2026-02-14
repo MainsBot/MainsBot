@@ -158,10 +158,112 @@ function getTrackedFriendTargets({ permanent = null } = {}) {
       username: String(entry?.username || "").trim(),
       permanent: isPermanent,
       source: String(entry?.source || "").trim(),
+      addedAt: String(entry?.addedAt || "").trim() || null,
+      addedBy: String(entry?.addedBy || "").trim() || null,
     });
   }
 
   return targets;
+}
+
+export function listTrackedRobloxFriends({ scope = "all" } = {}) {
+  const normalizedScope = String(scope || "all").trim().toLowerCase();
+  const permanentFilter =
+    normalizedScope === "temp" || normalizedScope === "temporary"
+      ? false
+      : normalizedScope === "perm" || normalizedScope === "permanent"
+        ? true
+        : null;
+
+  const targets = getTrackedFriendTargets({ permanent: permanentFilter });
+  return targets.sort((a, b) => {
+    const nameA = String(a?.username || "").toLowerCase();
+    const nameB = String(b?.username || "").toLowerCase();
+    if (nameA < nameB) return -1;
+    if (nameA > nameB) return 1;
+    return String(a?.userId || "").localeCompare(String(b?.userId || ""));
+  });
+}
+
+export async function unfriendTrackedRobloxFriends({
+  includePermanent = false,
+  delayMs = 250,
+} = {}) {
+  const targets = getTrackedFriendTargets({
+    permanent: includePermanent ? null : false,
+  });
+
+  if (!targets.length) {
+    return {
+      ok: true,
+      totalBefore: 0,
+      processed: 0,
+      removed: 0,
+      alreadyNotFriends: 0,
+      failed: 0,
+      stoppedRateLimit: false,
+      includePermanent: !!includePermanent,
+      remainingTemp: getTrackedFriendTargets({ permanent: false }).length,
+      remainingPermanent: getTrackedFriendTargets({ permanent: true }).length,
+      entries: [],
+    };
+  }
+
+  const perEntry = [];
+  let removed = 0;
+  let alreadyNotFriends = 0;
+  let failed = 0;
+  let stoppedRateLimit = false;
+
+  for (const target of targets) {
+    const result = await ROBLOX_FUNCTIONS.removeFriend(target.userId).catch(() => "error");
+    const normalizedResult = String(result || "error").trim().toLowerCase();
+
+    if (normalizedResult === "success") {
+      removeTrackedFriend(target.userId);
+      removed += 1;
+    } else if (normalizedResult === "not_friends") {
+      removeTrackedFriend(target.userId);
+      alreadyNotFriends += 1;
+    } else if (normalizedResult === "rate_limited") {
+      failed += 1;
+      stoppedRateLimit = true;
+      perEntry.push({
+        userId: target.userId,
+        username: target.username,
+        permanent: target.permanent,
+        status: "rate_limited",
+      });
+      break;
+    } else {
+      failed += 1;
+    }
+
+    perEntry.push({
+      userId: target.userId,
+      username: target.username,
+      permanent: target.permanent,
+      status: normalizedResult || "error",
+    });
+
+    if (Number(delayMs) > 0) {
+      await delay(Number(delayMs));
+    }
+  }
+
+  return {
+    ok: true,
+    totalBefore: targets.length,
+    processed: perEntry.length,
+    removed,
+    alreadyNotFriends,
+    failed,
+    stoppedRateLimit,
+    includePermanent: !!includePermanent,
+    remainingTemp: getTrackedFriendTargets({ permanent: false }).length,
+    remainingPermanent: getTrackedFriendTargets({ permanent: true }).length,
+    entries: perEntry,
+  };
 }
 
 export async function addTrackedRobloxFriend({
@@ -305,42 +407,18 @@ export async function handleRobloxModCommands({
   }
 
   if (cmd === "!unfriendtemp" || cmd === "!unfriendall") {
-    const tempTargets = getTrackedFriendTargets({ permanent: false });
+    const tempTargets = listTrackedRobloxFriends({ scope: "temp" });
     if (!tempTargets.length) {
       reply("No temporary tracked users to unfriend.");
       return true;
     }
 
-    let successCount = 0;
-    let notFriendsCount = 0;
-    let failCount = 0;
-    let rateLimited = false;
-
-    for (const target of tempTargets) {
-      const unfriendResult = await ROBLOX_FUNCTIONS.removeFriend(target.userId).catch(
-        () => "error"
-      );
-
-      if (unfriendResult === "success") {
-        removeTrackedFriend(target.userId);
-        successCount += 1;
-      } else if (unfriendResult === "not_friends") {
-        removeTrackedFriend(target.userId);
-        notFriendsCount += 1;
-      } else if (unfriendResult === "rate_limited") {
-        rateLimited = true;
-        failCount += 1;
-        break;
-      } else {
-        failCount += 1;
-      }
-
-      await delay(250);
-    }
-
-    const permanentLeft = getTrackedFriendTargets({ permanent: true }).length;
+    const outcome = await unfriendTrackedRobloxFriends({
+      includePermanent: false,
+      delayMs: 250,
+    });
     reply(
-      `Temp unfriend done: removed ${successCount}, already-not-friends ${notFriendsCount}, failed ${failCount}. Permanent tracked kept: ${permanentLeft}.${rateLimited ? " Stopped early due to rate limit." : ""}`
+      `Temp unfriend done: removed ${outcome.removed}, already-not-friends ${outcome.alreadyNotFriends}, failed ${outcome.failed}. Permanent tracked kept: ${outcome.remainingPermanent}.${outcome.stoppedRateLimit ? " Stopped early due to rate limit." : ""}`
     );
     return true;
   }

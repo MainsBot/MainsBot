@@ -17,7 +17,7 @@ try {
     /^(1|true|yes|on)$/i.test(autoDump || "0");
 
   if (wantDump) {
-    const { ensureGamepingRolesDump } = await import("./bot/modules/gamepingRoles.js");
+    const { ensureGamepingRolesDump } = await import("./bot/discord/gamepingRoles.js");
     await ensureGamepingRolesDump({ logger: console });
   }
 } catch (e) {

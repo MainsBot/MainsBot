@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Login | MainsBot</title>
+  <meta name="description" content="Sign in to the MainsBot admin dashboard." />
+  <meta name="theme-color" content="#ffbd59" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="MainsBot" />
+  <meta property="og:title" content="Admin Login | MainsBot" />
+  <meta property="og:description" content="Sign in to the MainsBot admin dashboard." />
+  <meta property="og:image" content="/favicon.svg" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Admin Login | MainsBot" />
+  <meta name="twitter:description" content="Sign in to the MainsBot admin dashboard." />
+  <meta name="twitter:image" content="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.svg" />
+  <link rel="alternate icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/favicon.svg" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div class="topbar__brand">
+        <a href="/">MainsBot</a>
+        <span class="muted">Admin Login</span>
+      </div>
+      <div class="topbar__links">
+        <a class="btn btn--sm btn--ghost" href="/home">Home</a>
+        <a class="btn btn--sm btn--ghost" href="/admin">Admin</a>
+      </div>
+      <div class="topbar__right">
+        <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
+      </div>
+    </div>
+
+    <div class="app">
+      <section class="card login-card">
+        <div class="card__hd">
+          <div>
+            <div class="pill">Admin Login</div>
+            <h1 class="login-title">Sign in</h1>
+            <div class="muted login-subtitle">Access the admin dashboard with password or Twitch OAuth.</div>
+          </div>
+        </div>
+        <div class="card__bd">
+          <div class="grid grid--2 login-grid __LOGIN_GRID_CLASS__">
+            <form class="panel login-form" method="POST" action="/admin/login">
+              <input type="hidden" name="next" value="__NEXT_PATH__" />
+              <label class="login-label" for="adminLoginUsername">Username</label>
+              <input
+                id="adminLoginUsername"
+                class="in login-input"
+                name="username"
+                placeholder="Username"
+                autocomplete="username"
+                required
+              />
+              <label class="login-label" for="adminLoginPassword">Password</label>
+              <input
+                id="adminLoginPassword"
+                class="in login-input"
+                name="password"
+                type="password"
+                placeholder="Password"
+                autocomplete="current-password"
+                required
+              />
+              <div class="row login-actions">
+                <button class="btn" type="submit">Login</button>
+                <a class="btn btn--ghost" href="/home">Cancel</a>
+              </div>
+            </form>
+
+            <aside class="panel login-twitch __TWITCH_CLASS__">
+              <h2 class="login-panel-title">Sign in with Twitch</h2>
+              <div class="muted login-panel-text">
+                If you are a mod you will be allowed to login.
+              </div>
+              <div class="row login-panel-actions">
+                <a class="btn" href="__TWITCH_HREF__">Continue with Twitch</a>
+              </div>
+            </aside>
+          </div>
+
+          <div class="muted login-footer-note">
+            Access control still applies after login.
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

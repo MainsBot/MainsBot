@@ -6,13 +6,6 @@ function flagFromValue(value) {
   return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
 }
 
-function normalizeChannelLogin(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^[@#]+/, "")
-    .toLowerCase();
-}
-
 function readDataDir() {
   return String(process.env.DATA_DIR || "").trim();
 }
@@ -62,9 +55,8 @@ function shouldDump(outPath) {
   if (isPostgres) {
     try {
       const parsed = JSON.parse(String(fs.readFileSync(outPath, "utf8") || ""));
-      const pingCount = parsed?.pings && typeof parsed.pings === "object"
-        ? Object.keys(parsed.pings).length
-        : 0;
+      const pingCount =
+        parsed?.pings && typeof parsed.pings === "object" ? Object.keys(parsed.pings).length : 0;
       const hasGeneratedAt = Boolean(parsed?.generatedAt);
       if (pingCount === 0 || !hasGeneratedAt) return true;
     } catch {
@@ -102,19 +94,14 @@ function shouldDump(outPath) {
 
 function parseExcludeRoleNames() {
   const raw = String(process.env.GAMEPING_ROLES_EXCLUDE || "").trim();
-  const entries = raw
-    ? raw.split(/[,\r\n]+/).map((s) => s.trim()).filter(Boolean)
-    : [];
+  const entries = raw ? raw.split(/[,\r\n]+/).map((s) => s.trim()).filter(Boolean) : [];
   const set = new Set(["Anti Ghost Ping"]);
   for (const name of entries) set.add(name);
   return set;
 }
 
 function keyFromRoleName(roleName) {
-  return String(roleName || "")
-    .replace(/\s*ping\s*$/i, "")
-    .trim()
-    .toLowerCase();
+  return String(roleName || "").replace(/\s*ping\s*$/i, "").trim().toLowerCase();
 }
 
 function labelFromRoleName(roleName) {
@@ -187,3 +174,4 @@ export async function ensureGamepingRolesDump({ logger = console } = {}) {
     } catch {}
   }
 }
+

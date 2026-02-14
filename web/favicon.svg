@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="MainsBot icon">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#2a1d0a"/>
+      <stop offset="1" stop-color="#140f06"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffdc9b"/>
+      <stop offset="1" stop-color="#ffbd59"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="116" height="116" rx="24" fill="url(#bg)" stroke="#6f5225" stroke-width="6"/>
+  <path d="M30 92V36h16l18 24 18-24h16v56H82V63L64 86 46 63v29H30z" fill="url(#accent)"/>
+</svg>

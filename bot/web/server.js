@@ -2,7 +2,7 @@ import fs from "fs";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 
 import * as sass from "sass";
 import { minify as terserMinify } from "terser";
@@ -10,11 +10,13 @@ import CleanCSS from "clean-css";
 
 import { flushStateNow } from "../../data/postgres/stateInterceptor.js";
 import { createWebAdminAuth } from "../api/twitch/webAdmin.js";
+import { isUserModerator, updateChannelInfo, getGameIdByName } from "../api/twitch/helix.js";
 import {
   TWITCH_ROLES,
   buildAuthorizeUrl,
   buildTwitchAuthSettings,
   exchangeCodeForRole,
+  getRoleAccessToken,
   getPublicTokenSnapshot,
 } from "../api/twitch/auth.js";
 import {
@@ -23,12 +25,20 @@ import {
   exchangeRobloxCode,
   getPublicRobloxTokenSnapshot,
 } from "../api/roblox/auth.js";
+import * as ROBLOX from "../api/roblox/index.js";
 import {
   buildSpotifyAuthSettings,
   buildSpotifyAuthorizeUrl,
   exchangeSpotifyCode,
   getPublicSpotifyTokenSnapshot,
 } from "../api/spotify/auth.js";
+import * as SPOTIFY from "../api/spotify/index.js";
+import {
+  addTrackedRobloxFriend,
+  isRobloxModuleEnabled,
+  listTrackedRobloxFriends,
+  unfriendTrackedRobloxFriends,
+} from "../modules/roblox.js";
 
 function flagFromEnv(value) {
   return /^(1|true|yes|on)$/i.test(String(value || "").trim());
@@ -57,6 +67,10 @@ export function startWebServer(deps = {}) {
   const WEB_OWNER_USER_ID = String(process.env.WEB_OWNER_USER_ID || "").trim();
   const WEB_OWNER_LOGIN = String(process.env.WEB_OWNER_LOGIN || "").trim();
   const WEB_ALLOWED_USERS = String(process.env.WEB_ALLOWED_USERS || "").trim();
+  const WEB_AUTH_MODE = String(process.env.WEB_AUTH_MODE || "").trim().toLowerCase();
+  const WEB_ADMIN_USERNAME = String(process.env.WEB_ADMIN_USERNAME || "").trim();
+  const WEB_ADMIN_PASSWORD = String(process.env.WEB_ADMIN_PASSWORD || "");
+  const WEB_ADMIN_PASSWORD_HASH = String(process.env.WEB_ADMIN_PASSWORD_HASH || "").trim();
   const WEB_LOGIN_FORCE_VERIFY = flagFromEnv(
     process.env.WEB_LOGIN_FORCE_VERIFY || process.env.TWITCH_AUTH_FORCE_VERIFY || ""
   );
@@ -80,8 +94,77 @@ export function startWebServer(deps = {}) {
     forceVerify: WEB_LOGIN_FORCE_VERIFY,
   });
 
+  function normalizeLogin(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function safeEqualText(a, b) {
+    const aa = Buffer.from(String(a ?? ""), "utf8");
+    const bb = Buffer.from(String(b ?? ""), "utf8");
+    if (aa.length !== bb.length) {
+      // Spend roughly the same amount of time even when lengths differ.
+      try {
+        const ha = createHash("sha256").update(aa).digest();
+        const hb = createHash("sha256").update(bb).digest();
+        timingSafeEqual(ha, hb);
+      } catch {}
+      return false;
+    }
+    try {
+      return timingSafeEqual(aa, bb);
+    } catch {
+      return false;
+    }
+  }
+
+  const passwordAuthConfigured = Boolean(
+    normalizeLogin(WEB_ADMIN_USERNAME) &&
+      (String(WEB_ADMIN_PASSWORD || "").trim() || String(WEB_ADMIN_PASSWORD_HASH || "").trim())
+  );
+
+  const usePasswordAuth =
+    WEB_AUTH_MODE === "password" ||
+    ((WEB_AUTH_MODE === "" || WEB_AUTH_MODE === "auto") && passwordAuthConfigured);
+
+  function verifyAdminPasswordLogin({ username, password } = {}) {
+    const expectedUser = normalizeLogin(WEB_ADMIN_USERNAME);
+    if (!expectedUser) return { ok: false, error: "Missing [web].admin_username" };
+    if (normalizeLogin(username) !== expectedUser) return { ok: false, error: "Invalid username or password." };
+
+    const supplied = String(password ?? "");
+    const hash = String(WEB_ADMIN_PASSWORD_HASH || "").trim();
+    if (hash) {
+      // Supported formats:
+      // - sha256:<hex>
+      if (hash.toLowerCase().startsWith("sha256:")) {
+        const expectedHex = hash.slice("sha256:".length).trim().toLowerCase();
+        const gotHex = createHash("sha256").update(supplied, "utf8").digest("hex").toLowerCase();
+        return safeEqualText(gotHex, expectedHex)
+          ? { ok: true }
+          : { ok: false, error: "Invalid username or password." };
+      }
+      return { ok: false, error: "Unsupported [web].admin_password_hash format (use sha256:<hex>)."};
+    }
+
+    const expectedPw = String(WEB_ADMIN_PASSWORD || "");
+    if (!expectedPw) return { ok: false, error: "Missing [web].admin_password" };
+    return safeEqualText(supplied, expectedPw)
+      ? { ok: true }
+      : { ok: false, error: "Invalid username or password." };
+  }
+
   function isAdminAllowedSession(session) {
     if (!session?.userId || !session?.login) return false;
+
+    if (String(session.mode || "").trim().toLowerCase() === "password") {
+      // Cookie is signed; this means the user successfully logged in via /admin/login.
+      // Optionally pin to the configured admin username to prevent stale cookies from being accepted after a change.
+      const expectedUser = normalizeLogin(WEB_ADMIN_USERNAME);
+      if (!expectedUser) return false;
+      return normalizeLogin(session.login) === expectedUser;
+    }
+
+    if (session?.isMod === true) return true;
     if (WEB_ADMIN_AUTH.isAllowed(session)) return true;
 
     // Also allow the configured streamer/bot accounts to access /admin and /auth flows
@@ -97,7 +180,166 @@ export function startWebServer(deps = {}) {
     return false;
   }
 
+  function sanitizeSettingsForStorage(input = {}) {
+    const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+    const out = { ...src };
+
+    const bool = (v, fallback = false) => (v == null ? fallback : Boolean(v));
+    const str = (v, fallback = "") => (v == null ? fallback : String(v)).trim();
+    const num = (v, fallback = 0) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const int = (v, fallback = 0) => Math.max(0, Math.floor(num(v, fallback)));
+    const arrStr = (v) =>
+      Array.isArray(v) ? v.map((x) => String(x || "").trim()).filter(Boolean) : [];
+    const obj = (v, fallback = {}) =>
+      v && typeof v === "object" && !Array.isArray(v) ? v : fallback;
+
+    // Normalize common keys used by both the bot and admin UI.
+    out.ks = bool(out.ks, false);
+    out.timers = bool(out.timers, true);
+    out.keywords = bool(out.keywords, true);
+    out.spamFilter = bool(out.spamFilter, true);
+    out.lengthFilter = bool(out.lengthFilter, false);
+    out.linkFilter = bool(out.linkFilter, true);
+    out.linkAllowlist = arrStr(out.linkAllowlist);
+    out.currentMode = str(out.currentMode, "!join.on");
+    out.currentGame = str(out.currentGame, "Website");
+    out.currentLink = out.currentLink == null ? null : str(out.currentLink, "");
+
+    out.filterExemptions = arrStr(out.filterExemptions);
+    out.bots = arrStr(out.bots);
+    out.joinTimer = bool(out.joinTimer, true);
+    out.gamesPlayedCount = int(out.gamesPlayedCount, 5);
+
+    out.timer = obj(out.timer, {
+      join: "type !join to join the game",
+      link: "type !link to get the link to join",
+      "1v1": "type 1v1 in chat once to get a chance to 1v1 the streamer",
+      ticket: "type !ticket to join the game",
+      val: "type !val to join",
+    });
+    out.main = obj(out.main, { join: "!join", link: "!link", "1v1": "!1v1", ticket: "!ticket", val: "!val" });
+    out.nonFollowers = obj(out.nonFollowers, {
+      join: "click the follow button on twitch to get access to the join command",
+    });
+
+    out.validModes = arrStr(out.validModes);
+    out.specialModes = arrStr(out.specialModes);
+    out.customModes = arrStr(out.customModes);
+    out.ignoreModes = arrStr(out.ignoreModes);
+
+    if (!out.validModes.length) {
+      out.validModes = ["!join.on", "!link.on", "!1v1.on", "!ticket.on", "!val.on", "!reddit.on"];
+    }
+    if (!out.specialModes.length) {
+      out.specialModes = [
+        "!ks.on",
+        "!ks.off",
+        "!timer.on",
+        "!timer.off",
+        "!keywords.on",
+        "!keywords.off",
+        "!timers.off",
+        "!timers.on",
+        "!sleep.on",
+        "!sleep.off",
+      ];
+    }
+    if (!out.customModes.length) {
+      out.customModes = ["!xqcchat.on", "!xqcchat.off"];
+    }
+    if (!out.ignoreModes.length) {
+      out.ignoreModes = [
+        "!spamfilter.on",
+        "!spamfilter.off",
+        "!lengthfilter.on",
+        "!lengthfilter.off",
+        "!linkfilter.on",
+        "!linkfilter.off",
+        "!sleep.on",
+      ];
+    }
+
+    out.corrections = obj(out.corrections, {});
+    out.titles = obj(out.titles, {
+      join: "FREE ROBUX LIVE - WIN THIS GAME - !JOIN TO PLAY - !socials !discord",
+      link: "FREE ROBUX LIVE - WIN THIS GAME - !LINK TO PLAY - !socials !discord",
+      ticket: "FREE ROBUX LIVE - WIN THIS GAME - !TICKET TO PLAY - !socials !discord",
+      "1v1": "ARSENAL 1V1 - WIN = FREE ROBUX - !1V1 TO PLAY - !socials !discord",
+      val: "VALORANT - !VAL TO PLAY - !socials !discord",
+      reddit: "REDDIT RECAP - !socials !discord !reddit",
+    });
+    out.modeGames = obj(out.modeGames, {});
+    for (const [k, v] of Object.entries(out.modeGames)) {
+      const key = String(k || "").trim();
+      const val = String(v || "").trim();
+      if (!key || !val) {
+        delete out.modeGames[k];
+      } else {
+        out.modeGames[key] = val;
+      }
+    }
+
+    // Remove runtime/diagnostic keys (should not be persisted).
+    delete out.subathonDay;
+    delete out.account;
+    delete out.gameChangeTime;
+    delete out.lastGameExitTime;
+    delete out.followerOnlyMode;
+    delete out.discordRobloxLogging;
+    delete out.responseCount;
+    delete out.chatArray;
+
+    // Filter tuning (timeouts/intervals/messages).
+    out.filters = obj(out.filters, {});
+    out.filters.spam = obj(out.filters.spam, {});
+    out.filters.length = obj(out.filters.length, {});
+    out.filters.link = obj(out.filters.link, {});
+
+    out.filters.spam.windowMs = int(out.filters.spam.windowMs, 7000);
+    out.filters.spam.minMessages = int(out.filters.spam.minMessages, 5);
+    out.filters.spam.strikeResetMs = int(out.filters.spam.strikeResetMs, 10 * 60 * 1000);
+    out.filters.spam.timeoutFirstSec = int(out.filters.spam.timeoutFirstSec, 30);
+    out.filters.spam.timeoutRepeatSec = int(out.filters.spam.timeoutRepeatSec, 60);
+    out.filters.spam.reason = str(
+      out.filters.spam.reason,
+      "[AUTOMATIC] Please stop excessively spamming - MainsBot"
+    );
+    out.filters.spam.messageFirst = str(
+      out.filters.spam.messageFirst,
+      "{atUser}, please stop excessively spamming."
+    );
+    out.filters.spam.messageRepeat = str(
+      out.filters.spam.messageRepeat,
+      "{atUser} Please STOP excessively spamming."
+    );
+
+    out.filters.length.maxChars = int(out.filters.length.maxChars, 400);
+    out.filters.length.strikeResetMs = int(out.filters.length.strikeResetMs, 10 * 60 * 1000);
+    out.filters.length.timeoutFirstSec = int(out.filters.length.timeoutFirstSec, 30);
+    out.filters.length.timeoutRepeatSec = int(out.filters.length.timeoutRepeatSec, 60);
+    out.filters.length.reason = str(
+      out.filters.length.reason,
+      "[AUTOMATIC] Message exceeds max character limit - MainsBot"
+    );
+    out.filters.length.message = str(
+      out.filters.length.message,
+      "{atUser} Message exceeds max character limit."
+    );
+
+    out.filters.link.strikeResetMs = int(out.filters.link.strikeResetMs, 10 * 60 * 1000);
+    out.filters.link.timeoutFirstSec = int(out.filters.link.timeoutFirstSec, 1);
+    out.filters.link.timeoutRepeatSec = int(out.filters.link.timeoutRepeatSec, 5);
+    out.filters.link.reason = str(out.filters.link.reason, "[AUTOMATIC] No links allowed - MainsBot");
+    out.filters.link.message = str(out.filters.link.message, "{atUser} No links allowed in chat.");
+
+    return out;
+  }
+
   let WEB_BUILD = null;
+  let LAST_SCSS_CSS = "";
   const cssMinifier = new CleanCSS({ level: 2 });
 
 if (!fs.existsSync(STATIC_DIR)) {
@@ -105,31 +347,33 @@ if (!fs.existsSync(STATIC_DIR)) {
   console.log("[WEB] created static directory");
 }
 
-function compileScss() {
+function hashContentBase36(content, len = 10) {
+  const hex = createHash("sha1").update(content).digest("hex");
+  const base36 = BigInt(`0x${hex}`).toString(36);
+  return base36.slice(0, len);
+}
+
+function compileScssToCssText() {
   try {
-    console.log("[WEB] compiling scss...");
-    console.log("[WEB] SCSS_PATH:", SCSS_PATH);
-    console.log("[WEB] CSS_PATH :", CSS_PATH);
-
-    // ensure dirs exist
-    fs.mkdirSync(path.dirname(CSS_PATH), { recursive: true });
-
     if (!fs.existsSync(SCSS_PATH)) {
       console.error("[WEB] SCSS file not found:", SCSS_PATH);
-      return;
+      return "";
     }
 
-    const out = sass.compile(SCSS_PATH, { style: "compressed" });
-
-    // out.css should be a string
-    fs.writeFileSync(CSS_PATH, out.css, "utf8");
-
-    const bytes = fs.statSync(CSS_PATH).size;
-    console.log(`[WEB] SCSS compiled OK -> ${CSS_PATH} (${bytes} bytes)`);
-    void buildWebAssets();
+    const out = sass.compile(SCSS_PATH, { style: "expanded" });
+    return String(out?.css ?? "");
   } catch (e) {
     console.error("[WEB] SCSS compile failed:", e);
+    return "";
   }
+}
+
+function compileScss() {
+  console.log("[WEB] compiling scss...");
+  const css = compileScssToCssText();
+  if (!String(css || "").trim()) return;
+  LAST_SCSS_CSS = css;
+  void buildWebAssets();
 }
 
 compileScss();
@@ -137,10 +381,6 @@ compileScss();
 // auto-recompile when scss changes
 fs.watchFile(SCSS_PATH, { interval: 1200 }, compileScss);
 
-
-function hashContent(content) {
-  return createHash("sha1").update(content).digest("hex").slice(0, 8);
-}
 
 function minifyHtml(html) {
   if (typeof html !== "string") return "";
@@ -191,19 +431,20 @@ async function minifyJs(js, sourceLabel = "inline-js") {
 
 async function buildWebAssets() {
   try {
-    if (!fs.existsSync(BASE_JS_PATH) || !fs.existsSync(CSS_PATH)) {
+    if (!fs.existsSync(BASE_JS_PATH)) {
       return;
     }
 
     fs.mkdirSync(GEN_DIR, { recursive: true });
 
     const rawJs = fs.readFileSync(BASE_JS_PATH, "utf8");
-    const rawCss = fs.readFileSync(CSS_PATH, "utf8");
+    const rawCss = String(LAST_SCSS_CSS || "");
+    if (!rawCss.trim()) return;
     const js = await minifyJs(rawJs, BASE_JS_PATH);
-    const css = minifyCss(rawCss, CSS_PATH);
+    const css = minifyCss(rawCss, SCSS_PATH);
 
-    const jsFile = `base.${hashContent(js)}.js`;
-    const cssFile = `style.${hashContent(css)}.css`;
+    const jsFile = `base.${hashContentBase36(js)}.js`;
+    const cssFile = `style.${hashContentBase36(css)}.css`;
 
     fs.writeFileSync(path.join(GEN_DIR, jsFile), js, "utf8");
     fs.writeFileSync(path.join(GEN_DIR, cssFile), css, "utf8");
@@ -286,6 +527,16 @@ function safeJsonParse(text, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function parseBooleanInput(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text) return fallback;
+  if (["1", "true", "yes", "on"].includes(text)) return true;
+  if (["0", "false", "no", "off"].includes(text)) return false;
+  return fallback;
 }
 
 function abs(p) {
@@ -512,6 +763,15 @@ function getRequestOrigin(req) {
   return `${proto}://${host}`;
 }
 
+function getIsSecureRequest(req) {
+  const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+  return Boolean(req?.socket?.encrypted);
+}
+
 function isLocalAuthHost(hostname) {
   const value = String(hostname || "").trim().toLowerCase();
   return (
@@ -612,6 +872,858 @@ function escapeHtml(value) {
   });
 }
 
+function escapeJsonForInlineScript(value) {
+  return JSON.stringify(value ?? {}).replace(/[<>\u2028\u2029]/g, (ch) => {
+    if (ch === "<") return "\\u003c";
+    if (ch === ">") return "\\u003e";
+    if (ch === "\u2028") return "\\u2028";
+    if (ch === "\u2029") return "\\u2029";
+    return ch;
+  });
+}
+
+function renderTopbar({ who = "", active = "" } = {}) {
+  const safeWho = who ? escapeHtml(who) : "";
+  const a = String(active || "").trim().toLowerCase();
+  const link = (href, label, key, extra = "") => {
+    const isActive = key && a === String(key).trim().toLowerCase();
+    const cls = isActive ? "btn btn--sm" : "btn btn--sm btn--ghost";
+    return `<a class="${cls}" href="${href}" ${extra}>${escapeHtml(label)}</a>`;
+  };
+
+  const right = safeWho
+    ? `<div class="row" style="justify-content:flex-end"><a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a><span class="muted" style="font-size:13px">Logged in as</span><strong>${safeWho}</strong><a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a></div>`
+    : `<a class="btn btn--sm" href="/admin/login">Login</a>`;
+
+  return `<div class="topbar">
+    <div class="topbar__brand">
+      <a href="/">MainsBot</a>
+      <span class="muted">Admin</span>
+    </div>
+    <div class="topbar__links">
+      ${link("/", "Home", "home")}
+      ${link("/admin", "Admin", "admin")}
+    </div>
+    <div class="topbar__right">${right}</div>
+  </div>`;
+}
+
+function renderHeadMeta({
+  title = "MainsBot",
+  description = "Commands + live status and admin dashboard.",
+  imagePath = "/favicon.svg",
+} = {}) {
+  const fullTitle = `${String(title || "MainsBot").trim() || "MainsBot"} | MainsBot`;
+  const safeTitle = escapeHtml(fullTitle);
+  const safeDescription = escapeHtml(
+    String(description || "Commands + live status and admin dashboard.")
+  );
+  const safeImagePath = escapeHtml(String(imagePath || "/favicon.svg").trim() || "/favicon.svg");
+  return `
+    <meta name="description" content="${safeDescription}">
+    <meta name="theme-color" content="#ffbd59">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="MainsBot">
+    <meta property="og:title" content="${safeTitle}">
+    <meta property="og:description" content="${safeDescription}">
+    <meta property="og:image" content="${safeImagePath}">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="${safeTitle}">
+    <meta name="twitter:description" content="${safeDescription}">
+    <meta name="twitter:image" content="${safeImagePath}">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="shortcut icon" href="/favicon.svg">
+    <link rel="alternate icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" href="/favicon.svg">`;
+}
+
+function renderShell({
+  title = "MainsBot",
+  description = "Commands + live status and admin dashboard.",
+  who = "",
+  active = "",
+  body = "",
+} = {}) {
+  const cssHref = WEB_BUILD?.cssFile
+    ? `/static/gen/${WEB_BUILD.cssFile}`
+    : "/static/style.css";
+  return `<!doctype html>
+  <html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>${escapeHtml(title)} | MainsBot</title>
+    ${renderHeadMeta({ title, description })}
+    <link rel="stylesheet" href="${cssHref}" />
+  </head>
+  <body>
+    <div class="page">
+      ${renderTopbar({ who, active })}
+      ${body}
+    </div>
+  </body>
+  </html>`;
+}
+
+function buildOpenApiSpec({ requestOrigin = "" } = {}) {
+  const origin = String(requestOrigin || "").trim() || "http://localhost:8000";
+  return {
+    openapi: "3.0.3",
+    info: {
+      title: "MainsBot Admin API",
+      version: "1.0.0",
+      description: "Admin endpoints for settings, quotes, auth status, and mode apply.",
+    },
+    servers: [{ url: origin }],
+    tags: [
+      { name: "Admin" },
+      { name: "Auth" },
+      { name: "Status" },
+      { name: "Spotify" },
+      { name: "Roblox" },
+    ],
+    paths: {
+      "/api/admin/session": {
+        get: {
+          tags: ["Admin"],
+          summary: "Get current admin session",
+          responses: {
+            200: {
+              description: "Session payload",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: { type: "boolean" },
+                      authenticated: { type: "boolean" },
+                      session: { type: "object", additionalProperties: true, nullable: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/admin/settings": {
+        get: {
+          tags: ["Admin"],
+          summary: "Get settings JSON payload",
+          responses: {
+            200: { description: "Settings object" },
+            401: { description: "Unauthorized" },
+          },
+        },
+        post: {
+          tags: ["Admin"],
+          summary: "Save settings JSON payload",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    settings: {
+                      type: "object",
+                      description: "Settings object to persist.",
+                      additionalProperties: true,
+                    },
+                    settingsText: {
+                      type: "string",
+                      description: "Raw JSON text alternative.",
+                    },
+                  },
+                },
+                examples: {
+                  minimal: {
+                    value: {
+                      settings: {
+                        ks: false,
+                        timers: true,
+                        keywords: true,
+                        spamFilter: true,
+                        lengthFilter: false,
+                        linkFilter: true,
+                        currentMode: "!join.on",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Saved",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: { type: "boolean" },
+                      backend: { type: "string", example: "postgres" },
+                    },
+                  },
+                },
+              },
+            },
+            400: { description: "Invalid payload" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/admin/settings-json": {
+        get: {
+          tags: ["Admin"],
+          summary: "Get settings JSON payload",
+          responses: {
+            200: { description: "Settings object" },
+            401: { description: "Unauthorized" },
+          },
+        },
+        post: {
+          tags: ["Admin"],
+          summary: "Save settings JSON payload",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    settings: { type: "object", additionalProperties: true },
+                    settingsText: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Saved" },
+            400: { description: "Invalid payload" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/admin/apply-mode": {
+        post: {
+          tags: ["Admin"],
+          summary: "Apply selected mode/title/game to Twitch now",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    mode: { type: "string", example: "!join.on" },
+                    titles: { type: "object", additionalProperties: { type: "string" } },
+                    modeGames: { type: "object", additionalProperties: { type: "string" } },
+                  },
+                  required: ["mode"],
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Applied" },
+            400: { description: "Invalid mode/payload" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/spotify/add": {
+        post: {
+          tags: ["Spotify"],
+          summary: "Add a Spotify track to queue",
+          description:
+            "Requires admin session and linked Spotify account. Input accepts Spotify track URL, spotify:track URI, raw 22-char track id, or search text.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    input: {
+                      type: "string",
+                      example: "https://open.spotify.com/track/7dS5EaCoMnN7DzlpT6aRn2",
+                    },
+                    limit: {
+                      type: "integer",
+                      minimum: 1,
+                      maximum: 10,
+                      description: "Only used for search fallback.",
+                      example: 1,
+                    },
+                  },
+                  required: ["input"],
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Track added (or add failed with details)." },
+            400: { description: "Validation/auth/linking issue." },
+            401: { description: "Unauthorized." },
+            405: { description: "Method not allowed." },
+          },
+        },
+      },
+      "/api/spotify/skip": {
+        post: {
+          tags: ["Spotify"],
+          summary: "Skip current Spotify track",
+          description:
+            "Requires admin session and linked Spotify account.",
+          responses: {
+            200: { description: "Skip attempted." },
+            400: { description: "Spotify not linked/configured." },
+            401: { description: "Unauthorized." },
+            405: { description: "Method not allowed." },
+          },
+        },
+      },
+      "/api/roblox/friends/tracked": {
+        get: {
+          tags: ["Roblox"],
+          summary: "List tracked Roblox friend targets (TOUNFRIEND store)",
+          description:
+            "Admin-only endpoint. Returns tracked Roblox users that can be unfriended later.",
+          parameters: [
+            {
+              in: "query",
+              name: "scope",
+              required: false,
+              schema: {
+                type: "string",
+                enum: ["all", "temp", "temporary", "perm", "permanent"],
+              },
+              description: "Filter tracked list by scope.",
+            },
+          ],
+          responses: {
+            200: { description: "Tracked users list." },
+            401: { description: "Unauthorized." },
+          },
+        },
+      },
+      "/api/roblox/friends/current": {
+        get: {
+          tags: ["Roblox"],
+          summary: "Get current Roblox friends for linked account",
+          description:
+            "Admin-only endpoint. Uses linked Roblox account from OAuth. Optionally pass userId query param.",
+          parameters: [
+            {
+              in: "query",
+              name: "userId",
+              required: false,
+              schema: { type: "string" },
+              description: "Optional Roblox user id override.",
+            },
+            {
+              in: "query",
+              name: "limit",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 5000 },
+              description: "Maximum entries to return.",
+            },
+          ],
+          responses: {
+            200: { description: "Friends list." },
+            400: { description: "Roblox account not linked / invalid user id." },
+            401: { description: "Unauthorized." },
+          },
+        },
+      },
+      "/api/roblox/friends/add": {
+        post: {
+          tags: ["Roblox"],
+          summary: "Send Roblox friend request and track target",
+          description:
+            "Admin-only endpoint. Adds a user to tracked TOUNFRIEND store after friend request send/confirm.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    username: { type: "string", example: "Builderman" },
+                    permanent: { type: "boolean", example: false },
+                    source: { type: "string", example: "api" },
+                  },
+                  required: ["username"],
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Request processed." },
+            400: { description: "Validation/configuration issue." },
+            401: { description: "Unauthorized." },
+          },
+        },
+      },
+      "/api/roblox/friends/unfriend-all": {
+        post: {
+          tags: ["Roblox"],
+          summary: "Unfriend tracked Roblox users in bulk",
+          description:
+            "Admin-only endpoint. Unfriends tracked temporary users by default; set includePermanent=true to process all tracked users.",
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    includePermanent: { type: "boolean", example: false },
+                    delayMs: { type: "integer", minimum: 0, maximum: 10000, example: 250 },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Bulk unfriend result." },
+            401: { description: "Unauthorized." },
+          },
+        },
+      },
+      "/api/admin/quotes": {
+        get: {
+          tags: ["Admin"],
+          summary: "Get quotes JSON export",
+          responses: {
+            200: { description: "JSON response" },
+            401: { description: "Unauthorized" },
+          },
+        },
+        post: {
+          tags: ["Admin"],
+          summary: "Mutate quotes",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    action: {
+                      type: "string",
+                      enum: ["add", "edit", "delete", "replace"],
+                    },
+                    id: { type: "integer" },
+                    text: { type: "string" },
+                    quotesText: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Saved" },
+            400: { description: "Validation error" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/auth/status": {
+        get: {
+          tags: ["Auth"],
+          summary: "Get public auth/token status snapshot",
+          responses: {
+            200: { description: "Status payload" },
+          },
+        },
+      },
+      "/api/status": {
+        get: {
+          tags: ["Status"],
+          summary: "Get bot runtime status JSON",
+          responses: {
+            200: { description: "Status payload" },
+          },
+        },
+      },
+    },
+  };
+}
+
+function renderSwaggerUiHtml({ who = "" } = {}) {
+  const safeWho = escapeHtml(String(who || "").trim());
+  const cssHref = WEB_BUILD?.cssFile
+    ? `/static/gen/${WEB_BUILD.cssFile}`
+    : "/static/style.css";
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Swagger | MainsBot</title>
+  ${renderHeadMeta({
+    title: "Swagger",
+    description: "Interactive API docs for MainsBot endpoints.",
+  })}
+  <link rel="stylesheet" href="${cssHref}" />
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    .swagger-shell {
+      margin-top: 16px;
+      padding: 16px;
+    }
+    .swagger-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .swagger-head h1 {
+      margin: 10px 0 4px;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }
+    .swagger-head .meta {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    #swagger-ui {
+      max-width: 100%;
+      margin: 0;
+    }
+    .swagger-ui .topbar {
+      display: none;
+    }
+    .swagger-ui .scheme-container {
+      background: rgba(0, 0, 0, 0.22);
+      box-shadow: none;
+      border: 1px solid rgba(255, 197, 84, 0.18);
+      border-radius: 12px;
+    }
+    .swagger-ui .opblock {
+      border-radius: 12px;
+    }
+    .swagger-ui .info p,
+    .swagger-ui .info li,
+    .swagger-ui .opblock-description-wrapper p,
+    .swagger-ui .parameter__name,
+    .swagger-ui .response-col_status,
+    .swagger-ui .response-col_description,
+    .swagger-ui table thead tr th {
+      color: var(--text);
+    }
+    .swagger-ui input,
+    .swagger-ui textarea,
+    .swagger-ui select {
+      background: rgba(0, 0, 0, 0.35) !important;
+      color: var(--text) !important;
+      border-color: rgba(255, 196, 80, 0.28) !important;
+    }
+    @media (max-width: 860px) {
+      .swagger-shell {
+        padding: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    ${renderTopbar({ who: safeWho, active: "admin" })}
+    <main class="app">
+      <section class="card swagger-shell">
+        <div class="swagger-head">
+          <div>
+            <span class="pill">API Docs</span>
+            <h1>Swagger</h1>
+            <div class="meta">Interactive docs for all public and admin <code>/api/*</code> endpoints.</div>
+          </div>
+          <div class="row">
+            <a class="btn btn--sm btn--ghost" href="/swagger.json" target="_blank" rel="noreferrer">Raw JSON</a>
+            ${
+              safeWho
+                ? ``
+                : `<a class="btn btn--sm" href="/admin/login">Login</a>`
+            }
+          </div>
+        </div>
+        <div id="swagger-ui"></div>
+      </section>
+    </main>
+  </div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: '/swagger.json',
+      dom_id: '#swagger-ui',
+      deepLinking: true,
+      displayRequestDuration: true,
+      persistAuthorization: true
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function renderReactAdminHtml({ who = "" } = {}) {
+  const safeWho = escapeHtml(String(who || "").trim() || "unknown");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>React Admin | MainsBot</title>
+  ${renderHeadMeta({
+    title: "Admin",
+    description: "Manage MainsBot settings, auth, and quotes.",
+  })}
+  <style>
+    :root{--bg:#0f0d06;--panel:#17130a;--line:#5f461e;--text:#f7ebcc;--muted:#b7a886;--accent:#ffbd59;--ok:#45c06a;--warn:#ff6767}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#140f07,#0d0b06);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Arial}
+    .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+    .btn{background:#2d2310;border:1px solid #7a5b2b;color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}
+    .btn:hover{border-color:#b8863c}
+    .in,select,textarea{width:100%;background:#0d0a05;border:1px solid #56401c;color:var(--text);border-radius:10px;padding:10px}
+    .muted{color:var(--muted)} h1,h2{margin:0 0 10px} label{display:block;font-weight:600;margin-bottom:6px}
+    .pill{display:inline-block;background:#2d2310;border:1px solid #7a5b2b;border-radius:999px;padding:4px 10px;color:#ffd086}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card row" style="justify-content:space-between">
+      <div><span class="pill">React Admin</span> <span class="muted">Logged in as ${safeWho}</span></div>
+      <div class="row">
+        <a class="btn" href="/admin">Back</a>
+        <a class="btn" href="/swagger">Swagger</a>
+        <a class="btn" href="/admin/logout">Logout</a>
+      </div>
+    </div>
+    <div id="app" class="card" style="margin-top:12px">Loadingâ€¦</div>
+  </div>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+    const { useEffect, useState } = React;
+    function toCsv(arr){ return Array.isArray(arr) ? arr.join(', ') : ''; }
+    function fromCsv(text){ return String(text||'').split(/[,\\n]+/).map(s=>s.trim()).filter(Boolean); }
+    function asInt(value, fallback){
+      const n = Number(value);
+      return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : fallback;
+    }
+    const FILTER_DEFAULTS = {
+      spam: { windowMs: 7000, minMessages: 5, strikeResetMs: 600000, timeoutFirstSec: 30, timeoutRepeatSec: 60, reason: "[AUTOMATIC] Please stop excessively spamming - MainsBot", messageFirst: "{atUser}, please stop excessively spamming.", messageRepeat: "{atUser} Please STOP excessively spamming." },
+      length: { maxChars: 400, strikeResetMs: 600000, timeoutFirstSec: 30, timeoutRepeatSec: 60, reason: "[AUTOMATIC] Message exceeds max character limit - MainsBot", message: "{atUser} Message exceeds max character limit." },
+      link: { strikeResetMs: 600000, timeoutFirstSec: 1, timeoutRepeatSec: 5, reason: "[AUTOMATIC] No links allowed - MainsBot", message: "{atUser} No links allowed in chat." },
+    };
+    function normalizeSettings(raw){
+      const s = raw && typeof raw === 'object' ? { ...raw } : {};
+      const filters = s.filters && typeof s.filters === 'object' ? s.filters : {};
+      const spam = filters.spam && typeof filters.spam === 'object' ? filters.spam : {};
+      const length = filters.length && typeof filters.length === 'object' ? filters.length : {};
+      const link = filters.link && typeof filters.link === 'object' ? filters.link : {};
+      s.filters = {
+        spam: {
+          windowMs: asInt(spam.windowMs, FILTER_DEFAULTS.spam.windowMs),
+          minMessages: asInt(spam.minMessages, FILTER_DEFAULTS.spam.minMessages),
+          strikeResetMs: asInt(spam.strikeResetMs, FILTER_DEFAULTS.spam.strikeResetMs),
+          timeoutFirstSec: asInt(spam.timeoutFirstSec, FILTER_DEFAULTS.spam.timeoutFirstSec),
+          timeoutRepeatSec: asInt(spam.timeoutRepeatSec, FILTER_DEFAULTS.spam.timeoutRepeatSec),
+          reason: String(spam.reason || FILTER_DEFAULTS.spam.reason),
+          messageFirst: String(spam.messageFirst || FILTER_DEFAULTS.spam.messageFirst),
+          messageRepeat: String(spam.messageRepeat || FILTER_DEFAULTS.spam.messageRepeat),
+        },
+        length: {
+          maxChars: asInt(length.maxChars, FILTER_DEFAULTS.length.maxChars),
+          strikeResetMs: asInt(length.strikeResetMs, FILTER_DEFAULTS.length.strikeResetMs),
+          timeoutFirstSec: asInt(length.timeoutFirstSec, FILTER_DEFAULTS.length.timeoutFirstSec),
+          timeoutRepeatSec: asInt(length.timeoutRepeatSec, FILTER_DEFAULTS.length.timeoutRepeatSec),
+          reason: String(length.reason || FILTER_DEFAULTS.length.reason),
+          message: String(length.message || FILTER_DEFAULTS.length.message),
+        },
+        link: {
+          strikeResetMs: asInt(link.strikeResetMs, FILTER_DEFAULTS.link.strikeResetMs),
+          timeoutFirstSec: asInt(link.timeoutFirstSec, FILTER_DEFAULTS.link.timeoutFirstSec),
+          timeoutRepeatSec: asInt(link.timeoutRepeatSec, FILTER_DEFAULTS.link.timeoutRepeatSec),
+          reason: String(link.reason || FILTER_DEFAULTS.link.reason),
+          message: String(link.message || FILTER_DEFAULTS.link.message),
+        },
+      };
+      s.linkAllowlistText = toCsv(s.linkAllowlist);
+      return s;
+    }
+
+    function App(){
+      const [loading,setLoading]=useState(true);
+      const [status,setStatus]=useState('');
+      const [data,setData]=useState(null);
+
+      useEffect(()=>{ (async()=>{
+        try{
+          const r = await fetch('/admin/settings-json', { credentials:'same-origin' });
+          const j = await r.json();
+          if(!r.ok) throw new Error(j && j.error ? j.error : (r.status + ' ' + r.statusText));
+          setData(j.settings || {});
+        }catch(e){
+          setStatus('Error: ' + (e && e.message ? e.message : String(e)));
+        }finally{
+          setLoading(false);
+        }
+      })(); },[]);
+
+      async function save(){
+        if(!data) return;
+        setStatus('Saving...');
+        try{
+          const payload = {
+            settings: {
+              ...data,
+              linkAllowlist: fromCsv(data.linkAllowlistText),
+            }
+          };
+          delete payload.settings.linkAllowlistText;
+          const r = await fetch('/admin/settings-json', {
+            method:'POST',
+            credentials:'same-origin',
+            headers:{ 'content-type':'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const j = await r.json();
+          if(!r.ok) throw new Error(j && j.error ? j.error : (r.status + ' ' + r.statusText));
+          setData({ ...(j.settings||{}), linkAllowlistText: toCsv((j.settings||{}).linkAllowlist) });
+          setStatus('Saved (' + (j.backend || 'ok') + ').');
+        }catch(e){
+          setStatus('Error: ' + (e && e.message ? e.message : String(e)));
+        }
+      }
+
+      if(loading) return <div>Loading settingsâ€¦</div>;
+      if(!data) return <div className="muted">Failed to load settings.</div>;
+
+      const set = (k,v)=>setData(prev=>({ ...(prev||{}), [k]: v }));
+      return (
+        <div>
+          <h1>Settings (React)</h1>
+          <div className="muted" style={{marginBottom:12}}>This writes to the same backend as admin save.</div>
+          <div className="grid">
+            <div>
+              <label>Current Mode</label>
+              <select value={String(data.currentMode||'')} onChange={e=>set('currentMode', e.target.value)}>
+                {Array.isArray(data.validModes) && data.validModes.length
+                  ? data.validModes.map(m => <option key={m} value={m}>{m}</option>)
+                  : <option value={String(data.currentMode||'!join.on')}>{String(data.currentMode||'!join.on')}</option>}
+              </select>
+            </div>
+            <div>
+              <label>Kill Switch</label>
+              <input type="checkbox" checked={Boolean(data.ks)} onChange={e=>set('ks', e.target.checked)} />
+            </div>
+            <div>
+              <label>Timers</label>
+              <input type="checkbox" checked={Boolean(data.timers)} onChange={e=>set('timers', e.target.checked)} />
+            </div>
+            <div>
+              <label>Keywords</label>
+              <input type="checkbox" checked={Boolean(data.keywords)} onChange={e=>set('keywords', e.target.checked)} />
+            </div>
+            <div>
+              <label>Spam Filter</label>
+              <input type="checkbox" checked={Boolean(data.spamFilter)} onChange={e=>set('spamFilter', e.target.checked)} />
+            </div>
+            <div>
+              <label>Length Filter</label>
+              <input type="checkbox" checked={Boolean(data.lengthFilter)} onChange={e=>set('lengthFilter', e.target.checked)} />
+            </div>
+            <div>
+              <label>Link Filter</label>
+              <input type="checkbox" checked={Boolean(data.linkFilter)} onChange={e=>set('linkFilter', e.target.checked)} />
+            </div>
+            <div style={{gridColumn:'1/-1'}}>
+              <label>Link Allowlist (comma separated)</label>
+              <input
+                className="in"
+                value={String(data.linkAllowlistText ?? toCsv(data.linkAllowlist))}
+                onChange={e=>set('linkAllowlistText', e.target.value)}
+                placeholder="example.com, twitch.tv"
+              />
+            </div>
+          </div>
+          <div className="row" style={{marginTop:14}}>
+            <button className="btn" onClick={save}>Save</button>
+            <span className="muted">{status}</span>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('app')).render(<App />);
+  </script>
+</body>
+</html>`;
+}
+
+function renderReactAppHtml({ who = "" } = {}) {
+  try {
+    const adminHtmlPath = path.join(WEB_DIR, "admin", "index.html");
+    return fs.readFileSync(adminHtmlPath, "utf8");
+  } catch {
+    return renderShell({
+      title: "Admin",
+      who: String(who || ""),
+      active: "admin",
+      body: '<div class="card"><div class="card__bd"><h1>Admin UI missing</h1><div class="muted">Could not load <code>web/admin/index.html</code>.</div></div></div>',
+    });
+  }
+}
+
+function renderQuotesAppHtml({ who = "" } = {}) {
+  try {
+    const quotesHtmlPath = path.join(WEB_DIR, "admin", "quotes.html");
+    return fs.readFileSync(quotesHtmlPath, "utf8");
+  } catch {
+    return renderShell({
+      title: "Quotes",
+      who: String(who || ""),
+      active: "admin",
+      body: '<div class="card"><div class="card__bd"><h1>Quotes UI missing</h1><div class="muted">Could not load <code>web/admin/quotes.html</code>.</div></div></div>',
+    });
+  }
+}
+
+function renderAdminLoginHtml({
+  nextPath = "/admin",
+  canWebTwitchLogin = true,
+} = {}) {
+  try {
+    const loginHtmlPath = path.join(WEB_DIR, "admin", "login.html");
+    const safeNext = escapeHtml(String(nextPath || "/admin"));
+    const twitchHref = `/admin/login?twitch=1&next=${encodeURIComponent(String(nextPath || "/admin"))}`;
+
+    return fs
+      .readFileSync(loginHtmlPath, "utf8")
+      .replaceAll("__NEXT_PATH__", safeNext)
+      .replaceAll("__TWITCH_HREF__", escapeHtml(twitchHref))
+      .replaceAll("__LOGIN_GRID_CLASS__", canWebTwitchLogin ? "" : "login-grid--single")
+      .replaceAll("__TWITCH_CLASS__", canWebTwitchLogin ? "" : "is-hidden");
+  } catch {
+    return renderShell({
+      title: "Admin Login",
+      active: "admin",
+      body: `<div class="card"><div class="card__bd"><h1>Admin login UI missing</h1><div class="muted">Could not load <code>web/admin/login.html</code>.</div></div></div>`,
+    });
+  }
+}
+
 function renderAuthLandingHtml({ settings, snapshot }) {
   const redirectUri = escapeHtml(settings?.redirectUri || "not_set");
   const tokenPath = escapeHtml(snapshot?.tokenStorePath || "secrets/twitch_tokens.json");
@@ -624,6 +1736,10 @@ function renderAuthLandingHtml({ settings, snapshot }) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Twitch Auth | MainsBot</title>
+    ${renderHeadMeta({
+      title: "Twitch Auth",
+      description: "Link Twitch bot and streamer accounts for MainsBot.",
+    })}
     <style>
       :root{--bg0:#0b0a06;--bg1:#141108;--panel:rgba(26,21,9,.92);--border:rgba(255,196,80,.35);--text:#fff3d6;--muted:rgba(255,243,214,.72);--accent:#ffbd59}
       *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:var(--text);font-family:"Segoe UI",Arial,sans-serif;background:radial-gradient(900px 550px at 20% 0%,rgba(255,196,80,.14),transparent 60%),radial-gradient(700px 420px at 80% 100%,rgba(255,140,40,.14),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg0))}
@@ -650,7 +1766,7 @@ function renderAuthLandingHtml({ settings, snapshot }) {
       <div class="row">
         <a class="btn" href="/auth/bot">Connect Bot</a>
         <a class="btn" href="/auth/streamer">Connect Streamer</a>
-        <a class="btn" href="/auth/success">View Auth Status</a>
+        <a class="btn" href="/admin/auth">View Auth Status</a>
         <a class="btn" href="/auth/roblox">Roblox OAuth</a>
         <a class="btn" href="/auth/spotify">Spotify OAuth</a>
       </div>
@@ -673,6 +1789,10 @@ function renderAuthSuccessHtml({ role = "", login = "", snapshot }) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Auth Success | MainsBot</title>
+    ${renderHeadMeta({
+      title: "Auth Success",
+      description: "OAuth flow complete. Redirecting to admin auth status.",
+    })}
     <style>
       :root{--bg0:#0b0a06;--bg1:#141108;--panel:rgba(26,21,9,.92);--border:rgba(255,196,80,.35);--text:#fff3d6;--muted:rgba(255,243,214,.72);--accent:#ffbd59}
       *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:var(--text);font-family:"Segoe UI",Arial,sans-serif;background:radial-gradient(900px 550px at 20% 0%,rgba(255,196,80,.14),transparent 60%),radial-gradient(700px 420px at 80% 100%,rgba(255,140,40,.14),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg0))}
@@ -699,7 +1819,7 @@ function renderAuthSuccessHtml({ role = "", login = "", snapshot }) {
         <div>Redirect URI: <code>${redirectUri}</code></div>
       </div>
       <div class="row">
-        <a class="btn" href="/auth">Back To Auth</a>
+        <a class="btn" href="/admin/auth">Back To Auth</a>
         <a class="btn" href="/">Return Home</a>
       </div>
     </main>
@@ -711,6 +1831,7 @@ function renderUnifiedAuthSuccessHtml({
   provider = "",
   role = "",
   login = "",
+  who = "",
   twitchSnapshot,
   robloxSnapshot,
   spotifySnapshot,
@@ -719,15 +1840,12 @@ function renderUnifiedAuthSuccessHtml({
   const roleText = escapeHtml(role || "");
   const loginText = escapeHtml(login || "");
 
-  const twitchTokenPath = escapeHtml(twitchSnapshot?.tokenStorePath || "secrets/twitch_tokens.json");
   const twitchBotStatus = twitchSnapshot?.bot?.hasAccessToken ? "Connected" : "Not Connected";
   const twitchStreamerStatus = twitchSnapshot?.streamer?.hasAccessToken ? "Connected" : "Not Connected";
 
-  const robloxTokenPath = escapeHtml(robloxSnapshot?.tokenStorePath || "secrets/roblox_tokens.json");
   const robloxStatus = robloxSnapshot?.bot?.hasAccessToken ? "Connected" : "Not Connected";
   const robloxLogin = escapeHtml(String(robloxSnapshot?.bot?.login || "").trim() || "");
 
-  const spotifyTokenPath = escapeHtml(spotifySnapshot?.tokenStorePath || "secrets/spotify_tokens.json");
   const spotifyStatus = spotifySnapshot?.hasRefreshToken ? "Connected" : "Not Connected";
 
   const headline =
@@ -748,68 +1866,93 @@ function renderUnifiedAuthSuccessHtml({
         ? `<div class="meta">Roblox login: <code>${robloxLogin}</code></div>`
         : ``;
 
-  return `<!doctype html>
-  <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Auth | MainsBot</title>
-    <style>
-      :root{--bg0:#0b0a06;--bg1:#141108;--panel:rgba(26,21,9,.92);--border:rgba(255,196,80,.35);--text:#fff3d6;--muted:rgba(255,243,214,.72);--accent:#ffbd59}
-      *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:var(--text);font-family:"Segoe UI",Arial,sans-serif;background:radial-gradient(900px 550px at 20% 0%,rgba(255,196,80,.14),transparent 60%),radial-gradient(700px 420px at 80% 100%,rgba(255,140,40,.14),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg0))}
-      .card{width:min(900px,100%);border-radius:18px;border:1px solid var(--border);background:var(--panel);padding:26px;box-shadow:0 18px 48px rgba(0,0,0,.42)}
-      h1{margin:0 0 8px;font-size:34px;line-height:1.05} p{margin:0;color:var(--muted);line-height:1.45}
-      .meta{margin-top:12px;font-size:14px;color:var(--muted)}
-      .row{margin-top:18px;display:flex;flex-wrap:wrap;gap:10px}
-      .btn{display:inline-block;padding:10px 14px;border-radius:10px;background:rgba(255,189,89,.16);border:1px solid rgba(255,189,89,.35);color:var(--accent);font-weight:700;text-decoration:none}
-      .grid{margin-top:18px;display:grid;grid-template-columns:1fr;gap:12px}
-      .panel{border:1px solid rgba(255,196,80,.18);border-radius:14px;padding:14px;background:rgba(9,8,4,.45)}
-      .k{color:var(--muted)}
-      .ok{color:#b8f7c0}
-      .warn{color:#ffcf8a}
-      code{font-family:Consolas,Monaco,monospace;color:var(--accent)}
-    </style>
-  </head>
-  <body>
-    <main class="card">
-      <h1>${escapeHtml(headline)}</h1>
+  const body = `<div class="card">
+  <div class="card__hd">
+    <div>
+      <div class="pill">Auth Status</div>
+      <h1 style="margin-top:10px">${escapeHtml(headline)}</h1>
       ${detailLine}
-
-      <div class="grid">
-        <div class="panel">
-          <div><span class="k">Twitch bot:</span> <span class="${twitchBotStatus === "Connected" ? "ok" : "warn"}">${escapeHtml(twitchBotStatus)}</span></div>
-          <div><span class="k">Twitch streamer:</span> <span class="${twitchStreamerStatus === "Connected" ? "ok" : "warn"}">${escapeHtml(twitchStreamerStatus)}</span></div>
-          <div class="meta">Token store: <code>${twitchTokenPath}</code></div>
-          <div class="row">
-            <a class="btn" href="/auth/twitch/bot">Link Twitch Bot</a>
-            <a class="btn" href="/auth/twitch/streamer">Link Twitch Streamer</a>
+    </div>
+    <div class="row">
+      <a class="btn btn--sm btn--ghost" href="/admin">Back</a>
+    </div>
+  </div>
+  <div class="card__bd">
+    <div class="grid grid--2">
+      <div class="panel" style="grid-column:1/-1">
+        <div class="panel__top">
+          <div class="panel__topLeft">
+            <div><span class="k">Twitch bot:</span> <span class="${twitchBotStatus === "Connected" ? "ok" : "warn"} status-value">${escapeHtml(twitchBotStatus)}</span></div>
+            <div><span class="k">Twitch streamer:</span> <span class="${twitchStreamerStatus === "Connected" ? "ok" : "warn"} status-value">${escapeHtml(twitchStreamerStatus)}</span></div>
           </div>
         </div>
-
-        <div class="panel">
-          <div><span class="k">Roblox:</span> <span class="${robloxStatus === "Connected" ? "ok" : "warn"}">${escapeHtml(robloxStatus)}</span>${robloxLogin ? ` ( <code>${robloxLogin}</code> )` : ""}</div>
-          <div class="meta">Token store: <code>${robloxTokenPath}</code></div>
-          <div class="row">
-            <a class="btn" href="/auth/roblox">Link Roblox</a>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div><span class="k">Spotify:</span> <span class="${spotifyStatus === "Connected" ? "ok" : "warn"}">${escapeHtml(spotifyStatus)}</span></div>
-          <div class="meta">Token store: <code>${spotifyTokenPath}</code></div>
-          <div class="row">
-            <a class="btn" href="/auth/spotify">Link Spotify</a>
-          </div>
+        <div class="row" style="margin-top:10px">
+          <a class="btn" href="/auth/twitch/bot">Link Twitch Bot</a>
+          <a class="btn" href="/auth/twitch/streamer">Link Twitch Streamer</a>
         </div>
       </div>
 
-      <div class="row">
-        <a class="btn" href="/admin">Admin</a>
-        <a class="btn" href="/">Home</a>
+      <div class="panel">
+        <div class="panel__top">
+          <div class="panel__topLeft">
+            <div><span class="k">Roblox:</span> <span class="${robloxStatus === "Connected" ? "ok" : "warn"} status-value">${escapeHtml(robloxStatus)}</span>${robloxLogin ? ` <span class="muted">( <code>${robloxLogin}</code> )</span>` : ""}</div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <a class="btn" href="/auth/roblox">Link Roblox</a>
+        </div>
       </div>
-    </main>
-  </body>
-  </html>`;
+
+      <div class="panel">
+        <div class="panel__top">
+          <div class="panel__topLeft">
+            <div><span class="k">Spotify:</span> <span class="${spotifyStatus === "Connected" ? "ok" : "warn"} status-value">${escapeHtml(spotifyStatus)}</span></div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <a class="btn" href="/auth/spotify">Link Spotify</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+  return renderShell({ title: "Auth", who: String(who || ""), active: "auth", body });
+}
+
+function renderAuthSuccessRedirectHtml({
+  targetPath = "/admin/auth",
+  success = true,
+  errorText = "",
+} = {}) {
+  const safeTarget = String(targetPath || "/admin/auth");
+  const title = success ? "Link Successful" : "Link Returned Error";
+  const description = success
+    ? "OAuth link completed. Redirecting to Auth Status in 2 seconds."
+    : `OAuth provider returned an error: ${String(errorText || "unknown_error")}. Redirecting to Auth Status in 2 seconds.`;
+
+  const body = `<div class="card">
+  <div class="card__hd">
+    <div>
+      <div class="pill">AUTH</div>
+      <h1 style="margin-top:10px">${escapeHtml(title)}</h1>
+      <div class="muted" style="margin-top:6px">${escapeHtml(description)}</div>
+    </div>
+  </div>
+  <div class="card__bd">
+    <div class="row">
+      <a class="btn" href="${escapeHtml(safeTarget)}">Go now</a>
+    </div>
+  </div>
+</div>
+<script>
+  const target = ${JSON.stringify(safeTarget)};
+  setTimeout(() => {
+    window.location.replace(target);
+  }, 2000);
+</script>`;
+
+  return renderShell({ title: "Auth Redirect", body });
 }
 
 function renderRobloxAuthLandingHtml({ settings, snapshot }) {
@@ -827,6 +1970,10 @@ function renderRobloxAuthLandingHtml({ settings, snapshot }) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Roblox Auth | MainsBot</title>
+    ${renderHeadMeta({
+      title: "Roblox Auth",
+      description: "Link Roblox account access for MainsBot.",
+    })}
     <style>
       :root{--bg0:#0b0a06;--bg1:#141108;--panel:rgba(26,21,9,.92);--border:rgba(255,196,80,.35);--text:#fff3d6;--muted:rgba(255,243,214,.72);--accent:#ffbd59}
       *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:var(--text);font-family:"Segoe UI",Arial,sans-serif;background:radial-gradient(900px 550px at 20% 0%,rgba(255,196,80,.14),transparent 60%),radial-gradient(700px 420px at 80% 100%,rgba(255,140,40,.14),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg0))}
@@ -850,7 +1997,7 @@ function renderRobloxAuthLandingHtml({ settings, snapshot }) {
       <div class="row">
         <a class="btn" href="/auth/roblox/bot">Connect Roblox Account</a>
         <a class="btn" href="/auth/roblox/success">View Roblox Auth Status</a>
-        <a class="btn" href="/auth">Twitch Auth</a>
+        <a class="btn" href="/admin/auth">Auth Status</a>
       </div>
     </main>
   </body>
@@ -872,6 +2019,10 @@ function renderRobloxAuthSuccessHtml({ login = "", snapshot }) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Roblox Auth Success | MainsBot</title>
+    ${renderHeadMeta({
+      title: "Roblox Auth Success",
+      description: "Roblox OAuth flow complete for MainsBot.",
+    })}
     <style>
       :root{--bg0:#0b0a06;--bg1:#141108;--panel:rgba(26,21,9,.92);--border:rgba(255,196,80,.35);--text:#fff3d6;--muted:rgba(255,243,214,.72);--accent:#ffbd59}
       *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:var(--text);font-family:"Segoe UI",Arial,sans-serif;background:radial-gradient(900px 550px at 20% 0%,rgba(255,196,80,.14),transparent 60%),radial-gradient(700px 420px at 80% 100%,rgba(255,140,40,.14),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg0))}
@@ -922,8 +2073,12 @@ const MIME = {
 const BLOCKED_SOURCE_PATHS = new Set([
   "/style.scss",
   "/style.css.map",
+  "/admin.css",
+  "/_admin.scss",
   "/static/style.scss",
   "/static/style.css.map",
+  "/static/admin.css",
+  "/static/_admin.scss",
 ]);
 
 const webServer = http.createServer(async (req, res) => {
@@ -956,7 +2111,9 @@ const webServer = http.createServer(async (req, res) => {
     const spotifyAuthSettings = buildSpotifyAuthSettingsForRequest(req);
     const spotifyAuthSnapshot = () => getPublicSpotifyTokenSnapshot();
 
-  const isSecureRequest = requestOrigin.startsWith("https://");
+  // IMPORTANT: do not derive cookie security from requestOrigin, since requestOrigin can be forced via WEB_ORIGIN.
+  // Use the actual incoming request scheme (or x-forwarded-proto) so local http logins don't drop the cookie.
+  const isSecureRequest = getIsSecureRequest(req);
     const adminSession = WEB_ADMIN_AUTH.readSession(req);
     const adminAllowed = isAdminAllowedSession(adminSession);
 
@@ -968,6 +2125,28 @@ const webServer = http.createServer(async (req, res) => {
     ? webAdminRedirectUriOverride
     : `${(webAdminOriginOverride || requestOrigin).replace(/\/+$/, "")}/auth/callback`;
 
+  if (routePath === "/favicon.ico") {
+    return sendRedirect(res, "/favicon.svg", 302);
+  }
+
+  if (routePath === "/swagger.json") {
+    return sendJsonResponse(
+      res,
+      200,
+      buildOpenApiSpec({ requestOrigin }),
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/swagger") {
+    return sendHtmlResponse(
+      res,
+      200,
+      renderSwaggerUiHtml({ who: adminAllowed ? String(adminSession?.login || "") : "" }),
+      { "cache-control": "no-store" }
+    );
+  }
+
   if (routePath === "/admin/login") {
     try {
       if (String(parsedUrl.searchParams.get("debug") || "") === "1") {
@@ -976,7 +2155,9 @@ const webServer = http.createServer(async (req, res) => {
           200,
           {
             ok: true,
+            authMode: usePasswordAuth ? "password" : "twitch",
             requestOrigin,
+            isSecureRequest,
             host: String(req?.headers?.host || ""),
             forwardedHost: String(req?.headers?.["x-forwarded-host"] || ""),
             forwardedProto: String(req?.headers?.["x-forwarded-proto"] || ""),
@@ -988,7 +2169,84 @@ const webServer = http.createServer(async (req, res) => {
         );
       }
 
-      const nextPath = sanitizeNextPath(parsedUrl.searchParams.get("next"));
+      if (adminAllowed) {
+        const nextPath = sanitizeNextPath(parsedUrl.searchParams.get("next"));
+        return sendRedirect(res, nextPath || "/admin");
+      }
+
+      const nextPath = sanitizeNextPath(parsedUrl.searchParams.get("next")) || "/admin";
+      const wantsTwitchLogin = String(parsedUrl.searchParams.get("twitch") || "") === "1";
+
+      const canWebTwitchLogin =
+        !!String(process.env.CLIENT_ID || "").trim() &&
+        !!String(process.env.CLIENT_SECRET || "").trim();
+
+      if (usePasswordAuth && !wantsTwitchLogin) {
+        if (!passwordAuthConfigured) {
+          return sendErrorPage(
+            res,
+            500,
+            "Admin Login Not Configured",
+            "Password login is enabled, but [web].admin_username + [web].admin_password (or admin_password_hash) are not set in your INI."
+          );
+        }
+
+        if (method === "GET") {
+          return sendHtmlResponse(
+            res,
+            200,
+            renderAdminLoginHtml({
+              nextPath,
+              canWebTwitchLogin,
+            }),
+            { "cache-control": "no-store" }
+          );
+        }
+
+        if (method === "POST") {
+          try {
+            const contentType = String(req?.headers?.["content-type"] || "")
+              .split(";")[0]
+              .trim()
+              .toLowerCase();
+
+            let username = "";
+            let password = "";
+            let next = nextPath;
+
+            if (contentType === "application/json") {
+              const body = await readJsonBody(req, { limitBytes: 16 * 1024 });
+              username = String(body?.username || "");
+              password = String(body?.password || "");
+              next = sanitizeNextPath(body?.next) || nextPath;
+            } else {
+              const text = await readRequestBodyText(req, { limitBytes: 16 * 1024 });
+              const params = new URLSearchParams(text);
+              username = String(params.get("username") || "");
+              password = String(params.get("password") || "");
+              next = sanitizeNextPath(params.get("next")) || nextPath;
+            }
+
+            const ok = verifyAdminPasswordLogin({ username, password });
+            if (!ok?.ok) {
+              return sendErrorPage(res, 403, "Forbidden", ok?.error || "Invalid username or password.");
+            }
+
+            WEB_ADMIN_AUTH.setSessionCookie(
+              res,
+              { userId: "password", login: normalizeLogin(WEB_ADMIN_USERNAME), mode: "password" },
+              { secure: isSecureRequest }
+            );
+            return sendRedirect(res, next || "/admin");
+          } catch (e) {
+            console.error("[WEB][ADMIN] password login failed:", e);
+            return sendErrorPage(res, 500, "Login Failed", String(e?.message || e));
+          }
+        }
+
+        return sendErrorPage(res, 405, "Method Not Allowed", "Use GET or POST.");
+      }
+
       const state = createOAuthState("admin", "weblogin", {
         nextPath: nextPath || "/admin",
       });
@@ -1010,7 +2268,21 @@ const webServer = http.createServer(async (req, res) => {
 
   if (routePath === "/admin/logout") {
     WEB_ADMIN_AUTH.clearSessionCookie(res, { secure: isSecureRequest });
-    return sendRedirect(res, "/");
+    return sendRedirect(res, "/admin/login");
+  }
+
+  if (routePath === "/admin/session" || routePath === "/api/admin/session") {
+    return sendJsonResponse(
+      res,
+      200,
+      {
+        ok: true,
+        allowed: Boolean(adminAllowed),
+        login: adminAllowed ? String(adminSession?.login || "") : null,
+        mode: adminAllowed ? String(adminSession?.mode || "") : null,
+      },
+      { "cache-control": "no-store" }
+    );
   }
 
   if (routePath === "/admin/callback") {
@@ -1088,30 +2360,52 @@ const webServer = http.createServer(async (req, res) => {
     if (!adminAllowed) {
       return sendRedirect(res, "/admin/login");
     }
-
-    const who = escapeHtml(String(adminSession?.login || "unknown"));
     return sendHtmlResponse(
       res,
       200,
-      `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin | MainsBot</title><style>:root{--bg0:#0b0a06;--bg1:#141108;--panel:rgba(26,21,9,.92);--border:rgba(255,196,80,.35);--text:#fff3d6;--muted:rgba(255,243,214,.72);--accent:#ffbd59}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:var(--text);font-family:\"Segoe UI\",Arial,sans-serif;background:radial-gradient(900px 550px at 20% 0%,rgba(255,196,80,.14),transparent 60%),radial-gradient(700px 420px at 80% 100%,rgba(255,140,40,.14),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg0))}.card{width:min(860px,100%);border-radius:18px;border:1px solid var(--border);background:var(--panel);padding:26px;box-shadow:0 18px 48px rgba(0,0,0,.42)}h1{margin:0 0 8px;font-size:34px;line-height:1.05}p{margin:0;color:var(--muted);line-height:1.45}.row{margin-top:18px;display:flex;flex-wrap:wrap;gap:10px}.btn{display:inline-block;padding:10px 14px;border-radius:10px;background:rgba(255,189,89,.16);border:1px solid rgba(255,189,89,.35);color:var(--accent);font-weight:700;text-decoration:none}code{font-family:Consolas,Monaco,monospace;color:var(--accent)}</style></head><body><main class="card"><h1>MainsBot Admin</h1><p>Logged in as <strong>${who}</strong></p><div class="row"><a class="btn" href=\"/admin/settings\">Settings</a><a class="btn" href=\"/admin/quotes\">Quotes</a><a class="btn" href=\"/auth\">Twitch/Roblox OAuth</a><a class="btn" href=\"/status\">Public Status JSON</a><a class="btn" href=\"/admin/logout\">Logout</a></div></main></body></html>`,
+      renderReactAppHtml({ who: String(adminSession?.login || "") }),
       { "cache-control": "no-store" }
     );
   }
 
-  if (routePath === "/admin/quotes") {
+  if (routePath === "/admin/auth") {
     if (!adminAllowed) {
-      if (method === "POST") {
+      const next = encodeURIComponent(`${routePath}${parsedUrl.search || ""}`);
+      return sendRedirect(res, `/admin/login?next=${next}`);
+    }
+    const provider = String(parsedUrl.searchParams.get("provider") || "").trim();
+    const role = String(parsedUrl.searchParams.get("role") || "").trim();
+    const login = String(parsedUrl.searchParams.get("login") || "").trim();
+    return sendHtmlResponse(
+      res,
+      200,
+      renderUnifiedAuthSuccessHtml({
+        provider,
+        role,
+        login,
+        who: String(adminSession?.login || ""),
+        twitchSnapshot: authSnapshot(),
+        robloxSnapshot: robloxAuthSnapshot(),
+        spotifySnapshot: spotifyAuthSnapshot(),
+      }),
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/admin/quotes" || routePath === "/api/admin/quotes") {
+    const isQuotesApi = routePath === "/api/admin/quotes";
+    if (!adminAllowed) {
+      if (isQuotesApi || method === "POST") {
         return sendJsonResponse(res, 401, { ok: false, error: "Unauthorized" }, { "cache-control": "no-store" });
       }
       return sendRedirect(res, "/admin/login");
     }
 
     if (method === "GET") {
-      const who = escapeHtml(String(adminSession?.login || "unknown"));
       const format = String(parsedUrl.searchParams.get("format") || "").trim().toLowerCase();
       const data = loadQuotes();
 
-      if (format === "json") {
+      if (isQuotesApi || format === "json") {
         res.writeHead(200, {
           "content-type": "application/json; charset=utf-8",
           "cache-control": "no-store",
@@ -1119,23 +2413,10 @@ const webServer = http.createServer(async (req, res) => {
         return res.end(JSON.stringify(data, null, 2));
       }
 
-      const quotesJson = escapeHtml(JSON.stringify(data, null, 2));
-      const rowsHtml = data.quotes
-        .slice()
-        .sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0))
-        .map((q) => {
-          const id = Number(q?.id || 0);
-          const text = escapeHtml(String(q?.text || ""));
-          const addedBy = escapeHtml(String(q?.addedBy || ""));
-          const addedAt = escapeHtml(String(q?.addedAt || ""));
-          return `<tr data-id="${id}"><td class="id">#${id}</td><td class="txt"><input class="in" value="${text}" /></td><td class="meta">${addedBy || "-"}</td><td class="meta">${addedAt || "-"}</td><td class="act"><button class="btn sm" data-act="save">Save</button><button class="btn sm danger" data-act="del">Delete</button></td></tr>`;
-        })
-        .join("");
-
       return sendHtmlResponse(
         res,
         200,
-        `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Quotes | MainsBot</title><style>:root{--bg0:#0b0a06;--bg1:#141108;--panel:rgba(26,21,9,.92);--border:rgba(255,196,80,.35);--text:#fff3d6;--muted:rgba(255,243,214,.72);--accent:#ffbd59;--danger:#ff6b6b}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:var(--text);font-family:\"Segoe UI\",Arial,sans-serif;background:radial-gradient(900px 550px at 20% 0%,rgba(255,196,80,.14),transparent 60%),radial-gradient(700px 420px at 80% 100%,rgba(255,140,40,.14),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg0))}.card{width:min(1180px,100%);border-radius:18px;border:1px solid var(--border);background:var(--panel);padding:22px;box-shadow:0 18px 48px rgba(0,0,0,.42)}h1{margin:0 0 6px;font-size:30px;line-height:1.05}.meta{color:var(--muted);font-size:14px;margin-bottom:14px}.row{margin-top:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}.btn,button.btn{display:inline-block;padding:10px 14px;border-radius:10px;background:rgba(255,189,89,.16);border:1px solid rgba(255,189,89,.35);color:var(--accent);font-weight:700;text-decoration:none;cursor:pointer}.btn.sm{padding:7px 10px;border-radius:9px;font-weight:700}.btn.danger,.btn.sm.danger{border-color:rgba(255,107,107,.45);background:rgba(255,107,107,.14);color:var(--danger)}.in{width:100%;border-radius:10px;border:1px solid rgba(255,196,80,.28);background:rgba(9,8,4,.55);padding:10px 12px;color:var(--text);font-size:14px}.in:focus{outline:2px solid rgba(255,189,89,.35)}table{width:100%;border-collapse:collapse}th,td{padding:10px 10px;border-bottom:1px solid rgba(255,196,80,.18);vertical-align:top}th{color:var(--muted);font-size:12px;text-align:left;letter-spacing:.04em;text-transform:uppercase}.id{width:70px;white-space:nowrap;color:var(--accent);font-weight:800}.txt{min-width:420px}.meta{color:var(--muted);font-size:13px}.act{width:160px;white-space:nowrap}.status{margin-left:auto;color:var(--muted);min-height:18px}details{margin-top:16px}textarea{width:100%;min-height:38vh;resize:vertical;border-radius:12px;border:1px solid rgba(255,196,80,.28);background:rgba(9,8,4,.55);padding:14px;color:var(--text);font-family:Consolas,Monaco,monospace;font-size:13px;line-height:1.4}textarea:focus{outline:2px solid rgba(255,189,89,.35)}code{font-family:Consolas,Monaco,monospace;color:var(--accent)}</style></head><body><main class="card"><h1>Quotes</h1><div class="meta">Logged in as <strong>${who}</strong> · Chat: <code>!addquote &lt;text&gt;</code> · <a class="btn sm" href="/admin/quotes?format=json">Download JSON</a></div><div class="row"><input class="in" id="newText" placeholder="New quote text…" /><button class="btn" id="add">Add Quote</button><a class="btn" href="/admin">Back</a><a class="btn" href="/admin/logout">Logout</a><span class="status" id="status"></span></div><table><thead><tr><th>ID</th><th>Text</th><th>Added By</th><th>Added At</th><th>Actions</th></tr></thead><tbody id="rows">${rowsHtml || `<tr><td class="meta" colspan="5">No quotes yet.</td></tr>`}</tbody></table><details><summary class="meta">Advanced JSON editor</summary><p class="meta">Edits persist to your configured state backend. Invalid JSON is rejected.</p><textarea id="quotes" spellcheck="false">${quotesJson}</textarea><div class="row"><button class="btn" id="saveJson">Save JSON</button></div></details><script>const $st=document.getElementById('status');const api=async(payload)=>{const r=await fetch('/admin/quotes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});const j=await r.json().catch(()=>null);if(!r.ok)throw new Error(j&&j.error?j.error:(r.status+' '+r.statusText));return j;};document.getElementById('add').addEventListener('click',async()=>{$st.textContent='Adding…';try{const text=(document.getElementById('newText').value||'').trim();if(!text)throw new Error('Enter quote text.');await api({action:'add',text});location.reload();}catch(e){$st.textContent='Error: '+(e&&e.message?e.message:String(e));}});document.getElementById('rows').addEventListener('click',async(e)=>{const btn=e.target&&e.target.closest&&e.target.closest('button[data-act]');if(!btn)return;const tr=btn.closest('tr');const id=Number(tr&&tr.dataset&&tr.dataset.id);if(!id)return;$st.textContent='Saving…';try{if(btn.dataset.act==='del'){if(!confirm('Delete quote #'+id+'?'))return;await api({action:'delete',id});location.reload();return;}if(btn.dataset.act==='save'){const input=tr.querySelector('input.in');const text=(input&&input.value?input.value:'').trim();if(!text)throw new Error('Quote text is empty.');await api({action:'edit',id,text});location.reload();return;}}catch(err){$st.textContent='Error: '+(err&&err.message?err.message:String(err));}});document.getElementById('saveJson').addEventListener('click',async()=>{$st.textContent='Saving…';try{const text=(document.getElementById('quotes').value||'');await api({action:'replace',quotesText:text});$st.textContent='Saved.';}catch(e){$st.textContent='Error: '+(e&&e.message?e.message:String(e));}});</script></main></body></html>`,
+        renderQuotesAppHtml({ who: String(adminSession?.login || "") }),
         { "cache-control": "no-store" }
       );
     }
@@ -1205,12 +2486,40 @@ const webServer = http.createServer(async (req, res) => {
       }
     }
 
+    if (isQuotesApi) {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
     return sendErrorPage(res, 405, "Method Not Allowed", "Use GET or POST.");
   }
-
-  if (routePath === "/admin/settings") {
+  if (routePath === "/admin/react") {
     if (!adminAllowed) {
       return sendRedirect(res, "/admin/login");
+    }
+    return sendHtmlResponse(
+      res,
+      200,
+      renderReactAppHtml({ who: String(adminSession?.login || "") }),
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (
+    routePath === "/admin/settings-json" ||
+    routePath === "/api/admin/settings" ||
+    routePath === "/api/admin/settings-json"
+  ) {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
     }
 
     if (method === "GET") {
@@ -1223,15 +2532,91 @@ const webServer = http.createServer(async (req, res) => {
         }
       } catch {}
 
-      const who = escapeHtml(String(adminSession?.login || "unknown"));
-      const settingsText = escapeHtml(JSON.stringify(settingsObj, null, 2));
-
-      return sendHtmlResponse(
+      const sanitizedSettingsObj = sanitizeSettingsForStorage(settingsObj);
+      const backendRaw = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
+      const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
+      return sendJsonResponse(
         res,
         200,
-        `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings | MainsBot</title><style>:root{--bg0:#0b0a06;--bg1:#141108;--panel:rgba(26,21,9,.92);--border:rgba(255,196,80,.35);--text:#fff3d6;--muted:rgba(255,243,214,.72);--accent:#ffbd59}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:var(--text);font-family:\"Segoe UI\",Arial,sans-serif;background:radial-gradient(900px 550px at 20% 0%,rgba(255,196,80,.14),transparent 60%),radial-gradient(700px 420px at 80% 100%,rgba(255,140,40,.14),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg0))}.card{width:min(980px,100%);border-radius:18px;border:1px solid var(--border);background:var(--panel);padding:22px;box-shadow:0 18px 48px rgba(0,0,0,.42)}h1{margin:0 0 6px;font-size:30px;line-height:1.05}.meta{color:var(--muted);font-size:14px;margin-bottom:14px}.hint{margin:0 0 10px;color:var(--muted);line-height:1.45}.row{margin-top:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}.btn,button.btn{display:inline-block;padding:10px 14px;border-radius:10px;background:rgba(255,189,89,.16);border:1px solid rgba(255,189,89,.35);color:var(--accent);font-weight:700;text-decoration:none;cursor:pointer}textarea{width:100%;min-height:60vh;resize:vertical;border-radius:12px;border:1px solid rgba(255,196,80,.28);background:rgba(9,8,4,.55);padding:14px;color:var(--text);font-family:Consolas,Monaco,monospace;font-size:13px;line-height:1.4}textarea:focus{outline:2px solid rgba(255,189,89,.35)}.status{margin-top:10px;color:var(--muted);min-height:18px}code{font-family:Consolas,Monaco,monospace;color:var(--accent)}</style></head><body><main class="card"><h1>Settings</h1><div class="meta">Logged in as <strong>${who}</strong></div><p class="hint">Edits persist to your configured state backend. Invalid JSON is rejected.</p><textarea id="settings" spellcheck="false">${settingsText}</textarea><div class="row"><button class="btn" id="save">Save</button><a class="btn" href=\"/admin\">Back</a><a class="btn" href=\"/admin/quotes\">Quotes</a><a class="btn" href=\"/admin/logout\">Logout</a><span class="status" id="status"></span></div><script>const $s=document.getElementById('settings');const $st=document.getElementById('status');document.getElementById('save').addEventListener('click',async()=>{$st.textContent='Saving…';try{const r=await fetch('/admin/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({settingsText:$s.value})});const j=await r.json().catch(()=>null);if(!r.ok)throw new Error(j&&j.error?j.error:(r.status+' '+r.statusText));$st.textContent='Saved.';}catch(e){$st.textContent='Error: '+(e&&e.message?e.message:String(e));}});</script></main></body></html>`,
+        { ok: true, settings: sanitizedSettingsObj, backend },
         { "cache-control": "no-store" }
       );
+    }
+
+    if (method === "POST") {
+      try {
+        const body = await readJsonBody(req, { limitBytes: 1024 * 1024 });
+        let next = body?.settings;
+        if (next == null && typeof body?.settingsText === "string") {
+          next = safeJsonParse(body.settingsText, null);
+        }
+        if (!next || typeof next !== "object" || Array.isArray(next)) {
+          return sendJsonResponse(
+            res,
+            400,
+            { ok: false, error: "settings must be a JSON object." },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        const nextForSanitize = Object.assign({}, next);
+        delete nextForSanitize.currentGame;
+        const sanitized = sanitizeSettingsForStorage(nextForSanitize);
+
+        try {
+          const existingRaw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
+          const existingParsed = safeJsonParse(existingRaw, null);
+          if (existingParsed && typeof existingParsed === "object" && !Array.isArray(existingParsed)) {
+            const existingGame = String(existingParsed.currentGame || "").trim();
+            if (existingGame) sanitized.currentGame = existingGame;
+          }
+        } catch {}
+
+        fs.mkdirSync(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
+        fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(sanitized, null, 2), "utf8");
+        await flushStateNow();
+
+        const backendRaw = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
+        const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
+        return sendJsonResponse(
+          res,
+          200,
+          { ok: true, settings: sanitized, backend },
+          { "cache-control": "no-store" }
+        );
+      } catch (e) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: String(e?.message || e) },
+          { "cache-control": "no-store" }
+        );
+      }
+    }
+
+    return sendJsonResponse(
+      res,
+      405,
+      { ok: false, error: "Method not allowed." },
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/admin/settings") {
+    if (!adminAllowed) {
+      if (method === "POST") {
+        return sendJsonResponse(
+          res,
+          401,
+          { ok: false, error: "Unauthorized" },
+          { "cache-control": "no-store" }
+        );
+      }
+      return sendRedirect(res, "/admin/login");
+    }
+
+    if (method === "GET") {
+      return sendRedirect(res, "/admin#settings");
     }
 
     if (method === "POST") {
@@ -1252,11 +2637,26 @@ const webServer = http.createServer(async (req, res) => {
           );
         }
 
+        const nextForSanitize = Object.assign({}, next);
+        delete nextForSanitize.currentGame;
+        const sanitized = sanitizeSettingsForStorage(nextForSanitize);
+
+        try {
+          const existingRaw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
+          const existingParsed = safeJsonParse(existingRaw, null);
+          if (existingParsed && typeof existingParsed === "object" && !Array.isArray(existingParsed)) {
+            const existingGame = String(existingParsed.currentGame || "").trim();
+            if (existingGame) sanitized.currentGame = existingGame;
+          }
+        } catch {}
+
         fs.mkdirSync(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
-        fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(next, null, 2), "utf8");
+        fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(sanitized, null, 2), "utf8");
         await flushStateNow();
 
-        return sendJsonResponse(res, 200, { ok: true }, { "cache-control": "no-store" });
+        const backendRaw = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
+        const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
+        return sendJsonResponse(res, 200, { ok: true, backend }, { "cache-control": "no-store" });
       } catch (e) {
         console.error("[WEB][ADMIN] settings save failed:", e);
         return sendJsonResponse(
@@ -1274,6 +2674,529 @@ const webServer = http.createServer(async (req, res) => {
       { ok: false, error: "Method not allowed." },
       { "cache-control": "no-store" }
     );
+  }
+  if (routePath === "/admin/apply-mode" || routePath === "/api/admin/apply-mode") {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (method !== "POST") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    try {
+      const body = await readJsonBody(req, { limitBytes: 256 * 1024 });
+      const mode = String(body?.mode || "").trim();
+      const titles =
+        body?.titles && typeof body.titles === "object" && !Array.isArray(body.titles)
+          ? body.titles
+          : null;
+      const modeGames =
+        body?.modeGames && typeof body.modeGames === "object" && !Array.isArray(body.modeGames)
+          ? body.modeGames
+          : null;
+
+      if (!mode) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: "Missing mode." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const MODE_TO_TWITCH = {
+        "!join.on": { titleKey: "join", gameName: "Roblox" },
+        "!link.on": { titleKey: "link", gameName: "Roblox" },
+        "!1v1.on": { titleKey: "1v1", gameName: "Roblox" },
+        "!ticket.on": { titleKey: "ticket", gameName: "Roblox" },
+        "!val.on": { titleKey: "val", gameName: "VALORANT" },
+        "!reddit.on": { titleKey: "reddit", gameName: "Just Chatting" },
+      };
+
+      const cfg = MODE_TO_TWITCH[mode];
+      if (!cfg) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: `Unsupported mode: ${mode}` },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      let settingsObj = {};
+      try {
+        const raw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
+        const parsed = safeJsonParse(raw, null);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          settingsObj = parsed;
+        }
+      } catch {}
+
+      const mergedTitles = {
+        ...(settingsObj?.titles && typeof settingsObj.titles === "object"
+          ? settingsObj.titles
+          : {}),
+        ...(titles || {}),
+      };
+
+      const title = String(mergedTitles?.[cfg.titleKey] || "").trim();
+      if (!title) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: `No title set for titles.${cfg.titleKey}` },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const auth = await getRoleAccessToken({ role: TWITCH_ROLES.STREAMER });
+      if (!auth?.accessToken || !auth?.clientId) {
+        return sendJsonResponse(
+          res,
+          400,
+          {
+            ok: false,
+            error: "Missing streamer OAuth token/client id. Link Twitch streamer first.",
+          },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const broadcasterId = TWITCH_CHANNEL_ID || String(auth.userId || "").trim();
+      if (!broadcasterId) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: "Missing broadcaster id (set [twitch].channel_id)." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const gameNameOverride = String(
+        (modeGames && modeGames[mode]) ||
+          (settingsObj?.modeGames && settingsObj.modeGames[mode]) ||
+          cfg.gameName ||
+          ""
+      ).trim();
+
+      const gameId = gameNameOverride
+        ? await getGameIdByName({
+          token: auth.accessToken,
+          clientId: auth.clientId,
+          name: gameNameOverride,
+        })
+        : null;
+
+      await updateChannelInfo({
+        broadcasterId,
+        token: auth.accessToken,
+        clientId: auth.clientId,
+        title,
+        gameId: gameId || undefined,
+      });
+
+      return sendJsonResponse(res, 200, { ok: true }, { "cache-control": "no-store" });
+    } catch (e) {
+      console.error("[WEB][ADMIN] apply-mode failed:", e);
+      return sendJsonResponse(
+        res,
+        500,
+        { ok: false, error: String(e?.message || e) },
+        { "cache-control": "no-store" }
+      );
+    }
+  }
+
+  if (
+    routePath === "/admin/spotify/add" ||
+    routePath === "/admin/spotify/skip" ||
+    routePath === "/api/spotify/add" ||
+    routePath === "/api/spotify/skip"
+  ) {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (method !== "POST") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    const spotifySnapshot = getPublicSpotifyTokenSnapshot();
+    if (!spotifySnapshot?.hasClientId || !spotifySnapshot?.hasClientSecret) {
+      return sendJsonResponse(
+        res,
+        400,
+        { ok: false, error: "Spotify API is not configured. Set [spotify] client_id + client_secret." },
+        { "cache-control": "no-store" }
+      );
+    }
+    if (!spotifySnapshot?.hasRefreshToken) {
+      return sendJsonResponse(
+        res,
+        400,
+        { ok: false, error: "Spotify is not linked. Visit /auth/spotify first." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (routePath === "/admin/spotify/skip" || routePath === "/api/spotify/skip") {
+      try {
+        const result = await SPOTIFY.skipNext();
+        return sendJsonResponse(
+          res,
+          200,
+          {
+            ok: Boolean(result?.ok),
+            action: "skip",
+            spotifyStatus: Number(result?.status || 0) || null,
+            raw: result?.raw ?? null,
+          },
+          { "cache-control": "no-store" }
+        );
+      } catch (e) {
+        console.error("[WEB][SPOTIFY] skip failed:", e);
+        return sendJsonResponse(
+          res,
+          500,
+          { ok: false, error: String(e?.message || e) },
+          { "cache-control": "no-store" }
+        );
+      }
+    }
+
+    try {
+      const body = await readJsonBody(req, { limitBytes: 64 * 1024 });
+      const input = String(
+        body?.input ?? body?.track ?? body?.query ?? ""
+      ).trim();
+      const searchLimit = Math.max(1, Math.min(10, Number(body?.limit) || 1));
+
+      if (!input) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: "Missing input. Provide a Spotify URL/URI/id or search text." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      let uri = SPOTIFY.parseSpotifyTrackUri(input);
+      let track = null;
+      let source = "uri";
+
+      if (!uri) {
+        source = "search";
+        const search = await SPOTIFY.searchTrack(input, searchLimit);
+        track = search?.tracks?.[0] || null;
+        uri = String(track?.uri || "").trim();
+        if (!search?.ok || !uri) {
+          return sendJsonResponse(
+            res,
+            400,
+            { ok: false, error: "No Spotify track found for that input." },
+            { "cache-control": "no-store" }
+          );
+        }
+      }
+
+      const result = await SPOTIFY.addToQueue(uri);
+      return sendJsonResponse(
+        res,
+        200,
+        {
+          ok: Boolean(result?.ok),
+          action: "add",
+          source,
+          input,
+          uri,
+          track: track
+            ? {
+              name: String(track?.name || ""),
+              artists: String(track?.artists || ""),
+              url: String(track?.url || ""),
+            }
+            : null,
+          spotifyStatus: Number(result?.status || 0) || null,
+          raw: result?.raw ?? null,
+        },
+        { "cache-control": "no-store" }
+      );
+    } catch (e) {
+      console.error("[WEB][SPOTIFY] add failed:", e);
+      return sendJsonResponse(
+        res,
+        500,
+        { ok: false, error: String(e?.message || e) },
+        { "cache-control": "no-store" }
+      );
+    }
+  }
+
+  const isRobloxFriendsApi =
+    routePath === "/api/roblox/friends/tracked" ||
+    routePath === "/api/roblox/friends/current" ||
+    routePath === "/api/roblox/friends/add" ||
+    routePath === "/api/roblox/friends/unfriend-all";
+
+  if (isRobloxFriendsApi) {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (routePath === "/api/roblox/friends/tracked") {
+      if (method !== "GET") {
+        return sendJsonResponse(
+          res,
+          405,
+          { ok: false, error: "Method not allowed." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const scopeRaw = String(parsedUrl.searchParams.get("scope") || "all")
+        .trim()
+        .toLowerCase();
+      const validScopes = new Set(["all", "temp", "temporary", "perm", "permanent"]);
+      if (!validScopes.has(scopeRaw)) {
+        return sendJsonResponse(
+          res,
+          400,
+          {
+            ok: false,
+            error: "Invalid scope. Use one of: all, temp, temporary, perm, permanent.",
+          },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const entries = listTrackedRobloxFriends({ scope: scopeRaw });
+      return sendJsonResponse(
+        res,
+        200,
+        {
+          ok: true,
+          moduleEnabled: isRobloxModuleEnabled(),
+          scope: scopeRaw,
+          count: entries.length,
+          entries,
+        },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (routePath === "/api/roblox/friends/current") {
+      if (method !== "GET") {
+        return sendJsonResponse(
+          res,
+          405,
+          { ok: false, error: "Method not allowed." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const snapshot = getPublicRobloxTokenSnapshot();
+      const userIdQuery = Number(parsedUrl.searchParams.get("userId") || 0);
+      const linkedUserId = userIdQuery > 0 ? userIdQuery : Number(snapshot?.bot?.userId || 0);
+
+      if (!linkedUserId || !Number.isFinite(linkedUserId)) {
+        return sendJsonResponse(
+          res,
+          400,
+          {
+            ok: false,
+            error: "Roblox account is not linked. Link Roblox first or pass ?userId=...",
+          },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const limit = Math.max(
+        1,
+        Math.min(5000, Number(parsedUrl.searchParams.get("limit") || 500) || 500)
+      );
+
+      try {
+        const friends = await ROBLOX.getCurrentUserFriends(linkedUserId);
+        const sliced = Array.isArray(friends) ? friends.slice(0, limit) : [];
+        const entries = sliced.map((friend) => ({
+          userId: String(friend?.id || ""),
+          username: String(friend?.name || "").trim(),
+          displayName: String(friend?.displayName || "").trim(),
+          isBanned: Boolean(friend?.isBanned),
+          created: String(friend?.created || "").trim() || null,
+        }));
+
+        return sendJsonResponse(
+          res,
+          200,
+          {
+            ok: true,
+            linkedUserId: String(linkedUserId),
+            count: entries.length,
+            totalFetched: Array.isArray(friends) ? friends.length : 0,
+            limit,
+            entries,
+          },
+          { "cache-control": "no-store" }
+        );
+      } catch (e) {
+        console.error("[WEB][ROBLOX] friends/current failed:", e);
+        return sendJsonResponse(
+          res,
+          500,
+          { ok: false, error: String(e?.message || e) },
+          { "cache-control": "no-store" }
+        );
+      }
+    }
+
+    if (routePath === "/api/roblox/friends/add") {
+      if (method !== "POST") {
+        return sendJsonResponse(
+          res,
+          405,
+          { ok: false, error: "Method not allowed." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      if (!isRobloxModuleEnabled()) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: "Roblox module is disabled for this instance." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      try {
+        const body = await readJsonBody(req, { limitBytes: 64 * 1024 });
+        const targetName = String(body?.username ?? body?.targetName ?? "")
+          .trim()
+          .split(/\s+/)[0];
+        const permanent = parseBooleanInput(body?.permanent, false);
+        const source = String(body?.source || (permanent ? "permadd" : "api"))
+          .trim()
+          .toLowerCase();
+
+        if (!targetName) {
+          return sendJsonResponse(
+            res,
+            400,
+            { ok: false, error: "Missing username." },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        const result = await addTrackedRobloxFriend({
+          targetName,
+          requestedBy: String(adminSession?.login || "").trim(),
+          permanent,
+          source: source || (permanent ? "permadd" : "api"),
+        });
+
+        const ok = result?.status === "success" || result?.status === "already";
+        const statusMap = {
+          disabled: 400,
+          missing_username: 400,
+          validate_error: 502,
+          invalid_username: 400,
+          rate_limited: 429,
+          send_error: 502,
+          success: 200,
+          already: 200,
+        };
+        const statusCode = Number(statusMap[result?.status]) || (ok ? 200 : 400);
+
+        return sendJsonResponse(
+          res,
+          statusCode,
+          { ok, result },
+          { "cache-control": "no-store" }
+        );
+      } catch (e) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: String(e?.message || e) },
+          { "cache-control": "no-store" }
+        );
+      }
+    }
+
+    if (method !== "POST") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (!isRobloxModuleEnabled()) {
+      return sendJsonResponse(
+        res,
+        400,
+        { ok: false, error: "Roblox module is disabled for this instance." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    try {
+      const body = await readJsonBody(req, { limitBytes: 64 * 1024 });
+      const includePermanent = parseBooleanInput(body?.includePermanent, false);
+      const delayMs = Math.max(0, Math.min(10_000, Number(body?.delayMs) || 250));
+
+      const outcome = await unfriendTrackedRobloxFriends({
+        includePermanent,
+        delayMs,
+      });
+
+      return sendJsonResponse(
+        res,
+        200,
+        {
+          ok: true,
+          includePermanent,
+          delayMs,
+          result: outcome,
+        },
+        { "cache-control": "no-store" }
+      );
+    } catch (e) {
+      return sendJsonResponse(
+        res,
+        400,
+        { ok: false, error: String(e?.message || e) },
+        { "cache-control": "no-store" }
+      );
+    }
   }
 
   if (lowerUrlPath.startsWith("/auth") && !adminAllowed) {
@@ -1304,17 +3227,48 @@ const webServer = http.createServer(async (req, res) => {
     );
   }
 
-  // Use /auth as a shortcut to the unified auth status page.
+  // Use /auth as a shortcut to admin auth status.
   if (routePath === "/auth") {
-    return sendRedirect(res, "/auth/success");
+    return sendRedirect(res, "/admin/auth");
   }
 
-  if (routePath === "/auth/status") {
+  if (routePath === "/auth/status" || routePath === "/api/auth/status") {
     res.writeHead(200, {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
     });
     return res.end(JSON.stringify(authSnapshot()));
+  }
+
+  if (routePath === "/auth/debug") {
+    return sendJsonResponse(
+      res,
+      200,
+      {
+        ok: true,
+        requestOrigin,
+        host: String(req?.headers?.host || ""),
+        forwardedHost: String(req?.headers?.["x-forwarded-host"] || ""),
+        forwardedProto: String(req?.headers?.["x-forwarded-proto"] || ""),
+        webOriginOverride: String(process.env.WEB_ORIGIN || process.env.WEB_BASE_URL || "").trim() || null,
+        twitch: {
+          redirectUri: String(authSettings?.redirectUri || "").trim() || null,
+          dynamicRedirect: String(process.env.TWITCH_AUTH_DYNAMIC_REDIRECT || "").trim() || null,
+          configuredRedirectUri: String(process.env.TWITCH_AUTH_REDIRECT_URI || "").trim() || null,
+        },
+        roblox: {
+          redirectUri: String(robloxAuthSettings?.redirectUri || "").trim() || null,
+          dynamicRedirect: String(process.env.ROBLOX_AUTH_DYNAMIC_REDIRECT || "").trim() || null,
+          configuredRedirectUri: String(process.env.ROBLOX_AUTH_REDIRECT_URI || "").trim() || null,
+        },
+        spotify: {
+          redirectUri: String(spotifyAuthSettings?.redirectUri || "").trim() || null,
+          dynamicRedirect: String(process.env.SPOTIFY_AUTH_DYNAMIC_REDIRECT || "").trim() || null,
+          configuredRedirectUri: String(process.env.SPOTIFY_AUTH_REDIRECT_URI || "").trim() || null,
+        },
+      },
+      { "cache-control": "no-store" }
+    );
   }
 
   // Direct auth start endpoints (no landing pages).
@@ -1531,7 +3485,18 @@ const webServer = http.createServer(async (req, res) => {
           redirectUri: webLoginRedirectUri,
         });
 
-        const session = { userId: user.userId, login: user.login };
+        let isMod = false;
+        try {
+          if (TWITCH_CHANNEL_ID && user?.userId) {
+            isMod = await isUserModerator({
+              broadcasterId: TWITCH_CHANNEL_ID,
+              userId: String(user.userId),
+              preferredRole: "streamer",
+            });
+          }
+        } catch {}
+
+        const session = { userId: user.userId, login: user.login, mode: "twitch", isMod };
         if (!isAdminAllowedSession(session)) {
           WEB_ADMIN_AUTH.clearSessionCookie(res, { secure: isSecureRequest });
           return sendErrorPage(
@@ -1542,7 +3507,8 @@ const webServer = http.createServer(async (req, res) => {
               `Logged in as: ${String(user?.login || "unknown")} (id: ${String(user?.userId || "unknown")}).\n\n` +
               `To allow access, update your INI [web] section:\n` +
               `- owner_user_id / owner_login, or\n` +
-              `- allowed_users (comma separated logins).\n\n` +
+              `- allowed_users (comma separated logins), or\n` +
+              `- make this user a moderator in the channel.\n\n` +
               `Note: streamer/bot accounts from your INI [twitch] section (channel_name/channel_id/bot_name/bot_id) are also allowed.`
           );
         }
@@ -1626,20 +3592,16 @@ const webServer = http.createServer(async (req, res) => {
   }
 
   if (routePath === "/auth/success") {
-    // Unified status page for all auth providers.
-    const provider = String(parsedUrl.searchParams.get("provider") || "").trim();
-    const role = String(parsedUrl.searchParams.get("role") || "").trim();
-    const login = String(parsedUrl.searchParams.get("login") || "").trim();
+    const oauthError = String(parsedUrl.searchParams.get("error") || "").trim();
+    const oauthErrorDescription = String(parsedUrl.searchParams.get("error_description") || "").trim();
+    const redirectTarget = `/admin/auth${parsedUrl.search || ""}`;
     return sendHtmlResponse(
       res,
-      200,
-      renderUnifiedAuthSuccessHtml({
-        provider,
-        role,
-        login,
-        twitchSnapshot: authSnapshot(),
-        robloxSnapshot: robloxAuthSnapshot(),
-        spotifySnapshot: spotifyAuthSnapshot(),
+      oauthError ? 400 : 200,
+      renderAuthSuccessRedirectHtml({
+        targetPath: redirectTarget,
+        success: !oauthError,
+        errorText: oauthErrorDescription || oauthError,
       }),
       { "cache-control": "no-store" }
     );
@@ -1667,7 +3629,7 @@ const webServer = http.createServer(async (req, res) => {
     );
   }
 
-  if (routePath === "/status") {
+  if (routePath === "/status" || routePath === "/api/status") {
     res.writeHead(200, {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
@@ -1675,13 +3637,60 @@ const webServer = http.createServer(async (req, res) => {
     return res.end(JSON.stringify(getStatusSnapshot()));
   }
 
-  let filePath;
-  if (routePath === "/" || routePath === "/index.html") {
+  if (routePath === "/home" || routePath === "/index.html") {
     if (WEB_BUILD?.html) {
       return sendHtmlResponse(res, 200, WEB_BUILD.html);
     }
-    filePath = path.join(WEB_DIR, "index.html");
-  } else {
+    const homePath = path.join(WEB_DIR, "index.html");
+    try {
+      const html = fs.readFileSync(homePath, "utf8");
+      return sendHtmlResponse(res, 200, html);
+    } catch (e) {
+      return sendErrorPage(
+        res,
+        500,
+        "Server Error",
+        `Failed to load home page: ${String(e?.message || e)}`
+      );
+    }
+  }
+
+  if (routePath === "/admin.html") {
+    return sendRedirect(res, "/admin");
+  }
+
+  if (routePath === "/static/admin.css" || routePath === "/admin.css") {
+    // Old asset path from previous versions.
+    return sendRedirect(res, "/static/style.css", 302);
+  }
+
+  if (routePath === "/static/style.css" || routePath === "/style.css") {
+    if (WEB_BUILD?.cssFile) {
+      return sendRedirect(res, `/static/gen/${WEB_BUILD.cssFile}`, 302);
+    }
+
+    const fallbackCss = compileScssToCssText();
+    if (fallbackCss.trim()) {
+      return sendCssResponse(res, 200, fallbackCss, SCSS_PATH, {
+        "cache-control": "no-store",
+      });
+    }
+
+    return sendErrorPage(res, 404, "Not Found", "Stylesheet not available yet.");
+  }
+
+  if (routePath === "/static/base.js" || routePath === "/base.js") {
+    if (WEB_BUILD?.jsFile) {
+      return sendRedirect(res, `/static/gen/${WEB_BUILD.jsFile}`, 302);
+    }
+  }
+
+  if (routePath === "/") {
+    return sendRedirect(res, "/home");
+  }
+
+  let filePath;
+  {
     const rel = urlPath.replace(/^\/+/, ""); // IMPORTANT FIX
     filePath = path.join(WEB_DIR, rel);
   }

@@ -1,15 +1,12 @@
 ﻿let chatByUser = {};
 
-import { WebhookClient, EmbedBuilder } from "discord.js";
+import { initDiscord, EmbedBuilder } from "./discord/index.js";
 
-const DISCORD_WEBHOOK_URL = String(process.env.DISCORD_WEBHOOK_URL || "").trim();
-const webhookClient = DISCORD_WEBHOOK_URL
-  ? new WebhookClient({ url: DISCORD_WEBHOOK_URL })
-  : null;
-
-if (!webhookClient) {
-  console.warn("[discord] DISCORD_WEBHOOK_URL missing; webhook features disabled.");
-}
+const DISCORD = initDiscord({ logger: console });
+const webhookClient = DISCORD.webhookClient;
+const discordMessenger = DISCORD.discordMessenger;
+const DISCORD_ANNOUNCE_CHANNEL_ID = DISCORD.announceChannelId;
+const logDiscordModAction = DISCORD.logModAction;
 
 import fs from "fs";
 import fetch from "node-fetch";
@@ -56,7 +53,10 @@ import { handleFirstMessageWelcome } from "./modules/welcome.js";
 import { tryHandleQuotesModCommand, tryHandleQuotesUserCommand } from "./modules/quotes.js";
 import { tryHandleGlobalCommands } from "./modules/globalCommands.js";
 import { startTimers } from "./functions/timers.js";
+import { createCommandCounter } from "./functions/commandCounts.js";
+import { createNamedCountStore } from "./functions/namedCounts.js";
 import { startWebServer } from "./web/server.js";
+import { isCustomCommandsModuleEnabled, registerCustomCommandsModule } from "./modules/customCommands.js";
 import {
   addTrackedRobloxFriend,
   getRobloxFriendCooldownMs,
@@ -69,6 +69,8 @@ import {
 import {
   getTokenStorePath,
   readTokenStore,
+  getRoleAccessToken,
+  TWITCH_ROLES,
 } from "./api/twitch/auth.js";
 import {
   getPublicRobloxTokenSnapshot,
@@ -194,12 +196,38 @@ const PAJBOT_OAUTH = String(process.env.PAJBOT_OAUTH || "").trim();
 const INSTANCE_NAME =
   String(process.env.INSTANCE_NAME || "default").trim() || "default";
 
+const COMMAND_COUNTER = createCommandCounter({ instance: INSTANCE_NAME });
+const NAMED_COUNTERS = createNamedCountStore({ instance: INSTANCE_NAME });
+
 const PLAYTIME_PATH = String(
   process.env.PLAYTIME_PATH || "./playtime.json"
 ).trim();
 const SETTINGS_PATH = String(process.env.SETTINGS_PATH || "./SETTINGS.json").trim();
 const STREAMS_PATH = String(process.env.STREAMS_PATH || "./STREAMS.json").trim();
 const WORDS_PATH = String(process.env.WORDS_PATH || "./WORDS.json").trim();
+const DEFAULT_VALID_MODES = ["!join.on", "!link.on", "!1v1.on", "!ticket.on", "!val.on", "!reddit.on"];
+const DEFAULT_SPECIAL_MODES = [
+  "!ks.on",
+  "!ks.off",
+  "!timer.on",
+  "!timer.off",
+  "!keywords.on",
+  "!keywords.off",
+  "!timers.off",
+  "!timers.on",
+  "!sleep.on",
+  "!sleep.off",
+];
+const DEFAULT_CUSTOM_MODES = ["!xqcchat.on", "!xqcchat.off"];
+const DEFAULT_IGNORE_MODES = [
+  "!spamfilter.on",
+  "!spamfilter.off",
+  "!lengthfilter.on",
+  "!lengthfilter.off",
+  "!linkfilter.on",
+  "!linkfilter.off",
+  "!sleep.on",
+];
 
 const ver = '2.4'
 
@@ -268,6 +296,10 @@ function recordCommandUsage(channel, userstate, commandText) {
     command,
     at: Date.now(),
   });
+
+  try {
+    COMMAND_COUNTER?.record?.(command);
+  } catch {}
 
   console.log(`[TWITCH][CMD] ${user} used ${command} in #${key}`);
 }
@@ -381,17 +413,51 @@ if (!fs.existsSync(LOG_PATH)) {
 }
 scheduleChatLogRotation();
 
-let SETTINGS = JSON.parse(fs.readFileSync(SETTINGS_PATH));
+function withSettingsDefaults(input = {}) {
+  const base =
+    input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {};
+
+  const arr = (value) =>
+    Array.isArray(value) ? value.map((v) => String(v || "").trim()).filter(Boolean) : [];
+
+  base.validModes = arr(base.validModes);
+  if (!base.validModes.length) base.validModes = [...DEFAULT_VALID_MODES];
+
+  base.specialModes = arr(base.specialModes);
+  if (!base.specialModes.length) base.specialModes = [...DEFAULT_SPECIAL_MODES];
+
+  base.customModes = arr(base.customModes);
+  if (!base.customModes.length) base.customModes = [...DEFAULT_CUSTOM_MODES];
+
+  base.ignoreModes = arr(base.ignoreModes);
+  if (!base.ignoreModes.length) base.ignoreModes = [...DEFAULT_IGNORE_MODES];
+
+  return base;
+}
+
+function readSettingsFromDisk() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+    return withSettingsDefaults(parsed);
+  } catch {
+    return withSettingsDefaults({});
+  }
+}
+
+let SETTINGS = readSettingsFromDisk();
 let STREAMS = JSON.parse(fs.readFileSync(STREAMS_PATH));
 let WORDS = JSON.parse(fs.readFileSync(WORDS_PATH));
+try {
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2), "utf8");
+} catch {}
 
 function loadSettings() {
-  return SETTINGS && typeof SETTINGS === "object" ? SETTINGS : {};
+  return withSettingsDefaults(SETTINGS);
 }
 
 function saveSettings(next) {
   if (!next || typeof next !== "object") return;
-  SETTINGS = next;
+  SETTINGS = withSettingsDefaults(next);
   try {
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2), "utf8");
   } catch {}
@@ -409,7 +475,7 @@ let EXTERNAL_STATUS = {
 
 function readSettingsSnapshot() {
   try {
-    const s = JSON.parse(fs.readFileSync(SETTINGS_PATH));
+    const s = readSettingsFromDisk();
     return {
       ks: !!s.ks,
       timers: !!s.timers,
@@ -600,6 +666,122 @@ const pajbot = PAJBOT_ENABLED
     })
   : null;
 
+// Optional: allow commands typed in Discord to be relayed to the bot.
+// Default mode is "simulate" (runs handlers without sending to Twitch chat).
+// Optional mode "tmi" will send the command into Twitch chat via [pajbot].
+let DISCORD_RELAY_OUT = {
+  discordChannelId: "",
+  discordMessage: null,
+  expiresAt: 0,
+  remaining: 0,
+};
+const DISCORD_RELAY_OUT_TTL_MS = 10_000;
+const DISCORD_RELAY_OUT_MAX_MESSAGES = 6;
+
+function normalizeChan(value) {
+  return String(value || "").trim().replace(/^#/, "").toLowerCase();
+}
+
+function parseRawPrivmsgLine(rawLine) {
+  const line = String(rawLine || "");
+  const m = /\bPRIVMSG\s+#?([^\s]+)\s+:(.*)$/.exec(line);
+  if (!m) return { channel: "", text: "" };
+  return { channel: normalizeChan(m[1]), text: String(m[2] || "").trim() };
+}
+
+function setDiscordRelayOutput(discordMessage) {
+  const id = String(discordMessage?.channel?.id || "").trim();
+  if (!id) return;
+  DISCORD_RELAY_OUT = {
+    discordChannelId: id,
+    discordMessage,
+    expiresAt: Date.now() + DISCORD_RELAY_OUT_TTL_MS,
+    remaining: DISCORD_RELAY_OUT_MAX_MESSAGES,
+  };
+}
+
+async function mirrorToDiscordIfActive(channelLogin, text) {
+  try {
+    const out = String(text || "").trim();
+    if (!out) return false;
+
+    const ctx = DISCORD_RELAY_OUT;
+    if (!ctx?.discordChannelId) return false;
+    if (Date.now() > Number(ctx.expiresAt || 0)) return false;
+    if (Number(ctx.remaining || 0) <= 0) return false;
+
+    const chan = normalizeChan(channelLogin);
+    if (chan && chan !== normalizeChan(CHANNEL_NAME)) return false;
+
+    // When a command is typed in Discord, we want all bot output to reply to that Discord message.
+    // Never leak simulated output into Twitch chat.
+    try {
+      const msg = ctx?.discordMessage;
+      if (msg && typeof msg.reply === "function") {
+        await msg.reply({ content: out, allowedMentions: { repliedUser: false } });
+      } else if (discordMessenger) {
+        await discordMessenger.send(ctx.discordChannelId, { content: out });
+      }
+    } catch (e) {
+      console.warn("[discord][relay] mirror send failed:", String(e?.message || e));
+    }
+
+    ctx.remaining = Number(ctx.remaining || 0) - 1;
+    DISCORD_RELAY_OUT = ctx;
+    return true;
+  } catch (e) {
+    console.warn("[discord][relay] mirror failed:", String(e?.message || e));
+    // Suppress Twitch output even if Discord mirroring fails.
+    return true;
+  }
+}
+
+try {
+  DISCORD?.registerCommandRelay?.({
+    relayToTwitch: async (text, ctx) => {
+      const mode = String(process.env.DISCORD_RELAY_MODE || "simulate").trim().toLowerCase();
+      const debug = /^(1|true|yes|on)$/i.test(String(process.env.DISCORD_RELAY_DEBUG || "0").trim());
+      const msg = String(text || "").trim();
+      if (!msg) return;
+
+      if (mode === "tmi") {
+        if (!pajbot) throw new Error("PAJBOT is not configured (set [pajbot].enabled/name/oauth).");
+        if (debug) console.log("[discord][relay] tmi -> twitch:", msg);
+        await pajbot.say(CHANNEL_NAME, msg);
+        return;
+      }
+
+      // simulate (default): run handlers without sending a chat message from a second account
+      const discordMessage = ctx?.discordMessage;
+      const discordChannelId = String(discordMessage?.channel?.id || "").trim();
+      const discordAuthor = discordMessage?.author;
+      const isPrivileged = Boolean(ctx?.isPrivileged);
+
+      const syntheticUser = String(discordAuthor?.username || "").trim().toLowerCase() || "discord_user";
+      const syntheticDisplay = String(discordAuthor?.globalName || discordAuthor?.displayName || discordAuthor?.username || "DiscordUser");
+      const syntheticId = String(discordAuthor?.id || "");
+
+      const userstate = {
+        username: syntheticUser,
+        "display-name": syntheticDisplay,
+        "user-id": syntheticId,
+        mod: isPrivileged,
+        badges: isPrivileged ? { moderator: "1" } : {},
+        id: "",
+        "client-nonce": "",
+      };
+
+      // Route bot output to the same Discord channel for a short window.
+      if (discordMessage) setDiscordRelayOutput(discordMessage);
+
+      if (debug) console.log("[discord][relay] simulate -> handlers:", msg, { user: syntheticUser, mod: isPrivileged });
+      client.emit("message", `#${CHANNEL_NAME}`, userstate, msg, false);
+    },
+  });
+} catch (e) {
+  console.warn("[discord][relay] init failed:", String(e?.message || e));
+}
+
 TWITCH_FUNCTIONS.installHelixChatTransport({
   client,
   label: "main_client",
@@ -622,6 +804,49 @@ TWITCH_FUNCTIONS.installHelixChatTransport({
   allowIrcFallback: TWITCH_CHAT_ALLOW_IRC_FALLBACK,
 });
 
+try {
+  const diag = TWITCH_FUNCTIONS.getHelixChatDiagnostics?.() || null;
+  if (diag) {
+    const status = diag.missingConfig?.length ? "NOT READY" : "READY";
+    const extra = diag.missingConfig?.length ? ` missing: ${diag.missingConfig.join(", ")}` : "";
+    console.log(
+      `[TWITCH][HELIX_CHAT] ${status} (app_token=${diag.useAppToken ? "on" : "off"} fallback=${diag.allowIrcFallback ? "on" : "off"}) broadcaster=${diag.broadcasterLogin || "?"} senderId=${diag.senderId || "?"}.${extra}`
+    );
+  }
+} catch {}
+
+// Suppress Twitch chat output for Discord-simulated commands, and mirror it to Discord instead.
+try {
+  const baseSay = client.say.bind(client);
+  client.say = async (channel, message, ...rest) => {
+    const chan = normalizeChan(channel || CHANNEL_NAME);
+    if (await mirrorToDiscordIfActive(chan, message)) return null;
+    return baseSay(channel, message, ...rest);
+  };
+
+  const baseAction = client.action?.bind(client);
+  if (typeof baseAction === "function") {
+    client.action = async (channel, message, ...rest) => {
+      const chan = normalizeChan(channel || CHANNEL_NAME);
+      if (await mirrorToDiscordIfActive(chan, message)) return null;
+      return baseAction(channel, message, ...rest);
+    };
+  }
+
+  const baseRaw = client.raw?.bind(client);
+  if (typeof baseRaw === "function") {
+    client.raw = async (rawLine, ...rest) => {
+      const parsed = parseRawPrivmsgLine(rawLine);
+      if (parsed.text && (await mirrorToDiscordIfActive(parsed.channel || CHANNEL_NAME, parsed.text))) {
+        return null;
+      }
+      return baseRaw(rawLine, ...rest);
+    };
+  }
+} catch (e) {
+  console.warn("[discord][relay] output mirror wrap failed:", String(e?.message || e));
+}
+
 // Keep pajbot on plain IRC/tmi.js transport (no Helix patching).
 
   // ---------- OPTIONAL MODULES ----------
@@ -634,6 +859,7 @@ try {
       streamerDisplayName: STREAMER_DISPLAY_NAME,
       isSharedCommandCooldownActive,
       getChatPerms,
+      logModAction: logDiscordModAction,
     });
     console.log("[modules] spotify=on");
   } else {
@@ -650,6 +876,8 @@ try {
       channelName: CHANNEL_NAME,
       getChatPerms,
       webhookClient,
+      discordMessenger,
+      discordChannelId: DISCORD_ANNOUNCE_CHANNEL_ID,
       EmbedBuilder,
     });
     console.log("[modules] gameping=on");
@@ -695,12 +923,30 @@ try {
       channelName: CHANNEL_NAME,
       getChatPerms,
     });
-    console.log("[modules] aubreytab=on");
+    console.log("[modules] tab=on");
   } else {
-    console.log("[modules] aubreytab=off");
+    console.log("[modules] tab=off");
   }
 } catch (e) {
-  console.warn("[modules] aubreytab init failed:", String(e?.message || e));
+  console.warn("[modules] tab init failed:", String(e?.message || e));
+}
+
+try {
+  if (isCustomCommandsModuleEnabled()) {
+    registerCustomCommandsModule({
+      client,
+      channelName: CHANNEL_NAME,
+      getChatPerms,
+      commandCounter: COMMAND_COUNTER,
+      countStore: NAMED_COUNTERS,
+      logger: console,
+    });
+    console.log("[modules] custom_commands=on");
+  } else {
+    console.log("[modules] custom_commands=off");
+  }
+} catch (e) {
+  console.warn("[modules] custom_commands init failed:", String(e?.message || e));
 }
 
 let alertsController = null;
@@ -748,6 +994,36 @@ client.on("message", (channel, userstate, message, self) => {
   recordCommandUsage(channel, userstate, msg);
 });
 
+// Twitch chat -> Discord logging should be independent of the main command handler, so it still
+// works even when other handlers return early or error out.
+client.on("message", (channel, userstate, message, self) => {
+  try {
+    if (self) return;
+    const msg = String(message || "").trim();
+    if (!msg) return;
+
+    const badges = userstate?.badges && typeof userstate.badges === "object" ? userstate.badges : {};
+    const isBroadcaster = badges?.broadcaster === "1" || badges?.broadcaster === 1;
+    const isVip = badges?.vip === "1" || badges?.vip === 1;
+    const isMod = Boolean(userstate?.mod) || badges?.moderator === "1" || badges?.moderator === 1;
+    const isSubscriber = Boolean(userstate?.subscriber);
+
+    void DISCORD?.logTwitchChat?.({
+      channelName: String(channel || CHANNEL_NAME || "").replace(/^#/, ""),
+      message: msg,
+      isVip,
+      isMod,
+      isBroadcaster,
+      isSubscriber,
+      user: {
+        login: String(userstate?.username || "").toLowerCase(),
+        displayName: String(userstate?.["display-name"] || userstate?.username || ""),
+        id: String(userstate?.["user-id"] || ""),
+      },
+    });
+  } catch {}
+});
+
 
 // --------------------------------------------------------------------------------------------------
 
@@ -771,6 +1047,7 @@ async function logHandler(
   twitchUsername,
   twitchDisplayName,
   twitchUserId,
+  isVip,
   isMod,
   isBroadcaster,
   isFirstMessage,
@@ -1288,25 +1565,34 @@ async function applyModeToTwitch({ client, mode, userstate }) {
   if (!cfg) return false;
 
   // reload settings so we always use freshest titles
-  const s = JSON.parse(fs.readFileSync("./SETTINGS.json", "utf8"));
+  const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
 
   const title = s?.titles?.[cfg.titleKey];
   if (!title) {
-    client.say(CHANNEL_NAME, `âŒ No title set for ${cfg.titleKey} in SETTINGS.titles`);
+    console.warn(`[applyModeToTwitch] No title set for "${cfg.titleKey}" in settings.titles`);
     return false;
   }
 
   try {
+    const auth = await getRoleAccessToken({ role: TWITCH_ROLES.STREAMER });
+    if (!auth?.accessToken || !auth?.clientId) {
+      throw new Error("Missing streamer OAuth token/client id (link streamer in /auth).");
+    }
+
+    const overrideGame =
+      s?.modeGames && typeof s.modeGames === "object" ? String(s.modeGames[mode] || "").trim() : "";
+    const gameName = overrideGame || cfg.gameName;
+
     const gameId = await TWITCH_FUNCTIONS.getGameIdByName({
-      token: STREAMER_TOKEN,
-      clientId: CLIENT_ID,
-      name: cfg.gameName,
+      token: auth.accessToken,
+      clientId: auth.clientId,
+      name: gameName,
     });
 
     await TWITCH_FUNCTIONS.updateChannelInfo({
       broadcasterId: CHANNEL_ID,
-      token: STREAMER_TOKEN,
-      clientId: CLIENT_ID,
+      token: auth.accessToken,
+      clientId: auth.clientId,
       title,
       gameId: gameId || undefined,
     });
@@ -1327,7 +1613,7 @@ async function updateMode(client, message, twitchUsername, userstate) {
   if (!cmd.endsWith(".on")) return;
 
   // reload fresh settings
-  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json", "utf8"));
+  SETTINGS = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
 
   const isValidMode = SETTINGS.validModes.includes(cmd);
   const isIgnoreMode = SETTINGS.ignoreModes.includes(cmd);
@@ -1360,7 +1646,7 @@ async function updateMode(client, message, twitchUsername, userstate) {
 
   SETTINGS.currentMode = cmd;
 
-  fs.writeFileSync("./SETTINGS.json", JSON.stringify(SETTINGS, null, 2));
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2));
 
   client.raw(
     `@client-nonce=${userstate["client-nonce"]};reply-parent-msg-id=${userstate["id"]} ` +
@@ -1384,7 +1670,7 @@ async function updateMode(client, message, twitchUsername, userstate) {
     }
   }
 
-  SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json", "utf8"));
+  SETTINGS = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
 }
 
 
@@ -1904,13 +2190,13 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     customUserFunctions(client, message, twitchUsername, twitchUserId, userstate);
     const isFilterPermitted = hasTemporaryFilterPermit(twitchUsername);
     if (!isFilterPermitted && SETTINGS["spamFilter"] == true) {
-      FILTERS.spamFilter(client, message, twitchUsername, userstate);
+      FILTERS.spamFilter(client, channel, message, twitchUsername, userstate, SETTINGS);
     }
     if (!isFilterPermitted && SETTINGS["lengthFilter"] == true) {
-      FILTERS.lengthFilter(client, message, twitchUsername, userstate);
+      void FILTERS.lengthFilter(client, channel, message, twitchUsername, userstate, SETTINGS);
     }
     if (!isFilterPermitted && SETTINGS["linkFilter"] == true) {
-      FILTERS.linkFilter(client, message, twitchUsername, userstate, SETTINGS);
+      FILTERS.linkFilter(client, channel, message, twitchUsername, userstate, SETTINGS);
     }
   }
 
@@ -1919,6 +2205,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     twitchUsername,
     twitchDisplayName,
     twitchUserId,
+    isVip,
     isMod,
     isBroadcaster,
     isFirstMessage,
@@ -2246,6 +2533,15 @@ async function gracefulShutdown(signal = "shutdown") {
     } catch {}
     try {
       TIMERS?.stop?.();
+    } catch {}
+    try {
+      await DISCORD?.shutdown?.();
+    } catch {}
+    try {
+      await COMMAND_COUNTER?.flushNow?.();
+    } catch {}
+    try {
+      await NAMED_COUNTERS?.flushNow?.();
     } catch {}
     await flushStateNow();
   } catch (e) {
