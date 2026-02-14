@@ -284,6 +284,7 @@ export function initDiscord({ logger = console } = {}) {
       const user = payload?.user && typeof payload.user === "object" ? payload.user : {};
       const display = String(user.displayName || user.login || "unknown").trim() || "unknown";
       const login = String(user.login || "").trim();
+      const userId = String(user.id || "").trim();
 
       const isBroadcaster = payload?.isBroadcaster === true;
       const isMod = payload?.isMod === true;
@@ -296,10 +297,8 @@ export function initDiscord({ logger = console } = {}) {
       if (isVip) badgeParts.push("VIP");
       if (isSubscriber) badgeParts.push("SUB");
 
-      const who =
-        login && String(login).toLowerCase() !== String(display).toLowerCase()
-          ? `${display} (@${login})`
-          : `${display}${login ? ` (@${login})` : ""}`;
+      const identity = userId || login || "";
+      const who = identity ? `${display} (${identity})` : display;
 
       if (chatPerMessage) {
         const color = isBroadcaster

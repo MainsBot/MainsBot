@@ -59,6 +59,7 @@ const APP_ENV_KEYS_TO_CLEAR = [
   "SPAM_LINK",
   "JOIN_TIMER",
   "SONG_TIMER",
+  "DISCORD_TIMEZONE",
 ];
 
 function clearEnvKey(key) {
@@ -270,6 +271,20 @@ function applySettingsSection(ini) {
   }
   if (settings.admin_id != null || settings.adminId != null) {
     setEnvOverride("ADMIN_ID", settings.admin_id ?? settings.adminId);
+  }
+  if (
+    settings.timezone != null ||
+    settings.time_zone != null ||
+    settings.discord_timezone != null ||
+    settings.discordTimeZone != null
+  ) {
+    setEnvOverride(
+      "DISCORD_TIMEZONE",
+      settings.timezone ??
+        settings.time_zone ??
+        settings.discord_timezone ??
+        settings.discordTimeZone
+    );
   }
 }
 

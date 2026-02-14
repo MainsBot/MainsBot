@@ -150,6 +150,91 @@ const CHANNEL_ID =
   String(TWITCH_STREAMER_STORE.user_id || "").trim(); // id of channel for the bot to be in
 const WEB_PUBLIC_URL = String(process.env.WEB_PUBLIC_URL || "").trim();
 const REDDIT_RECAP_URL = String(process.env.REDDIT_RECAP_URL || "").trim();
+const DISCORD_TIMEZONE_DEFAULT = "EST";
+const DISCORD_TIMEZONE_ALIASES = Object.freeze({
+  EST: "America/New_York",
+  EDT: "America/New_York",
+  ET: "America/New_York",
+  "US EST": "America/New_York",
+  EASTERN: "America/New_York",
+  "US EASTERN": "America/New_York",
+  CST: "America/Chicago",
+  CDT: "America/Chicago",
+  CT: "America/Chicago",
+  CENTRAL: "America/Chicago",
+  "US CENTRAL": "America/Chicago",
+  MST: "America/Denver",
+  MDT: "America/Denver",
+  MT: "America/Denver",
+  MOUNTAIN: "America/Denver",
+  "US MOUNTAIN": "America/Denver",
+  PST: "America/Los_Angeles",
+  PDT: "America/Los_Angeles",
+  PT: "America/Los_Angeles",
+  PACIFIC: "America/Los_Angeles",
+  "US PACIFIC": "America/Los_Angeles",
+});
+
+function normalizeDiscordTimeZoneKey(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function resolveIanaTimeZone(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: raw })
+      .resolvedOptions()
+      .timeZone;
+  } catch {
+    return "";
+  }
+}
+
+function resolveDiscordTimeZone(value) {
+  const raw = String(value || "").trim();
+  const key = normalizeDiscordTimeZoneKey(raw);
+  if (key && DISCORD_TIMEZONE_ALIASES[key]) {
+    return { iana: DISCORD_TIMEZONE_ALIASES[key], label: key };
+  }
+
+  const iana = resolveIanaTimeZone(raw);
+  if (iana) return { iana, label: raw };
+
+  return {
+    iana: DISCORD_TIMEZONE_ALIASES[DISCORD_TIMEZONE_DEFAULT],
+    label: DISCORD_TIMEZONE_DEFAULT,
+  };
+}
+
+function formatDiscordCurrentTime(tz = DISCORD_TIMEZONE) {
+  const timeZone = String(tz?.iana || "").trim() || DISCORD_TIMEZONE_ALIASES[DISCORD_TIMEZONE_DEFAULT];
+  const label = String(tz?.label || "").trim() || DISCORD_TIMEZONE_DEFAULT;
+  try {
+    const current = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(new Date());
+    return `${current} ${label}`;
+  } catch {
+    const fallback = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(new Date());
+    return `${fallback} ${DISCORD_TIMEZONE_DEFAULT}`;
+  }
+}
+
+const DISCORD_TIMEZONE = resolveDiscordTimeZone(
+  process.env.DISCORD_TIMEZONE || DISCORD_TIMEZONE_DEFAULT
+);
 
 const STREAMER_TOKEN =
   normalizeAuthToken(TWITCH_STREAMER_STORE.access_token) ||
@@ -700,6 +785,211 @@ function setDiscordRelayOutput(discordMessage) {
   };
 }
 
+function normalizeDiscordCommandTarget(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return "";
+
+  const mentionMatch = /^<@!?(\d+)>$/.exec(raw);
+  if (mentionMatch) return mentionMatch[1];
+
+  return raw.replace(/^@+/, "").replace(/[^\w.-]+$/g, "").trim();
+}
+
+function pickRandom(list) {
+  const items = Array.isArray(list) ? list.filter(Boolean) : [];
+  if (!items.length) return "";
+  return String(items[Math.floor(Math.random() * items.length)]);
+}
+
+function formatDurationShort(ms) {
+  const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  if (minutes > 0 || hours > 0 || days > 0) parts.push(`${minutes}m`);
+  parts.push(`${seconds}s`);
+  return parts.join(" ");
+}
+
+function getLatestStreamEndMs() {
+  try {
+    const entries =
+      STREAMS && typeof STREAMS === "object" && !Array.isArray(STREAMS)
+        ? Object.values(STREAMS)
+        : [];
+    let latest = 0;
+    for (const entry of entries) {
+      const end = Number(entry?.streamEnd || 0);
+      if (Number.isFinite(end) && end > latest) latest = end;
+    }
+    return latest;
+  } catch {
+    return 0;
+  }
+}
+
+function getLinkedStreamerLogin() {
+  try {
+    const latestStore = readTokenStore(getTokenStorePath());
+    const linkedLogin = String(latestStore?.streamer?.login || "")
+      .trim()
+      .toLowerCase();
+    if (linkedLogin) return linkedLogin;
+  } catch {}
+
+  return String(CHANNEL_NAME || "").replace(/^#/, "").trim().toLowerCase();
+}
+
+async function fetchDecapiText(pathSuffix, login) {
+  const target = String(login || "").trim().toLowerCase();
+  if (!target) return "";
+  try {
+    const url = `https://decapi.me/twitch/${pathSuffix}/${encodeURIComponent(target)}`;
+    const response = await fetch(url);
+    const text = String(await response.text()).trim();
+    if (!response.ok) return "";
+    return text;
+  } catch {
+    return "";
+  }
+}
+
+async function replyToDiscordCommand(discordMessage, text) {
+  const out = String(text || "").trim();
+  if (!out) return;
+  if (discordMessage && typeof discordMessage.reply === "function") {
+    await discordMessage.reply({ content: out, allowedMentions: { repliedUser: false } });
+    return;
+  }
+  const discordChannelId = String(discordMessage?.channel?.id || "").trim();
+  if (discordChannelId && discordMessenger) {
+    await discordMessenger.send(discordChannelId, { content: out, allowedMentions: { parse: [] } });
+  }
+}
+
+async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
+  const messageText = String(text || "").trim();
+  if (!messageText.startsWith("!")) return false;
+
+  const discordMessage = ctx?.discordMessage;
+  if (!discordMessage) return false;
+
+  const parts = messageText.split(/\s+/).filter(Boolean);
+  const command = String(parts[0] || "").toLowerCase();
+  const senderLogin =
+    String(discordMessage?.author?.username || "")
+      .trim()
+      .toLowerCase() || "discord_user";
+  const arg1 = normalizeDiscordCommandTarget(parts[1] || "");
+  const channelDisplay = String(STREAMER_DISPLAY_NAME || CHANNEL_NAME_DISPLAY || CHANNEL_NAME || "Streamer").trim();
+
+  if (command === "!fight") {
+    if (!arg1) {
+      await replyToDiscordCommand(discordMessage, "Usage: !fight <user>");
+      return true;
+    }
+    const winner = pickRandom([senderLogin, arg1]) || senderLogin;
+    const hype = pickRandom(["Pog", "PogU", "PogChamp", "PagMan"]) || "Pog";
+    await replyToDiscordCommand(
+      discordMessage,
+      `${winner} won the fight ${hype} peepoSmash`
+    );
+    return true;
+  }
+
+  if (command === "!never") {
+    const target = arg1 || senderLogin;
+    await replyToDiscordCommand(
+      discordMessage,
+      `${target} {Never} A term used by Tibb12 when he does not want something to happen, or when he wants to piss off the fans. ex. "We will NEVER play crim again, but only for a big donation."`
+    );
+    return true;
+  }
+
+  if (command === "!soon") {
+    const target = arg1 || senderLogin;
+    await replyToDiscordCommand(
+      discordMessage,
+      `${target} A term used by Tibb12 when he does not have a clue when something is going to occur or when he wants to piss off the fans. (EX: "We will play Arsenal SOON, but not yet.")`
+    );
+    return true;
+  }
+
+  if (command === "!time") {
+    await replyToDiscordCommand(
+      discordMessage,
+      `${channelDisplay} local time: ${formatDiscordCurrentTime()}.`
+    );
+    return true;
+  }
+
+  if (command === "!uptime") {
+    const linkedStreamerLogin = getLinkedStreamerLogin();
+    if (!linkedStreamerLogin) {
+      await replyToDiscordCommand(discordMessage, "No linked Twitch streamer account found.");
+      return true;
+    }
+
+    const uptimeRaw = await fetchDecapiText("uptime", linkedStreamerLogin);
+    if (uptimeRaw && !/is offline|offline/i.test(uptimeRaw)) {
+      const uptimeMatch = uptimeRaw.match(/has been live for\s+(.+)/i);
+      const uptime = String(uptimeMatch ? uptimeMatch[1] : uptimeRaw)
+        .replace(/[.!?]\s*$/, "")
+        .trim();
+      await replyToDiscordCommand(
+        discordMessage,
+        `${linkedStreamerLogin} has been live for ${uptime || uptimeRaw}.`
+      );
+      return true;
+    }
+
+    await replyToDiscordCommand(discordMessage, `${linkedStreamerLogin} is currently offline.`);
+    return true;
+  }
+
+  if (command === "!downtime") {
+    const linkedStreamerLogin = getLinkedStreamerLogin();
+    if (!linkedStreamerLogin) {
+      await replyToDiscordCommand(discordMessage, "No linked Twitch streamer account found.");
+      return true;
+    }
+
+    const uptimeRaw = await fetchDecapiText("uptime", linkedStreamerLogin);
+    if (uptimeRaw && !/is offline|offline/i.test(uptimeRaw)) {
+      await replyToDiscordCommand(discordMessage, `${linkedStreamerLogin} is currently live.`);
+      return true;
+    }
+
+    const downtimeRaw = await fetchDecapiText("downtime", linkedStreamerLogin);
+    if (downtimeRaw) {
+      await replyToDiscordCommand(discordMessage, downtimeRaw);
+      return true;
+    }
+
+    const lastEnd = getLatestStreamEndMs();
+    if (lastEnd > 0) {
+      const offlineFor = formatDurationShort(Date.now() - lastEnd);
+      await replyToDiscordCommand(
+        discordMessage,
+        `${linkedStreamerLogin} has been offline for ${offlineFor}.`
+      );
+      return true;
+    }
+
+    await replyToDiscordCommand(
+      discordMessage,
+      `${linkedStreamerLogin} is offline (downtime unavailable).`
+    );
+    return true;
+  }
+
+  return false;
+}
+
 async function mirrorToDiscordIfActive(channelLogin, text) {
   try {
     const out = String(text || "").trim();
@@ -744,6 +1034,10 @@ try {
       const msg = String(text || "").trim();
       if (!msg) return;
 
+      if (await tryHandleDiscordOnlyCommand(msg, ctx)) {
+        return;
+      }
+
       if (mode === "tmi") {
         if (!pajbot) throw new Error("PAJBOT is not configured (set [pajbot].enabled/name/oauth).");
         if (debug) console.log("[discord][relay] tmi -> twitch:", msg);
@@ -769,6 +1063,7 @@ try {
         badges: isPrivileged ? { moderator: "1" } : {},
         id: "",
         "client-nonce": "",
+        __discordRelay: true,
       };
 
       // Route bot output to the same Discord channel for a short window.
@@ -989,6 +1284,7 @@ if (pajbot) pajbot.connect();
 
 client.on("message", (channel, userstate, message, self) => {
   if (self) return;
+  if (userstate?.__discordRelay) return;
   const msg = String(message || "").trim();
   if (!msg.startsWith("!")) return;
   recordCommandUsage(channel, userstate, msg);
@@ -999,6 +1295,7 @@ client.on("message", (channel, userstate, message, self) => {
 client.on("message", (channel, userstate, message, self) => {
   try {
     if (self) return;
+    if (userstate?.__discordRelay) return;
     const msg = String(message || "").trim();
     if (!msg) return;
 
@@ -2200,18 +2497,20 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     }
   }
 
-  logHandler(
-    message,
-    twitchUsername,
-    twitchDisplayName,
-    twitchUserId,
-    isVip,
-    isMod,
-    isBroadcaster,
-    isFirstMessage,
-    isSubscriber,
-    messageId
-  );
+  if (!userstate?.__discordRelay) {
+    logHandler(
+      message,
+      twitchUsername,
+      twitchDisplayName,
+      twitchUserId,
+      isVip,
+      isMod,
+      isBroadcaster,
+      isFirstMessage,
+      isSubscriber,
+      messageId
+    );
+  }
 
   // if user on cooldown, return
   var keywords;
