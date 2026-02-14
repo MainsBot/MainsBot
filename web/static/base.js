@@ -151,12 +151,16 @@ function setLastErrorDisplay(lastError) {
 
 function renderTopbarSession(session) {
   const right = document.querySelector(".topbar__right");
+  const adminLinkSlot = document.getElementById("topbarAdminLink");
   if (!right) return;
 
   const allowed = !!session?.allowed;
   const login = String(session?.login || "").trim();
 
   if (allowed && login) {
+    if (adminLinkSlot) {
+      adminLinkSlot.innerHTML = `<a class="btn btn--sm btn--ghost" href="/admin">Admin</a>`;
+    }
     right.innerHTML = `
       <div class="row" style="justify-content:flex-end">
         <a class="btn btn--sm btn--ghost" href="/swagger" target="_blank" rel="noreferrer">Swagger</a>
@@ -168,6 +172,7 @@ function renderTopbarSession(session) {
     return;
   }
 
+  if (adminLinkSlot) adminLinkSlot.innerHTML = "";
   right.innerHTML = `<a class="btn btn--sm" href="/admin/login">Login</a>`;
 }
 

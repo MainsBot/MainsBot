@@ -885,6 +885,7 @@ function escapeJsonForInlineScript(value) {
 function renderTopbar({ who = "", active = "" } = {}) {
   const safeWho = who ? escapeHtml(who) : "";
   const a = String(active || "").trim().toLowerCase();
+  const sectionLabel = a === "swagger" ? "Swagger Docs" : "Admin";
   const link = (href, label, key, extra = "") => {
     const isActive = key && a === String(key).trim().toLowerCase();
     const cls = isActive ? "btn btn--sm" : "btn btn--sm btn--ghost";
@@ -892,17 +893,18 @@ function renderTopbar({ who = "", active = "" } = {}) {
   };
 
   const right = safeWho
-    ? `<div class="row" style="justify-content:flex-end"><a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a><span class="muted" style="font-size:13px">Logged in as</span><strong>${safeWho}</strong><a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a></div>`
+    ? `<div class="row" style="justify-content:flex-end"><span class="muted" style="font-size:13px">Logged in as</span><strong>${safeWho}</strong><a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a></div>`
     : `<a class="btn btn--sm" href="/admin/login">Login</a>`;
 
   return `<div class="topbar">
     <div class="topbar__brand">
       <a href="/">MainsBot</a>
-      <span class="muted">Admin</span>
+      <span class="muted">${sectionLabel}</span>
     </div>
     <div class="topbar__links">
       ${link("/", "Home", "home")}
-      ${link("/admin", "Admin", "admin")}
+      ${safeWho ? link("/admin", "Admin", "admin") : ""}
+      ${link("/swagger", "Swagger", "swagger")}
     </div>
     <div class="topbar__right">${right}</div>
   </div>`;
@@ -1435,7 +1437,7 @@ function renderSwaggerUiHtml({ who = "" } = {}) {
 </head>
 <body>
   <div class="page">
-    ${renderTopbar({ who: safeWho, active: "admin" })}
+    ${renderTopbar({ who: safeWho, active: "swagger" })}
     <main class="app">
       <section class="card swagger-shell">
         <div class="swagger-head">
