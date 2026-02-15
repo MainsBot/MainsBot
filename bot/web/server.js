@@ -817,29 +817,87 @@ function logSpotifyAdminAudit(req, {
   input = "",
   uri = "",
   source = "",
+  trackName = "",
+  trackArtists = "",
   spotifyStatus = null,
 } = {}) {
   const actorLogin = String(adminSession?.login || "").trim() || "anonymous";
   const actorUserId = String(adminSession?.userId || "").trim() || "";
-  const payload = {
-    at: new Date().toISOString(),
-    action: String(action || "").trim() || "unknown",
-    ok: Boolean(ok),
-    route: String(routePath || "").trim(),
+  const actionKey = String(action || "").trim().toLowerCase();
+  const event =
+    actionKey === "add"
+      ? ok
+        ? "Song Added to Queue"
+        : "Song Add Failed"
+      : actionKey === "skip"
+        ? ok
+          ? "Song Skipped"
+          : "Song Skip Failed"
+        : ok
+          ? "Spotify Action OK"
+          : "Spotify Action Failed";
+
+  const normalizedTrackName = clampAuditText(trackName, 120);
+  const normalizedTrackArtists = clampAuditText(trackArtists, 120);
+  const normalizedInput = clampAuditText(input, 160);
+  const normalizedUri = clampAuditText(uri, 160);
+  const trackSummary = normalizedTrackName
+    ? normalizedTrackArtists
+      ? `${normalizedTrackName} - ${normalizedTrackArtists}`
+      : normalizedTrackName
+    : normalizedInput || normalizedUri || "(unknown track)";
+  const compact = `[WEB][SPOTIFY] (${event}) "${trackSummary}" - ${actorLogin} (${actorUserId || "unknown"})`;
+  const reasonText = clampAuditText(reason, 120);
+  if (ok) {
+    console.log(compact);
+  } else {
+    console.log(`${compact} [${reasonText || "failed"}]`);
+  }
+
+  const logModAction = deps?.logDiscordModAction;
+  if (typeof logModAction !== "function") return;
+
+  const discordAction =
+    actionKey === "add"
+      ? "spotify_addsong"
+      : actionKey === "skip"
+        ? "spotify_skip"
+        : "spotify_action";
+
+  const meta = {
+    route: String(routePath || "").trim() || "unknown",
     method: String(req?.method || "").toUpperCase(),
-    actorLogin,
-    actorUserId,
-    actorMode: String(adminSession?.mode || "").trim() || "",
     ip: getRequestIp(req),
-    userAgent: clampAuditText(req?.headers?.["user-agent"] || "", 160),
     source: String(source || "").trim() || "",
-    input: clampAuditText(input, 220),
-    uri: clampAuditText(uri, 220),
-    spotifyStatus:
-      Number.isFinite(Number(spotifyStatus)) ? Number(spotifyStatus) : null,
-    reason: clampAuditText(reason, 220),
+    input: normalizedInput || "",
+    trackName: normalizedTrackName || "",
+    trackArtists: normalizedTrackArtists || "",
+    trackUri: normalizedUri || "",
+    song: trackSummary || "",
   };
-  console.log("[WEB][SPOTIFY][AUDIT]", JSON.stringify(payload));
+  if (Number.isFinite(Number(spotifyStatus))) {
+    meta.spotifyStatus = Number(spotifyStatus);
+  }
+
+  Promise.resolve(
+    logModAction({
+      action: discordAction,
+      ok: Boolean(ok),
+      channelName: TWITCH_CHANNEL_NAME || "",
+      user: {
+        login: actorLogin,
+        id: actorUserId,
+        displayName: actorLogin,
+      },
+      meta,
+      error: ok ? "" : reasonText,
+    })
+  ).catch((e) => {
+    console.warn(
+      "[WEB][SPOTIFY] discord log bridge failed:",
+      String(e?.message || e)
+    );
+  });
 }
 
 function buildAuthSettingsForRequest(req) {
@@ -3025,6 +3083,8 @@ const webServer = http.createServer(async (req, res) => {
         source,
         input,
         uri,
+        trackName: String(track?.name || ""),
+        trackArtists: String(track?.artists || ""),
         spotifyStatus: Number(result?.status || 0) || null,
         reason: result?.ok ? "" : "spotify_add_not_ok",
       });

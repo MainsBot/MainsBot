@@ -41,6 +41,33 @@ function actionTitle(action) {
   return a;
 }
 
+function spotifyAuditLabel(action = "", ok = true) {
+  const a = String(action || "").trim().toLowerCase();
+  if (a === "spotify_addsong" || a === "spotify_song_added") {
+    return ok ? "Song Added to Queue" : "Song Add Failed";
+  }
+  if (a === "spotify_skip" || a === "spotify_song_skipped") {
+    return ok ? "Song Skipped" : "Song Skip Failed";
+  }
+  if (a === "spotify_volume") {
+    return ok ? "Spotify Volume Updated" : "Spotify Volume Failed";
+  }
+  if (a === "spotify_song_add_failed") return "Song Add Failed";
+  if (a === "spotify_song_skip_failed") return "Song Skip Failed";
+  return ok ? "Spotify Action OK" : "Spotify Action Failed";
+}
+
+function spotifyAuditSong(meta = {}) {
+  const m = meta && typeof meta === "object" ? meta : {};
+  const trackName = safeTrimLine(String(m.trackName || "").trim(), 120);
+  const artists = safeTrimLine(String(m.trackArtists || "").trim(), 120);
+  const song = safeTrimLine(String(m.song || "").trim(), 140);
+  if (trackName && artists) return `${trackName} - ${artists}`;
+  if (trackName) return trackName;
+  if (song) return song;
+  return "";
+}
+
 const TWITCH_PROFILE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const TWITCH_AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
 const twitchProfileCache = new Map();
@@ -171,6 +198,38 @@ export function initDiscord({ logger = console } = {}) {
       const err = String(payload?.error || "").trim();
 
       const isOk = ok === "OK";
+
+      if (String(action || "").toLowerCase().startsWith("spotify_")) {
+        const spotifyLabel = spotifyAuditLabel(action, isOk);
+        const song = spotifyAuditSong(meta);
+        const volume =
+          meta && Number.isFinite(Number(meta.volume)) ? Number(meta.volume) : null;
+        const whoLine = `${who}${userId ? ` (${userId})` : ""}`;
+        const bodyParts = [spotifyLabel];
+        if (song) bodyParts.push(song);
+        if (Number.isFinite(volume)) bodyParts.push(`Volume: ${volume}%`);
+        bodyParts.push(`By: ${whoLine}`);
+
+        const spotifyEmbed = new EmbedBuilder()
+          .setTitle("Spotify")
+          .setColor(isOk ? 0x2ecc71 : 0xff5c5c)
+          .setDescription(bodyParts.join("\n"))
+          .setFooter({ text: `#${chan || "?"}` })
+          .setTimestamp(new Date());
+
+        if (err) {
+          spotifyEmbed.addFields([
+            { name: "Error", value: "```" + safeTrimLine(err, 950) + "```" },
+          ]);
+        }
+
+        await discordMessenger.send(logChannelId, {
+          embeds: [spotifyEmbed],
+          allowedMentions: { parse: [] },
+        });
+        return;
+      }
+
       const embed = new EmbedBuilder()
         .setTitle(`${isOk ? "OK" : "FAIL"} | ${actionTitle(action)}`)
         .setColor(isOk ? 0x2ecc71 : 0xff5c5c)

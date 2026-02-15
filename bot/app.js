@@ -2816,7 +2816,7 @@ function getStatusSnapshot() {
 
 // ---------- WEB SERVER ----------
 // (moved to bot/web/server.js)
-const WEB = startWebServer({ getStatusSnapshot });
+const WEB = startWebServer({ getStatusSnapshot, logDiscordModAction });
 
 async function gracefulShutdown(signal = "shutdown") {
   try {
