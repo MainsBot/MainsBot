@@ -85,6 +85,19 @@ function asStringMap(value) {
   return out;
 }
 
+function normalizeLogin(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeId(value) {
+  return String(value || "").trim();
+}
+
+function isOAuthConnected(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  return Boolean(entry.hasAccessToken || entry.hasRefreshToken);
+}
+
 function normalizeSettings(raw) {
   const src = raw && typeof raw === "object" ? { ...raw } : {};
   src.ks = Boolean(src.ks);
@@ -158,7 +171,12 @@ async function initTopbarSession() {
       return;
     }
   } catch {}
-  right.innerHTML = `<a class="btn btn--sm" href="/admin/login">Login</a>`;
+  right.innerHTML = `
+    <div class="row" style="justify-content:flex-end">
+      <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
+      <a class="btn btn--sm" href="/admin/login">Login</a>
+    </div>
+  `;
 }
 
 function ToggleSwitch({ checked, onChange }) {
@@ -178,6 +196,7 @@ function App() {
   const [settings, setSettings] = useState(null);
   const [runtime, setRuntime] = useState(null);
   const [auth, setAuth] = useState(null);
+  const [session, setSession] = useState(null);
 
   useEffect(() => {
     const desired = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
@@ -193,10 +212,11 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [settingsRes, statusRes, authRes] = await Promise.all([
+        const [settingsRes, statusRes, authRes, sessionRes] = await Promise.all([
           fetch("/api/admin/settings", { credentials: "same-origin", cache: "no-store" }),
           fetch("/api/status", { credentials: "same-origin", cache: "no-store" }),
           fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/admin/session", { credentials: "same-origin", cache: "no-store" }),
         ]);
         const settingsPayload = await settingsRes.json().catch(() => null);
         if (!settingsRes.ok) {
@@ -205,6 +225,7 @@ function App() {
         setSettings(normalizeSettings(settingsPayload?.settings || {}));
         setRuntime(statusRes.ok ? await statusRes.json().catch(() => null) : null);
         setAuth(authRes.ok ? await authRes.json().catch(() => null) : null);
+        setSession(sessionRes.ok ? await sessionRes.json().catch(() => null) : null);
       } catch (e) {
         setStatus(`Error: ${String(e?.message || e)}`);
       } finally {
@@ -362,6 +383,11 @@ function App() {
     }
   }
 
+  async function saveAndApplyMode() {
+    await saveSettings();
+    await applyToTwitch();
+  }
+
   if (loading) {
     return html`<div className="muted">Loading dashboard...</div>`;
   }
@@ -369,6 +395,37 @@ function App() {
   if (!settings) {
     return html`<div className="muted">Failed to load settings.</div>`;
   }
+
+  const viewerLogin = normalizeLogin(session?.login || auth?.session?.login || "");
+  const viewerUserId = normalizeId(session?.userId || auth?.session?.userId || "");
+  const ownerLogin = normalizeLogin(auth?.identities?.ownerLogin || "");
+  const ownerUserId = normalizeId(auth?.identities?.ownerUserId || "");
+  const botLogin = normalizeLogin(auth?.identities?.botLogin || auth?.bot?.login || "");
+  const botUserId = normalizeId(auth?.identities?.botUserId || auth?.bot?.userId || "");
+  const streamerLogin = normalizeLogin(auth?.identities?.streamerLogin || auth?.streamer?.login || "");
+  const streamerUserId = normalizeId(auth?.identities?.streamerUserId || auth?.streamer?.userId || "");
+
+  const isOwner =
+    (ownerLogin && viewerLogin === ownerLogin) ||
+    (ownerUserId && viewerUserId === ownerUserId);
+  const isBotAccount =
+    (botLogin && viewerLogin === botLogin) ||
+    (botUserId && viewerUserId === botUserId);
+  const isStreamerAccount =
+    (streamerLogin && viewerLogin === streamerLogin) ||
+    (streamerUserId && viewerUserId === streamerUserId);
+
+  const canLinkBot = Boolean(isOwner || isBotAccount);
+  const canLinkStreamer = Boolean(isOwner || isStreamerAccount);
+  const canLinkOtherOauth = Boolean(isOwner || isStreamerAccount);
+  const canManageAuth = Boolean(canLinkBot || canLinkStreamer || canLinkOtherOauth);
+
+  const twitchBotConnected = isOAuthConnected(auth?.bot);
+  const twitchStreamerConnected = isOAuthConnected(auth?.streamer);
+  const spotifyConnected = Boolean(
+    auth?.spotify?.hasRefreshToken || auth?.spotify?.hasAccessToken
+  );
+  const robloxConnected = isOAuthConnected(auth?.roblox?.bot);
 
   return html`
     <div className="grid">
@@ -380,8 +437,7 @@ function App() {
             <div className="muted" style=${{ marginTop: "6px" }}>Manage settings, filters, and OAuth links.</div>
           </div>
           <div className="row">
-            <a className="btn btn--sm btn--ghost" href="/admin/quotes">Quotes</a>
-            <a className="btn btn--sm btn--ghost" href="/admin/auth">Auth</a>
+            ${canManageAuth ? html`<a className="btn btn--sm btn--ghost" href="/admin/auth">Auth</a>` : null}
             <a className="btn btn--sm btn--ghost" href="/api/status" target="_blank" rel="noreferrer">Status JSON</a>
           </div>
         </div>
@@ -400,24 +456,56 @@ function App() {
                 <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Mode</span><span>${String(settings.currentMode || "n/a")}</span></div>
                 <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Game</span><span>${String(settings.currentGame || "n/a")}</span></div>
                 <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Kill Switch</span><span>${settings.ks ? "ON" : "OFF"}</span></div>
+                <div className="fieldlist" style=${{ marginTop: "10px" }}>
+                  <div className="field field--compact">
+                    <div className="field__meta">
+                      <div className="field__label">Quick Mode</div>
+                      <div className="field__hint">Fast switch for mods/broadcaster.</div>
+                    </div>
+                    <select className="in in--sm" value=${String(settings.currentMode || "")} onChange=${(e) => setField("currentMode", e.target.value)}>
+                      ${modeOptions.map((opt) => html`<option key=${`quick:${opt.value}`} value=${opt.value}>${opt.label}</option>`)}
+                    </select>
+                  </div>
+                  <div className="field field--compact">
+                    <div className="field__meta">
+                      <div className="field__label">Quick Kill Switch</div>
+                      <div className="field__hint">Toggle KS quickly from overview.</div>
+                    </div>
+                    <${ToggleSwitch} checked=${settings.ks} onChange=${(e) => setField("ks", e.target.checked)} />
+                  </div>
+                </div>
+                <div className="row" style=${{ marginTop: "10px" }}>
+                  <button className="btn btn--sm" onClick=${saveSettings}>Save Quick Changes</button>
+                  <button className="btn btn--sm btn--ghost" onClick=${saveAndApplyMode}>Save + Apply Mode</button>
+                </div>
+                <div className="meta">${status || "Use quick controls, then save."}</div>
               </div>
               <div className="panel">
                 <h2>Twitch OAuth</h2>
-                <div className="row" style=${{ justifyContent: "space-between", marginTop: "8px" }}><span className="k">Bot</span><span className=${auth?.bot?.hasAccessToken ? "ok" : "warn"}>${auth?.bot?.hasAccessToken ? "Connected" : "Not Connected"}</span></div>
-                <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Streamer</span><span className=${auth?.streamer?.hasAccessToken ? "ok" : "warn"}>${auth?.streamer?.hasAccessToken ? "Connected" : "Not Connected"}</span></div>
+                <div className="row" style=${{ justifyContent: "space-between", marginTop: "8px" }}><span className="k">Bot</span><span className=${twitchBotConnected ? "ok" : "warn"}>${twitchBotConnected ? "Connected" : "Not Connected"}</span></div>
+                <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Streamer</span><span className=${twitchStreamerConnected ? "ok" : "warn"}>${twitchStreamerConnected ? "Connected" : "Not Connected"}</span></div>
                 <div className="row" style=${{ marginTop: "10px" }}>
-                  <a className="btn btn--sm" href="/auth/twitch/bot">Link Bot</a>
-                  <a className="btn btn--sm" href="/auth/twitch/streamer">Link Streamer</a>
+                  ${canLinkBot ? html`<a className="btn btn--sm" href="/auth/twitch/bot">Link Bot</a>` : null}
+                  ${canLinkStreamer ? html`<a className="btn btn--sm" href="/auth/twitch/streamer">Link Streamer</a>` : null}
                 </div>
+                ${!canLinkBot || !canLinkStreamer
+                  ? html`<div className="meta">
+                      ${!canLinkBot ? "Bot link: owner or bot account only. " : ""}
+                      ${!canLinkStreamer ? "Streamer link: owner or streamer account only." : ""}
+                    </div>`
+                  : null}
               </div>
               <div className="panel">
                 <h2>Other OAuth</h2>
-                <div className="row" style=${{ justifyContent: "space-between", marginTop: "8px" }}><span className="k">Spotify</span><span className=${auth?.spotify?.hasAccessToken ? "ok" : "warn"}>${auth?.spotify?.hasAccessToken ? "Connected" : "Not Connected"}</span></div>
-                <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Roblox</span><span className=${auth?.roblox?.bot?.hasAccessToken ? "ok" : "warn"}>${auth?.roblox?.bot?.hasAccessToken ? "Connected" : "Not Connected"}</span></div>
+                <div className="row" style=${{ justifyContent: "space-between", marginTop: "8px" }}><span className="k">Spotify</span><span className=${spotifyConnected ? "ok" : "warn"}>${spotifyConnected ? "Connected" : "Not Connected"}</span></div>
+                <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Roblox</span><span className=${robloxConnected ? "ok" : "warn"}>${robloxConnected ? "Connected" : "Not Connected"}</span></div>
                 <div className="row" style=${{ marginTop: "10px" }}>
-                  <a className="btn btn--sm" href="/auth/spotify">Link Spotify</a>
-                  <a className="btn btn--sm" href="/auth/roblox">Link Roblox</a>
+                  ${canLinkOtherOauth ? html`<a className="btn btn--sm" href="/auth/spotify">Link Spotify</a>` : null}
+                  ${canLinkOtherOauth ? html`<a className="btn btn--sm" href="/auth/roblox">Link Roblox</a>` : null}
                 </div>
+                ${!canLinkOtherOauth
+                  ? html`<div className="meta">Spotify/Roblox linking: owner or streamer account only.</div>`
+                  : null}
               </div>
             </div>
           `

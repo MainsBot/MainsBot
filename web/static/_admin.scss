@@ -496,6 +496,44 @@
   opacity: 0.8;
 }
 
+.quotes-list {
+  display: grid;
+  gap: 12px;
+}
+
+.quote-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(9, 8, 4, 0.34);
+  border-radius: var(--radius2);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.quote-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quote-card__text {
+  min-height: 96px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.45;
+  max-width: none;
+}
+
+.quote-card__meta {
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .login-card .card__bd {
   padding-top: 20px;
 }

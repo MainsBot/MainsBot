@@ -60,6 +60,9 @@ const APP_ENV_KEYS_TO_CLEAR = [
   "JOIN_TIMER",
   "SONG_TIMER",
   "DISCORD_TIMEZONE",
+  "WEB_IP_INTEL_ENABLED",
+  "WEB_IP_INTEL_TIMEOUT_MS",
+  "WEB_IP_INTEL_CACHE_MS",
 ];
 
 function clearEnvKey(key) {
@@ -217,6 +220,26 @@ function applyWebConfig(ini) {
   }
   if (web.cookie_secret || web.cookieSecret) {
     setEnvOverride("WEB_COOKIE_SECRET", web.cookie_secret || web.cookieSecret);
+  }
+  if (
+    web.ip_intel_enabled != null ||
+    web.ipIntelEnabled != null ||
+    web.vpn_detection_enabled != null ||
+    web.vpnDetectionEnabled != null
+  ) {
+    setEnvOverride(
+      "WEB_IP_INTEL_ENABLED",
+      web.ip_intel_enabled ??
+        web.ipIntelEnabled ??
+        web.vpn_detection_enabled ??
+        web.vpnDetectionEnabled
+    );
+  }
+  if (web.ip_intel_timeout_ms != null || web.ipIntelTimeoutMs != null) {
+    setEnvOverride("WEB_IP_INTEL_TIMEOUT_MS", web.ip_intel_timeout_ms ?? web.ipIntelTimeoutMs);
+  }
+  if (web.ip_intel_cache_ms != null || web.ipIntelCacheMs != null) {
+    setEnvOverride("WEB_IP_INTEL_CACHE_MS", web.ip_intel_cache_ms ?? web.ipIntelCacheMs);
   }
 }
 

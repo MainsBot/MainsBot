@@ -163,7 +163,7 @@ function renderTopbarSession(session) {
     }
     right.innerHTML = `
       <div class="row" style="justify-content:flex-end">
-        <a class="btn btn--sm btn--ghost" href="/swagger" target="_blank" rel="noreferrer">Swagger</a>
+        <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
         <span class="muted" style="font-size:13px">Logged in as</span>
         <strong>${escapeHtml(login)}</strong>
         <a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a>
@@ -173,7 +173,12 @@ function renderTopbarSession(session) {
   }
 
   if (adminLinkSlot) adminLinkSlot.innerHTML = "";
-  right.innerHTML = `<a class="btn btn--sm" href="/admin/login">Login</a>`;
+  right.innerHTML = `
+    <div class="row" style="justify-content:flex-end">
+      <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
+      <a class="btn btn--sm" href="/admin/login">Login</a>
+    </div>
+  `;
 }
 
 async function initTopbarSession() {

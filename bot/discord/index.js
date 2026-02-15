@@ -160,6 +160,108 @@ async function getTwitchProfileImageUrl({ login, userId } = {}) {
   }
 }
 
+function safeLower(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeDiscordIdentityFromMeta(meta = {}, user = {}) {
+  const m = meta && typeof meta === "object" ? meta : {};
+  const u = user && typeof user === "object" ? user : {};
+
+  const id = String(
+    m.discordUserId || m.discord_id || m.discordId || ""
+  ).trim();
+  const username = String(
+    m.discordUsername || m.discord_username || m.discordUser || m.discordLookupHint || ""
+  ).trim();
+
+  return {
+    id,
+    username: username || String(u.login || "").trim(),
+  };
+}
+
+async function resolveDiscordIdentityForAudit({
+  discordMessenger,
+  meta = {},
+  user = {},
+} = {}) {
+  const base = normalizeDiscordIdentityFromMeta(meta, user);
+  let resolvedId = String(base.id || "").trim();
+  let resolvedName = String(base.username || "").trim();
+
+  const client = await discordMessenger?.getClient?.().catch(() => null);
+  if (!client) {
+    return { id: resolvedId, username: resolvedName };
+  }
+
+  if (resolvedId && /^\d{10,22}$/.test(resolvedId)) {
+    const directUser = await client.users.fetch(resolvedId).catch(() => null);
+    if (directUser) {
+      return {
+        id: String(directUser.id || resolvedId).trim(),
+        username: String(directUser.username || directUser.tag || resolvedName || "").trim(),
+      };
+    }
+  }
+
+  const guildId = readEnvString("GUILD_ID");
+  if (!guildId) return { id: resolvedId, username: resolvedName };
+
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return { id: resolvedId, username: resolvedName };
+
+  if (resolvedId && /^\d{10,22}$/.test(resolvedId)) {
+    const memberById = await guild.members.fetch(resolvedId).catch(() => null);
+    if (memberById?.user) {
+      return {
+        id: String(memberById.user.id || resolvedId).trim(),
+        username: String(
+          memberById.user.username ||
+            memberById.user.globalName ||
+            memberById.displayName ||
+            memberById.nickname ||
+            resolvedName
+        ).trim(),
+      };
+    }
+  }
+
+  const lookup = String(resolvedName || "").trim();
+  if (!lookup) return { id: resolvedId, username: resolvedName };
+
+  const matches = await guild.members
+    .search({ query: lookup, limit: 10 })
+    .catch(() => null);
+  const pool = Array.isArray(matches) ? matches : Array.from(matches?.values?.() || []);
+  const target = safeLower(lookup);
+  const picked =
+    pool.find((member) => {
+      const names = [
+        member?.user?.username,
+        member?.user?.globalName,
+        member?.displayName,
+        member?.nickname,
+      ];
+      return names.some((name) => safeLower(name) === target);
+    }) || pool[0];
+
+  if (picked?.user) {
+    return {
+      id: String(picked.user.id || resolvedId).trim(),
+      username: String(
+        picked.user.username ||
+          picked.user.globalName ||
+          picked.displayName ||
+          picked.nickname ||
+          resolvedName
+      ).trim(),
+    };
+  }
+
+  return { id: resolvedId, username: resolvedName };
+}
+
 export function initDiscord({ logger = console } = {}) {
   const webhookUrl = readEnvString("DISCORD_WEBHOOK_URL");
   const webhookClient = webhookUrl ? new WebhookClient({ url: webhookUrl }) : null;
@@ -205,10 +307,67 @@ export function initDiscord({ logger = console } = {}) {
         const volume =
           meta && Number.isFinite(Number(meta.volume)) ? Number(meta.volume) : null;
         const whoLine = `${who}${userId ? ` (${userId})` : ""}`;
+        const requestSource = String(meta?.requestSource || "").trim();
+        const requestIp = String(meta?.requestIp || meta?.ip || "").trim();
+        const requestIpSource = String(meta?.requestIpSource || meta?.ipSource || "").trim();
+        const requestIpChain = String(meta?.requestIpChain || meta?.ipChain || "").trim();
+        const ipRiskFlags = String(meta?.ipRiskFlags || "").trim();
+        const ipLookupError = String(meta?.ipLookupError || "").trim();
+        const ipIntel = meta?.ipIntel && typeof meta.ipIntel === "object" ? meta.ipIntel : null;
+        const requestMethod = String(meta?.method || "").trim().toUpperCase();
+        const requestRoute = String(meta?.route || "").trim();
+        const isWebAudit = Boolean(requestSource || requestIp || requestRoute);
+        const twitchLogin = String(meta?.twitchLogin || login || "").trim();
+        const twitchUserId = String(meta?.twitchUserId || userId || "").trim();
+        const discordIdentity = isWebAudit
+          ? await resolveDiscordIdentityForAudit({
+              discordMessenger,
+              meta,
+              user,
+            })
+          : { id: "", username: "" };
+
         const bodyParts = [spotifyLabel];
         if (song) bodyParts.push(song);
         if (Number.isFinite(volume)) bodyParts.push(`Volume: ${volume}%`);
         bodyParts.push(`By: ${whoLine}`);
+        if (isWebAudit) {
+          if (requestMethod || requestRoute) {
+            bodyParts.push(
+              `Request: ${requestMethod || "?"}${requestRoute ? ` ${requestRoute}` : ""}`
+            );
+          }
+          if (requestIp) {
+            bodyParts.push(
+              `IP: ${requestIp}${requestIpSource ? ` (${requestIpSource})` : ""}`
+            );
+          }
+          if (requestIpChain && requestIpChain !== requestIp) {
+            bodyParts.push(`IP Chain: ${requestIpChain}`);
+          }
+          if (ipRiskFlags) bodyParts.push(`IP Risk: ${ipRiskFlags}`);
+          if (ipIntel && !ipIntel.skipped) {
+            const geo = [ipIntel.city, ipIntel.region, ipIntel.country]
+              .map((x) => String(x || "").trim())
+              .filter(Boolean)
+              .join(", ");
+            const org = String(ipIntel.org || ipIntel.isp || "").trim();
+            if (geo) bodyParts.push(`Geo: ${geo}`);
+            if (org) bodyParts.push(`Network: ${org}`);
+          }
+          if (ipLookupError) bodyParts.push(`IP Lookup: ${ipLookupError}`);
+          if (requestSource) bodyParts.push(`Source: ${requestSource}`);
+          if (twitchLogin || twitchUserId) {
+            bodyParts.push(
+              `Twitch: ${twitchLogin || "unknown"}${twitchUserId ? ` (id: ${twitchUserId})` : ""}`
+            );
+          }
+          bodyParts.push(
+            `Discord: ${discordIdentity.username || "unknown"}${
+              discordIdentity.id ? ` (id: ${discordIdentity.id})` : ""
+            }`
+          );
+        }
 
         const spotifyEmbed = new EmbedBuilder()
           .setTitle("Spotify")

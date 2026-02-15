@@ -58,13 +58,19 @@ async function initTopbarSession() {
       return;
     }
   } catch {}
-  right.innerHTML = `<a class="btn btn--sm" href="/admin/login">Login</a>`;
+  right.innerHTML = `
+    <div class="row" style="justify-content:flex-end">
+      <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
+      <a class="btn btn--sm" href="/admin/login">Login</a>
+    </div>
+  `;
 }
 
 function App() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [newText, setNewText] = useState("");
+  const [search, setSearch] = useState("");
   const [data, setData] = useState({ nextId: 1, quotes: [] });
   const [drafts, setDrafts] = useState({});
   const [jsonText, setJsonText] = useState("");
@@ -129,6 +135,15 @@ function App() {
     () => [...(data?.quotes || [])].sort((a, b) => a.id - b.id),
     [data]
   );
+  const filteredQuotes = useMemo(() => {
+    const q = String(search || "").trim().toLowerCase();
+    if (!q) return sortedQuotes;
+    return sortedQuotes.filter((row) => {
+      const text = String(row?.text || "").toLowerCase();
+      const addedBy = String(row?.addedBy || "").toLowerCase();
+      return text.includes(q) || addedBy.includes(q) || String(row?.id || "").includes(q);
+    });
+  }, [sortedQuotes, search]);
 
   async function onAddQuote() {
     const text = String(newText || "").trim();
@@ -216,49 +231,48 @@ function App() {
           <button className="btn" onClick=${onAddQuote}>Add Quote</button>
           <span className="statusline">${status}</span>
         </div>
+        <div className="row" style=${{ marginTop: "10px" }}>
+          <input
+            className="in in--sm"
+            placeholder="Search by id, text, or added by..."
+            value=${search}
+            onInput=${(e) => setSearch(e.target.value)}
+            style=${{ maxWidth: "520px" }}
+          />
+          <div className="muted">Showing ${filteredQuotes.length} / ${sortedQuotes.length}</div>
+        </div>
       </div>
 
       <div className="panel">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Text</th>
-                <th>Added By</th>
-                <th>Added At</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${!sortedQuotes.length
-                ? html`<tr><td className="muted" colSpan="5">No quotes yet.</td></tr>`
-                : sortedQuotes.map(
-                    (row) => html`
-                      <tr key=${row.id}>
-                        <td><strong>#${row.id}</strong></td>
-                        <td>
-                          <input
-                            className="in in--sm quote-text-input"
-                            value=${String(drafts?.[row.id] ?? row.text)}
-                            onInput=${(e) =>
-                              setDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                          />
-                        </td>
-                        <td className="muted quote-added-by">${row.addedBy || "-"}</td>
-                        <td className="muted">${row.addedAt || "-"}</td>
-                        <td>
-                          <div className="row">
-                            <button className="btn btn--sm" onClick=${() => onSaveQuote(row.id)}>Save</button>
-                            <button className="btn btn--sm btn--danger" onClick=${() => onDeleteQuote(row.id)}>Delete</button>
-                          </div>
-                        </td>
-                      </tr>
-                    `
-                  )}
-            </tbody>
-          </table>
-        </div>
+        ${!filteredQuotes.length
+          ? html`<div className="muted">No quotes match your search.</div>`
+          : html`
+              <div className="quotes-list">
+                ${filteredQuotes.map((row) => html`
+                  <article className="quote-card" key=${row.id}>
+                    <div className="quote-card__head">
+                      <span className="pill">#${row.id}</span>
+                      <div className="row">
+                        <button className="btn btn--sm" onClick=${() => onSaveQuote(row.id)}>Save</button>
+                        <button className="btn btn--sm btn--danger" onClick=${() => onDeleteQuote(row.id)}>Delete</button>
+                      </div>
+                    </div>
+
+                    <textarea
+                      className="textarea textarea--sm quote-card__text"
+                      value=${String(drafts?.[row.id] ?? row.text)}
+                      onInput=${(e) => setDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                    ></textarea>
+
+                    <div className="quote-card__meta">
+                      <span>Added by: <strong>${row.addedBy || "-"}</strong></span>
+                      <span>|</span>
+                      <span>${row.addedAt || "-"}</span>
+                    </div>
+                  </article>
+                `)}
+              </div>
+            `}
       </div>
 
       <div className="panel">
@@ -288,3 +302,4 @@ const rootEl = document.getElementById("quotesRoot");
 if (rootEl) {
   createRoot(rootEl).render(html`<${App} />`);
 }
+

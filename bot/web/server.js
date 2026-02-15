@@ -1,5 +1,6 @@
 import fs from "fs";
 import http from "http";
+import net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
@@ -74,6 +75,19 @@ export function startWebServer(deps = {}) {
   const WEB_LOGIN_FORCE_VERIFY = flagFromEnv(
     process.env.WEB_LOGIN_FORCE_VERIFY || process.env.TWITCH_AUTH_FORCE_VERIFY || ""
   );
+  const WEB_IP_INTEL_ENABLED = flagFromEnv(
+    process.env.WEB_IP_INTEL_ENABLED ?? process.env.WEB_VPN_DETECTION_ENABLED ?? "1"
+  );
+  const WEB_IP_INTEL_TIMEOUT_MS = Math.max(
+    500,
+    Number(process.env.WEB_IP_INTEL_TIMEOUT_MS || 2500) || 2500
+  );
+  const WEB_IP_INTEL_CACHE_MS = Math.max(
+    60_000,
+    Number(process.env.WEB_IP_INTEL_CACHE_MS || 6 * 60 * 60 * 1000) ||
+      6 * 60 * 60 * 1000
+  );
+  const ipIntelCache = new Map();
 
   const TWITCH_CHANNEL_ID = String(process.env.CHANNEL_ID || "").trim();
   const TWITCH_CHANNEL_NAME = String(process.env.CHANNEL_NAME || "")
@@ -793,12 +807,275 @@ function sanitizeNextPath(value) {
   return raw.replace(/\s/g, "");
 }
 
+function isAuthManagerSession(session) {
+  if (!session?.userId && !session?.login) return false;
+
+  const sessionUserId = String(session?.userId || "").trim();
+  const sessionLogin = String(session?.login || "").trim().toLowerCase();
+  const ownerLogin = String(WEB_OWNER_LOGIN || "").trim().toLowerCase();
+  const ownerUserId = String(WEB_OWNER_USER_ID || "").trim();
+
+  if (ownerUserId && sessionUserId === ownerUserId) return true;
+  if (ownerLogin && sessionLogin === ownerLogin) return true;
+
+  if (TWITCH_CHANNEL_ID && sessionUserId === TWITCH_CHANNEL_ID) return true;
+  if (TWITCH_BOT_ID && sessionUserId === TWITCH_BOT_ID) return true;
+  if (TWITCH_CHANNEL_NAME && sessionLogin === TWITCH_CHANNEL_NAME) return true;
+  if (TWITCH_BOT_NAME && sessionLogin === TWITCH_BOT_NAME) return true;
+
+  return false;
+}
+
+function normalizeIpCandidate(rawValue) {
+  let value = String(rawValue || "").trim();
+  if (!value) return "";
+
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+
+  value = value.replace(/^for=/i, "").trim();
+  if (!value) return "";
+
+  if (value.startsWith("[")) {
+    const end = value.indexOf("]");
+    if (end !== -1) {
+      value = value.slice(1, end).trim();
+    }
+  } else if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(value)) {
+    value = value.slice(0, value.lastIndexOf(":"));
+  }
+
+  value = value.replace(/^::ffff:/i, "").trim();
+  const zoneIndex = value.indexOf("%");
+  if (zoneIndex !== -1) value = value.slice(0, zoneIndex).trim();
+
+  return net.isIP(value) ? value : "";
+}
+
+function isPrivateOrLocalIp(ip) {
+  const value = normalizeIpCandidate(ip);
+  if (!value) return true;
+
+  const ipVersion = net.isIP(value);
+  if (ipVersion === 4) {
+    const parts = value.split(".").map((x) => Number(x));
+    if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+      return true;
+    }
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 0) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+
+  if (ipVersion === 6) {
+    const lower = value.toLowerCase();
+    if (lower === "::1") return true;
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    if (lower.startsWith("fe80")) return true;
+    if (lower.startsWith("::ffff:127.")) return true;
+    return false;
+  }
+
+  return true;
+}
+
+function parseForwardedHeaderIps(value) {
+  const parts = String(value || "").split(",");
+  const out = [];
+  for (const part of parts) {
+    const match = String(part || "").match(/for=([^;]+)/i);
+    if (!match) continue;
+    const ip = normalizeIpCandidate(match[1]);
+    if (ip) out.push(ip);
+  }
+  return out;
+}
+
+function getRequestIpInfo(req) {
+  const candidates = [];
+  const seen = new Set();
+
+  const push = (rawValue, source) => {
+    const ip = normalizeIpCandidate(rawValue);
+    if (!ip) return;
+    if (seen.has(ip)) return;
+    seen.add(ip);
+    candidates.push({ ip, source });
+  };
+
+  const headerDirect = [
+    ["cf-connecting-ip", "cf-connecting-ip"],
+    ["true-client-ip", "true-client-ip"],
+    ["x-real-ip", "x-real-ip"],
+    ["x-client-ip", "x-client-ip"],
+    ["fastly-client-ip", "fastly-client-ip"],
+    ["fly-client-ip", "fly-client-ip"],
+  ];
+
+  for (const [headerName, sourceName] of headerDirect) {
+    push(req?.headers?.[headerName], sourceName);
+  }
+
+  const xffValues = String(req?.headers?.["x-forwarded-for"] || "")
+    .split(",")
+    .map((x) => normalizeIpCandidate(x))
+    .filter(Boolean);
+  for (let i = 0; i < xffValues.length; i++) {
+    push(xffValues[i], i === 0 ? "x-forwarded-for" : `x-forwarded-for#${i + 1}`);
+  }
+
+  const forwardedValues = parseForwardedHeaderIps(req?.headers?.forwarded);
+  for (let i = 0; i < forwardedValues.length; i++) {
+    push(forwardedValues[i], i === 0 ? "forwarded" : `forwarded#${i + 1}`);
+  }
+
+  push(req?.socket?.remoteAddress, "socket");
+
+  const selected =
+    candidates.find((entry) => !isPrivateOrLocalIp(entry.ip)) ||
+    candidates[0] ||
+    { ip: "unknown", source: "unknown" };
+
+  return {
+    ip: String(selected.ip || "unknown"),
+    source: String(selected.source || "unknown"),
+    chain: candidates.map((entry) => entry.ip),
+    chainSources: candidates.map((entry) => `${entry.source}:${entry.ip}`),
+  };
+}
+
+async function fetchJsonWithTimeout(url, timeoutMs) {
+  let timer = null;
+  try {
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+    });
+    const response = await Promise.race([
+      fetch(url, {
+        method: "GET",
+        headers: { accept: "application/json" },
+      }),
+      timeout,
+    ]);
+    if (!response || typeof response.ok !== "boolean") {
+      throw new Error("invalid_response");
+    }
+    if (!response.ok) {
+      throw new Error(`http_${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function normalizeIpIntelPayload(ip, payload) {
+  const status = String(payload?.status || "").trim().toLowerCase();
+  if (status && status !== "success") {
+    const reason = String(payload?.message || payload?.error || status).trim();
+    throw new Error(reason || "lookup_failed");
+  }
+
+  const isProxy = Boolean(payload?.proxy);
+  const isHosting = Boolean(payload?.hosting);
+  const isMobile = Boolean(payload?.mobile);
+  const riskFlags = [];
+  if (isProxy) riskFlags.push("vpn_or_proxy");
+  if (isHosting) riskFlags.push("hosting");
+  if (isMobile) riskFlags.push("mobile_network");
+
+  return {
+    provider: "ip-api",
+    ip: String(payload?.query || ip || "").trim() || ip,
+    isProxy,
+    isVpn: isProxy,
+    isTor: false,
+    isHosting,
+    isMobile,
+    riskFlags,
+    country: String(payload?.country || "").trim(),
+    region: String(payload?.regionName || "").trim(),
+    city: String(payload?.city || "").trim(),
+    isp: String(payload?.isp || "").trim(),
+    org: String(payload?.org || "").trim(),
+    asn: String(payload?.as || "").trim(),
+  };
+}
+
+async function getIpIntel(ip) {
+  if (!WEB_IP_INTEL_ENABLED) return null;
+
+  const normalizedIp = normalizeIpCandidate(ip);
+  if (!normalizedIp || normalizedIp === "unknown") return null;
+  if (isPrivateOrLocalIp(normalizedIp)) {
+    return {
+      provider: "ip-api",
+      ip: normalizedIp,
+      skipped: true,
+      reason: "private_or_local_ip",
+      riskFlags: [],
+    };
+  }
+
+  const now = Date.now();
+  const cached = ipIntelCache.get(normalizedIp);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  const url =
+    `http://ip-api.com/json/${encodeURIComponent(normalizedIp)}` +
+    `?fields=status,message,query,country,regionName,city,isp,org,as,proxy,hosting,mobile`;
+
+  try {
+    const json = await fetchJsonWithTimeout(url, WEB_IP_INTEL_TIMEOUT_MS);
+    const intel = normalizeIpIntelPayload(normalizedIp, json);
+    ipIntelCache.set(normalizedIp, {
+      value: intel,
+      expiresAt: now + WEB_IP_INTEL_CACHE_MS,
+    });
+    return intel;
+  } catch (e) {
+    const fallback = {
+      provider: "ip-api",
+      ip: normalizedIp,
+      lookupError: String(e?.message || e),
+      riskFlags: [],
+    };
+    ipIntelCache.set(normalizedIp, {
+      value: fallback,
+      expiresAt: now + Math.min(WEB_IP_INTEL_CACHE_MS, 10 * 60 * 1000),
+    });
+    return fallback;
+  }
+}
+
 function getRequestIp(req) {
-  const forwarded = String(req?.headers?.["x-forwarded-for"] || "")
-    .split(",")[0]
-    .trim();
-  if (forwarded) return forwarded;
-  return String(req?.socket?.remoteAddress || "").trim() || "unknown";
+  return getRequestIpInfo(req).ip;
+}
+
+function readRequestHeader(req, names = []) {
+  const list = Array.isArray(names) ? names : [names];
+  for (const nameRaw of list) {
+    const name = String(nameRaw || "").trim().toLowerCase();
+    if (!name) continue;
+    const value = req?.headers?.[name];
+    const text = Array.isArray(value) ? String(value[0] || "") : String(value || "");
+    const first = text.split(",")[0].trim();
+    if (first) return first;
+  }
+  return "";
 }
 
 function clampAuditText(value, maxLen = 220) {
@@ -806,6 +1083,116 @@ function clampAuditText(value, maxLen = 220) {
   if (!raw) return "";
   if (raw.length <= maxLen) return raw;
   return `${raw.slice(0, Math.max(0, maxLen - 3))}...`;
+}
+
+function detectSpotifyRequestSource(req, routePath = "") {
+  const explicit = String(
+    readRequestHeader(req, ["x-request-source", "x-source"]) || ""
+  )
+    .trim()
+    .toLowerCase();
+  if (explicit) return explicit;
+
+  const referer = String(
+    req?.headers?.referer || req?.headers?.referrer || ""
+  ).trim().toLowerCase();
+  const userAgent = String(req?.headers?.["user-agent"] || "")
+    .trim()
+    .toLowerCase();
+  const route = String(routePath || "").trim().toLowerCase();
+
+  if (referer.includes("/swagger") || userAgent.includes("swagger")) return "swagger";
+  if (route.startsWith("/admin/")) return "admin";
+  if (route.startsWith("/api/")) return "api";
+  return "unknown";
+}
+
+function resolveSpotifyAuditActor(req, adminSession = null) {
+  const sessionLogin = String(adminSession?.login || "").trim();
+  const sessionUserId = String(adminSession?.userId || "").trim();
+  const sessionMode = String(adminSession?.mode || "").trim().toLowerCase();
+  const adminLoginHeader = readRequestHeader(req, [
+    "x-admin-login",
+    "x-actor-login",
+  ]);
+  const adminUserIdHeader = readRequestHeader(req, [
+    "x-admin-user-id",
+    "x-actor-user-id",
+  ]);
+  const adminModeHeader = readRequestHeader(req, [
+    "x-admin-mode",
+    "x-actor-mode",
+  ]);
+
+  const twitchLoginHeader = readRequestHeader(req, [
+    "x-twitch-login",
+    "x-user-login",
+    "x-login",
+  ]);
+  const twitchUserIdHeader = readRequestHeader(req, [
+    "x-twitch-user-id",
+    "x-twitch-id",
+    "x-user-id",
+  ]);
+  const discordUsernameHeader = readRequestHeader(req, [
+    "x-discord-username",
+    "x-discord-user",
+  ]);
+  const discordUserIdHeader = readRequestHeader(req, [
+    "x-discord-user-id",
+    "x-discord-id",
+  ]);
+
+  const resolvedSessionLogin = adminLoginHeader || sessionLogin;
+  const resolvedSessionUserId = adminUserIdHeader || sessionUserId;
+  const resolvedSessionMode = String(adminModeHeader || sessionMode || "")
+    .trim()
+    .toLowerCase();
+
+  let twitchLogin = twitchLoginHeader;
+  let twitchUserId = twitchUserIdHeader;
+  let twitchSource = twitchLogin || twitchUserId ? "header" : "";
+
+  if ((!twitchLogin || !twitchUserId) && resolvedSessionMode === "twitch") {
+    if (!twitchLogin && resolvedSessionLogin) twitchLogin = resolvedSessionLogin;
+    if (!twitchUserId && resolvedSessionUserId) twitchUserId = resolvedSessionUserId;
+    if (!twitchSource && (twitchLogin || twitchUserId)) twitchSource = "session";
+  }
+
+  if (!twitchLogin && TWITCH_CHANNEL_NAME) {
+    twitchLogin = TWITCH_CHANNEL_NAME;
+    if (!twitchSource) twitchSource = "channel_fallback";
+  }
+  if (!twitchUserId && TWITCH_CHANNEL_ID) {
+    twitchUserId = TWITCH_CHANNEL_ID;
+    if (!twitchSource) twitchSource = "channel_fallback";
+  }
+
+  let discordUsername = discordUsernameHeader;
+  let discordUserId = discordUserIdHeader;
+  let discordSource = discordUsername || discordUserId ? "header" : "";
+
+  // Best-effort fallback: if no explicit Discord identity is provided, keep a lookup hint
+  // from the authenticated actor/session login for downstream resolver logic.
+  const discordLookupHint =
+    String(discordUsername || resolvedSessionLogin || twitchLogin || "").trim();
+  if (!discordUsername && resolvedSessionMode === "password" && resolvedSessionLogin) {
+    discordUsername = resolvedSessionLogin;
+    if (!discordSource) discordSource = "session_hint";
+  }
+
+  return {
+    actorLogin: resolvedSessionLogin || "anonymous",
+    actorUserId: resolvedSessionUserId,
+    sessionMode: resolvedSessionMode || "unknown",
+    twitchLogin: clampAuditText(twitchLogin, 80),
+    twitchUserId: clampAuditText(twitchUserId, 40),
+    twitchSource: twitchSource || "unknown",
+    discordUsername: clampAuditText(discordUsername, 80),
+    discordUserId: clampAuditText(discordUserId, 40),
+    discordLookupHint: clampAuditText(discordLookupHint, 80),
+    discordSource: discordSource || "unknown",
+  };
 }
 
 function logSpotifyAdminAudit(req, {
@@ -821,8 +1208,17 @@ function logSpotifyAdminAudit(req, {
   trackArtists = "",
   spotifyStatus = null,
 } = {}) {
-  const actorLogin = String(adminSession?.login || "").trim() || "anonymous";
-  const actorUserId = String(adminSession?.userId || "").trim() || "";
+  const actor = resolveSpotifyAuditActor(req, adminSession);
+  const actorLogin = String(actor.actorLogin || "").trim() || "anonymous";
+  const actorUserId = String(actor.actorUserId || "").trim() || "";
+  const requestIpInfo = getRequestIpInfo(req);
+  const requestIp = String(requestIpInfo?.ip || "unknown").trim() || "unknown";
+  const requestIpSource = String(requestIpInfo?.source || "unknown").trim() || "unknown";
+  const requestIpChain = Array.isArray(requestIpInfo?.chain)
+    ? requestIpInfo.chain.filter(Boolean)
+    : [];
+  const requestIpChainText = requestIpChain.join(" -> ");
+  const requestSource = detectSpotifyRequestSource(req, routePath);
   const actionKey = String(action || "").trim().toLowerCase();
   const event =
     actionKey === "add"
@@ -846,7 +1242,9 @@ function logSpotifyAdminAudit(req, {
       ? `${normalizedTrackName} - ${normalizedTrackArtists}`
       : normalizedTrackName
     : normalizedInput || normalizedUri || "(unknown track)";
-  const compact = `[WEB][SPOTIFY] (${event}) "${trackSummary}" - ${actorLogin} (${actorUserId || "unknown"})`;
+  const compact =
+    `[WEB][SPOTIFY] (${event}) "${trackSummary}" - ${actorLogin} (${actorUserId || "unknown"}) ` +
+    `[${requestSource}] ip=${requestIp} (${requestIpSource})`;
   const reasonText = clampAuditText(reason, 120);
   if (ok) {
     console.log(compact);
@@ -867,20 +1265,48 @@ function logSpotifyAdminAudit(req, {
   const meta = {
     route: String(routePath || "").trim() || "unknown",
     method: String(req?.method || "").toUpperCase(),
-    ip: getRequestIp(req),
+    ip: requestIp,
+    requestIp,
+    requestIpSource,
+    ipSource: requestIpSource,
+    requestIpChain: requestIpChainText,
+    ipChain: requestIpChainText,
+    requestSource,
     source: String(source || "").trim() || "",
+    inputSource: String(source || "").trim() || "",
     input: normalizedInput || "",
     trackName: normalizedTrackName || "",
     trackArtists: normalizedTrackArtists || "",
     trackUri: normalizedUri || "",
     song: trackSummary || "",
+    actorSessionMode: actor.sessionMode,
+    actorLogin,
+    actorUserId,
+    twitchLogin: actor.twitchLogin || "",
+    twitchUserId: actor.twitchUserId || "",
+    twitchIdentitySource: actor.twitchSource || "",
+    discordUsername: actor.discordUsername || "",
+    discordUserId: actor.discordUserId || "",
+    discordLookupHint: actor.discordLookupHint || "",
+    discordIdentitySource: actor.discordSource || "",
   };
   if (Number.isFinite(Number(spotifyStatus))) {
     meta.spotifyStatus = Number(spotifyStatus);
   }
 
-  Promise.resolve(
-    logModAction({
+  const sendDiscordAuditLog = async () => {
+    const ipIntel = await getIpIntel(requestIp).catch(() => null);
+    if (ipIntel && typeof ipIntel === "object") {
+      meta.ipIntel = ipIntel;
+      if (Array.isArray(ipIntel.riskFlags) && ipIntel.riskFlags.length) {
+        meta.ipRiskFlags = ipIntel.riskFlags.join(", ");
+      }
+      if (ipIntel.lookupError) {
+        meta.ipLookupError = String(ipIntel.lookupError);
+      }
+    }
+
+    await logModAction({
       action: discordAction,
       ok: Boolean(ok),
       channelName: TWITCH_CHANNEL_NAME || "",
@@ -891,8 +1317,10 @@ function logSpotifyAdminAudit(req, {
       },
       meta,
       error: ok ? "" : reasonText,
-    })
-  ).catch((e) => {
+    });
+  };
+
+  Promise.resolve(sendDiscordAuditLog()).catch((e) => {
     console.warn(
       "[WEB][SPOTIFY] discord log bridge failed:",
       String(e?.message || e)
@@ -999,9 +1427,11 @@ function renderTopbar({ who = "", active = "" } = {}) {
     return `<a class="${cls}" href="${href}" ${extra}>${escapeHtml(label)}</a>`;
   };
 
+  const swaggerBtnClass = a === "swagger" ? "btn btn--sm" : "btn btn--sm btn--ghost";
+
   const right = safeWho
-    ? `<div class="row" style="justify-content:flex-end"><span class="muted" style="font-size:13px">Logged in as</span><strong>${safeWho}</strong><a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a></div>`
-    : `<a class="btn btn--sm" href="/admin/login">Login</a>`;
+    ? `<div class="row" style="justify-content:flex-end"><a class="${swaggerBtnClass}" href="/swagger">Swagger</a><span class="muted" style="font-size:13px">Logged in as</span><strong>${safeWho}</strong><a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a></div>`
+    : `<div class="row" style="justify-content:flex-end"><a class="${swaggerBtnClass}" href="/swagger">Swagger</a><a class="btn btn--sm" href="/admin/login">Login</a></div>`;
 
   return `<div class="topbar">
     <div class="topbar__brand">
@@ -1011,7 +1441,7 @@ function renderTopbar({ who = "", active = "" } = {}) {
     <div class="topbar__links">
       ${link("/", "Home", "home")}
       ${safeWho ? link("/admin", "Admin", "admin") : ""}
-      ${link("/swagger", "Swagger", "swagger")}
+      ${safeWho ? link("/admin/quotes", "Quotes", "quotes") : ""}
     </div>
     <div class="topbar__right">${right}</div>
   </div>`;
@@ -1463,8 +1893,13 @@ function buildOpenApiSpec({ requestOrigin = "" } = {}) {
   };
 }
 
-function renderSwaggerUiHtml({ who = "" } = {}) {
+function renderSwaggerUiHtml({ who = "", actor = null } = {}) {
   const safeWho = escapeHtml(String(who || "").trim());
+  const safeActorJson = escapeJsonForInlineScript({
+    login: String(actor?.login || "").trim(),
+    userId: String(actor?.userId || "").trim(),
+    mode: String(actor?.mode || "").trim().toLowerCase(),
+  });
   const cssHref = WEB_BUILD?.cssFile
     ? `/static/gen/${WEB_BUILD.cssFile}`
     : "/static/style.css";
@@ -1555,11 +1990,6 @@ function renderSwaggerUiHtml({ who = "" } = {}) {
           </div>
           <div class="row">
             <a class="btn btn--sm btn--ghost" href="/swagger.json" target="_blank" rel="noreferrer">Raw JSON</a>
-            ${
-              safeWho
-                ? ``
-                : `<a class="btn btn--sm" href="/admin/login">Login</a>`
-            }
           </div>
         </div>
         <div id="swagger-ui"></div>
@@ -1568,12 +1998,38 @@ function renderSwaggerUiHtml({ who = "" } = {}) {
   </div>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
+    const adminActor = ${safeActorJson};
     window.ui = SwaggerUIBundle({
       url: '/swagger.json',
       dom_id: '#swagger-ui',
       deepLinking: true,
       displayRequestDuration: true,
-      persistAuthorization: true
+      persistAuthorization: true,
+      requestInterceptor: (req) => {
+        try {
+          req.headers = req.headers || {};
+          req.headers["x-request-source"] = "swagger";
+
+          if (adminActor && adminActor.login) {
+            req.headers["x-admin-login"] = adminActor.login;
+            req.headers["x-actor-login"] = adminActor.login;
+            req.headers["x-discord-username"] = adminActor.login;
+          }
+          if (adminActor && adminActor.userId) {
+            req.headers["x-admin-user-id"] = adminActor.userId;
+            req.headers["x-actor-user-id"] = adminActor.userId;
+          }
+          if (adminActor && adminActor.mode) {
+            req.headers["x-admin-mode"] = adminActor.mode;
+            req.headers["x-actor-mode"] = adminActor.mode;
+            if (adminActor.mode === "twitch") {
+              if (adminActor.login) req.headers["x-twitch-login"] = adminActor.login;
+              if (adminActor.userId) req.headers["x-twitch-user-id"] = adminActor.userId;
+            }
+          }
+        } catch {}
+        return req;
+      },
     });
   </script>
 </body>
@@ -2225,6 +2681,7 @@ const webServer = http.createServer(async (req, res) => {
   const isSecureRequest = getIsSecureRequest(req);
     const adminSession = WEB_ADMIN_AUTH.readSession(req);
     const adminAllowed = isAdminAllowedSession(adminSession);
+    const authManagerAllowed = isAuthManagerSession(adminSession);
 
   const webAdminRedirectUriOverride = String(process.env.WEB_ADMIN_REDIRECT_URI || "").trim();
   const webAdminOriginOverride = String(process.env.WEB_ADMIN_ORIGIN || "").trim();
@@ -2251,7 +2708,10 @@ const webServer = http.createServer(async (req, res) => {
     return sendHtmlResponse(
       res,
       200,
-      renderSwaggerUiHtml({ who: adminAllowed ? String(adminSession?.login || "") : "" }),
+      renderSwaggerUiHtml({
+        who: adminAllowed ? String(adminSession?.login || "") : "",
+        actor: adminAllowed ? adminSession || null : null,
+      }),
       { "cache-control": "no-store" }
     );
   }
@@ -2388,6 +2848,7 @@ const webServer = http.createServer(async (req, res) => {
         ok: true,
         allowed: Boolean(adminAllowed),
         login: adminAllowed ? String(adminSession?.login || "") : null,
+        userId: adminAllowed ? String(adminSession?.userId || "") : null,
         mode: adminAllowed ? String(adminSession?.mode || "") : null,
       },
       { "cache-control": "no-store" }
@@ -2481,6 +2942,14 @@ const webServer = http.createServer(async (req, res) => {
     if (!adminAllowed) {
       const next = encodeURIComponent(`${routePath}${parsedUrl.search || ""}`);
       return sendRedirect(res, `/admin/login?next=${next}`);
+    }
+    if (!authManagerAllowed) {
+      return sendErrorPage(
+        res,
+        403,
+        "Forbidden",
+        "Auth management is restricted to the owner, streamer account, or bot account."
+      );
     }
     const provider = String(parsedUrl.searchParams.get("provider") || "").trim();
     const role = String(parsedUrl.searchParams.get("role") || "").trim();
@@ -3378,7 +3847,8 @@ const webServer = http.createServer(async (req, res) => {
     if (
       routePath === "/auth/callback" ||
       routePath === "/auth/roblox/callback" ||
-      routePath === "/auth/spotify/callback"
+      routePath === "/auth/spotify/callback" ||
+      (routePath === "/auth/success" && parsedUrl.searchParams.has("code"))
     ) {
       // fall through
     } else {
@@ -3403,18 +3873,57 @@ const webServer = http.createServer(async (req, res) => {
 
   // Use /auth as a shortcut to admin auth status.
   if (routePath === "/auth") {
+    if (!adminAllowed) {
+      const next = encodeURIComponent(`${routePath}${parsedUrl.search || ""}`);
+      return sendRedirect(res, `/admin/login?next=${next}`);
+    }
+    if (!authManagerAllowed) {
+      return sendErrorPage(
+        res,
+        403,
+        "Forbidden",
+        "Auth management is restricted to the owner, streamer account, or bot account."
+      );
+    }
     return sendRedirect(res, "/admin/auth");
   }
 
   if (routePath === "/auth/status" || routePath === "/api/auth/status") {
-    res.writeHead(200, {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    });
-    return res.end(JSON.stringify(authSnapshot()));
+    const twitch = authSnapshot();
+    const roblox = robloxAuthSnapshot();
+    const spotify = spotifyAuthSnapshot();
+    const ownerLogin = String(WEB_OWNER_LOGIN || "").trim().toLowerCase();
+    const ownerUserId = String(WEB_OWNER_USER_ID || "").trim();
+
+    return sendJsonResponse(
+      res,
+      200,
+      {
+        ...twitch,
+        roblox,
+        spotify,
+        session: {
+          allowed: Boolean(adminAllowed),
+          canManageAuth: Boolean(adminAllowed && authManagerAllowed),
+          login: adminAllowed ? String(adminSession?.login || "").trim().toLowerCase() : null,
+          userId: adminAllowed ? String(adminSession?.userId || "").trim() : null,
+          mode: adminAllowed ? String(adminSession?.mode || "").trim().toLowerCase() : null,
+        },
+        identities: {
+          ownerLogin: ownerLogin || null,
+          ownerUserId: ownerUserId || null,
+          botLogin: String(twitch?.bot?.login || TWITCH_BOT_NAME || "").trim().toLowerCase() || null,
+          botUserId: String(twitch?.bot?.userId || TWITCH_BOT_ID || "").trim() || null,
+          streamerLogin: String(twitch?.streamer?.login || TWITCH_CHANNEL_NAME || "").trim().toLowerCase() || null,
+          streamerUserId: String(twitch?.streamer?.userId || TWITCH_CHANNEL_ID || "").trim() || null,
+        },
+      },
+      { "cache-control": "no-store" }
+    );
   }
 
   if (routePath === "/auth/debug") {
+    const reqIpInfo = getRequestIpInfo(req);
     return sendJsonResponse(
       res,
       200,
@@ -3424,6 +3933,9 @@ const webServer = http.createServer(async (req, res) => {
         host: String(req?.headers?.host || ""),
         forwardedHost: String(req?.headers?.["x-forwarded-host"] || ""),
         forwardedProto: String(req?.headers?.["x-forwarded-proto"] || ""),
+        requestIp: String(reqIpInfo?.ip || "unknown"),
+        requestIpSource: String(reqIpInfo?.source || "unknown"),
+        requestIpChain: Array.isArray(reqIpInfo?.chain) ? reqIpInfo.chain : [],
         webOriginOverride: String(process.env.WEB_ORIGIN || process.env.WEB_BASE_URL || "").trim() || null,
         twitch: {
           redirectUri: String(authSettings?.redirectUri || "").trim() || null,
@@ -3447,6 +3959,14 @@ const webServer = http.createServer(async (req, res) => {
 
   // Direct auth start endpoints (no landing pages).
   if (routePath === "/auth/spotify") {
+    if (!authManagerAllowed) {
+      return sendErrorPage(
+        res,
+        403,
+        "Forbidden",
+        "Spotify linking is restricted to the owner or streamer account."
+      );
+    }
     try {
       if (
         !String(process.env.SPOTIFY_CLIENT_ID || "").trim() ||
@@ -3488,6 +4008,14 @@ const webServer = http.createServer(async (req, res) => {
   }
 
   if (routePath === "/auth/roblox" || routePath === "/auth/roblox/bot") {
+    if (!authManagerAllowed) {
+      return sendErrorPage(
+        res,
+        403,
+        "Forbidden",
+        "Roblox linking is restricted to the owner or streamer account."
+      );
+    }
     try {
       const state = createOAuthState("bot", "roblox", {
         redirectUri: String(robloxAuthSettings?.redirectUri || "").trim(),
@@ -3524,6 +4052,14 @@ const webServer = http.createServer(async (req, res) => {
     routePath === "/auth/bot" ||
     routePath === "/auth/streamer"
   ) {
+    if (!authManagerAllowed) {
+      return sendErrorPage(
+        res,
+        403,
+        "Forbidden",
+        "Twitch token linking is restricted to the owner, streamer account, or bot account."
+      );
+    }
     const role =
       routePath.endsWith("/bot") ? TWITCH_ROLES.BOT : TWITCH_ROLES.STREAMER;
 
@@ -3711,6 +4247,26 @@ const webServer = http.createServer(async (req, res) => {
     }
 
     try {
+      if (stateMeta.provider === "roblox") {
+        const rbSettings = {
+          ...robloxAuthSettings,
+          redirectUri: String(stateMeta?.redirectUri || robloxAuthSettings.redirectUri || "").trim(),
+        };
+
+        const record = await exchangeRobloxCode({
+          code,
+          settings: rbSettings,
+          tokenStorePath: robloxAuthSettings.tokenStorePath,
+        });
+
+        refreshTrackedRobloxUserId(true);
+
+        const params = new URLSearchParams();
+        params.set("provider", "roblox");
+        if (record?.login) params.set("login", String(record.login));
+        return sendRedirect(res, `/auth/success?${params.toString()}`);
+      }
+
       if (stateMeta.provider === "spotify") {
         const spSettings = {
           ...spotifyAuthSettings,
