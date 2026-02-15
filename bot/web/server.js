@@ -4,6 +4,7 @@ import net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import fetch from "node-fetch";
 
 import * as sass from "sass";
 import { minify as terserMinify } from "terser";
@@ -1159,23 +1160,18 @@ function resolveSpotifyAuditActor(req, adminSession = null) {
     if (!twitchSource && (twitchLogin || twitchUserId)) twitchSource = "session";
   }
 
-  if (!twitchLogin && TWITCH_CHANNEL_NAME) {
-    twitchLogin = TWITCH_CHANNEL_NAME;
-    if (!twitchSource) twitchSource = "channel_fallback";
-  }
-  if (!twitchUserId && TWITCH_CHANNEL_ID) {
-    twitchUserId = TWITCH_CHANNEL_ID;
-    if (!twitchSource) twitchSource = "channel_fallback";
-  }
-
   let discordUsername = discordUsernameHeader;
   let discordUserId = discordUserIdHeader;
   let discordSource = discordUsername || discordUserId ? "header" : "";
 
   // Best-effort fallback: if no explicit Discord identity is provided, keep a lookup hint
   // from the authenticated actor/session login for downstream resolver logic.
-  const discordLookupHint =
-    String(discordUsername || resolvedSessionLogin || twitchLogin || "").trim();
+  const discordLookupHint = String(
+    discordUsername ||
+      (resolvedSessionMode === "password" && resolvedSessionLogin
+        ? resolvedSessionLogin
+        : "")
+  ).trim();
   if (!discordUsername && resolvedSessionMode === "password" && resolvedSessionLogin) {
     discordUsername = resolvedSessionLogin;
     if (!discordSource) discordSource = "session_hint";
