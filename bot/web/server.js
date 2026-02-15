@@ -793,6 +793,55 @@ function sanitizeNextPath(value) {
   return raw.replace(/\s/g, "");
 }
 
+function getRequestIp(req) {
+  const forwarded = String(req?.headers?.["x-forwarded-for"] || "")
+    .split(",")[0]
+    .trim();
+  if (forwarded) return forwarded;
+  return String(req?.socket?.remoteAddress || "").trim() || "unknown";
+}
+
+function clampAuditText(value, maxLen = 220) {
+  const raw = String(value ?? "").replace(/[\r\n\t]+/g, " ").trim();
+  if (!raw) return "";
+  if (raw.length <= maxLen) return raw;
+  return `${raw.slice(0, Math.max(0, maxLen - 3))}...`;
+}
+
+function logSpotifyAdminAudit(req, {
+  adminSession = null,
+  action = "",
+  routePath = "",
+  ok = false,
+  reason = "",
+  input = "",
+  uri = "",
+  source = "",
+  spotifyStatus = null,
+} = {}) {
+  const actorLogin = String(adminSession?.login || "").trim() || "anonymous";
+  const actorUserId = String(adminSession?.userId || "").trim() || "";
+  const payload = {
+    at: new Date().toISOString(),
+    action: String(action || "").trim() || "unknown",
+    ok: Boolean(ok),
+    route: String(routePath || "").trim(),
+    method: String(req?.method || "").toUpperCase(),
+    actorLogin,
+    actorUserId,
+    actorMode: String(adminSession?.mode || "").trim() || "",
+    ip: getRequestIp(req),
+    userAgent: clampAuditText(req?.headers?.["user-agent"] || "", 160),
+    source: String(source || "").trim() || "",
+    input: clampAuditText(input, 220),
+    uri: clampAuditText(uri, 220),
+    spotifyStatus:
+      Number.isFinite(Number(spotifyStatus)) ? Number(spotifyStatus) : null,
+    reason: clampAuditText(reason, 220),
+  };
+  console.log("[WEB][SPOTIFY][AUDIT]", JSON.stringify(payload));
+}
+
 function buildAuthSettingsForRequest(req) {
   const settings = buildTwitchAuthSettings();
   const requestOrigin = getRequestOrigin(req);
@@ -2827,6 +2876,13 @@ const webServer = http.createServer(async (req, res) => {
     routePath === "/api/spotify/skip"
   ) {
     if (!adminAllowed) {
+      logSpotifyAdminAudit(req, {
+        adminSession,
+        action: routePath.includes("skip") ? "skip" : "add",
+        routePath,
+        ok: false,
+        reason: "unauthorized",
+      });
       return sendJsonResponse(
         res,
         401,
@@ -2836,6 +2892,13 @@ const webServer = http.createServer(async (req, res) => {
     }
 
     if (method !== "POST") {
+      logSpotifyAdminAudit(req, {
+        adminSession,
+        action: routePath.includes("skip") ? "skip" : "add",
+        routePath,
+        ok: false,
+        reason: `method_not_allowed:${method}`,
+      });
       return sendJsonResponse(
         res,
         405,
@@ -2865,6 +2928,14 @@ const webServer = http.createServer(async (req, res) => {
     if (routePath === "/admin/spotify/skip" || routePath === "/api/spotify/skip") {
       try {
         const result = await SPOTIFY.skipNext();
+        logSpotifyAdminAudit(req, {
+          adminSession,
+          action: "skip",
+          routePath,
+          ok: Boolean(result?.ok),
+          spotifyStatus: Number(result?.status || 0) || null,
+          reason: result?.ok ? "" : "spotify_skip_not_ok",
+        });
         return sendJsonResponse(
           res,
           200,
@@ -2877,6 +2948,13 @@ const webServer = http.createServer(async (req, res) => {
           { "cache-control": "no-store" }
         );
       } catch (e) {
+        logSpotifyAdminAudit(req, {
+          adminSession,
+          action: "skip",
+          routePath,
+          ok: false,
+          reason: String(e?.message || e),
+        });
         console.error("[WEB][SPOTIFY] skip failed:", e);
         return sendJsonResponse(
           res,
@@ -2895,6 +2973,13 @@ const webServer = http.createServer(async (req, res) => {
       const searchLimit = Math.max(1, Math.min(10, Number(body?.limit) || 1));
 
       if (!input) {
+        logSpotifyAdminAudit(req, {
+          adminSession,
+          action: "add",
+          routePath,
+          ok: false,
+          reason: "missing_input",
+        });
         return sendJsonResponse(
           res,
           400,
@@ -2913,6 +2998,15 @@ const webServer = http.createServer(async (req, res) => {
         track = search?.tracks?.[0] || null;
         uri = String(track?.uri || "").trim();
         if (!search?.ok || !uri) {
+          logSpotifyAdminAudit(req, {
+            adminSession,
+            action: "add",
+            routePath,
+            ok: false,
+            source,
+            input,
+            reason: "no_track_found",
+          });
           return sendJsonResponse(
             res,
             400,
@@ -2923,6 +3017,17 @@ const webServer = http.createServer(async (req, res) => {
       }
 
       const result = await SPOTIFY.addToQueue(uri);
+      logSpotifyAdminAudit(req, {
+        adminSession,
+        action: "add",
+        routePath,
+        ok: Boolean(result?.ok),
+        source,
+        input,
+        uri,
+        spotifyStatus: Number(result?.status || 0) || null,
+        reason: result?.ok ? "" : "spotify_add_not_ok",
+      });
       return sendJsonResponse(
         res,
         200,
@@ -2945,6 +3050,13 @@ const webServer = http.createServer(async (req, res) => {
         { "cache-control": "no-store" }
       );
     } catch (e) {
+      logSpotifyAdminAudit(req, {
+        adminSession,
+        action: "add",
+        routePath,
+        ok: false,
+        reason: String(e?.message || e),
+      });
       console.error("[WEB][SPOTIFY] add failed:", e);
       return sendJsonResponse(
         res,
