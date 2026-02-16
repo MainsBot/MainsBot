@@ -255,18 +255,18 @@ function getTimeEmote(tz) {
   const hour = getHourInTimezone(tz);
 
   if (hour >= 5 && hour < 12) {
-    return ":tibb12Caveman:"
+    return "<:tibb12Caveman:1011823057939210270>"
   }
 
   if (hour >= 12 && hour < 17) {
-    return ":tibb12Fax::JuiceTime: "
+    return "<:tibb12Fax:1011823130559402045><:JuiceTime:1012867071241097276>"
   }
 
   if (hour >= 17 && hour < 21) {
-    return ":MLADY:"
+    return "<:MLADY:1012866938403291156>"
   }
 
-  return ":Wankge:"
+  return "<:Wankge:938438777066647622>"
 }
 
 const DISCORD_TIMEZONE = resolveDiscordTimeZone(
