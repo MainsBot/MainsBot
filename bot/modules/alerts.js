@@ -257,7 +257,7 @@ export function registerAlertsModule({
     if (isKs(s)) return;
 
     const { giftCount, count, disableForMs } = getSubgiftHypePlan(giftCountInput);
-    const msgPool = ["SUB HYPE! SUB HYPE! SUB HYPE!"];
+    const msgPool = ["tibb12Subhype tibb12Subhype tibb12Subhype"];
     const randomMsg = msgPool[Math.floor(Math.random() * msgPool.length)];
 
     await sleep(1500);
@@ -279,7 +279,7 @@ export function registerAlertsModule({
     subscription: (channel, username) => {
       const s = loadSettings();
       if (isKs(s)) return;
-      client.say(CHANNEL_NAME, "SUB HYPE!");
+      client.say(CHANNEL_NAME, "SUB HYP");
       client.say(CHANNEL_NAME, "SUB HYPE!");
       client.say(CHANNEL_NAME, "SUB HYPE!");
     },
@@ -337,10 +337,11 @@ export function registerAlertsModule({
       const s = loadSettings();
       if (isKs(s)) return;
 
+      const e = "tibb12Subhype tibb12Imback tibb12Subhype"
       await sleep(1500);
-      client.say(CHANNEL_NAME, `WELCOME BACK, ${username}!`);
-      client.say(CHANNEL_NAME, "SUB HYPE!");
-      client.say(CHANNEL_NAME, "SUB HYPE!");
+      client.say(CHANNEL_NAME, e);
+      client.say(CHANNEL_NAME, e);
+      client.say(CHANNEL_NAME, e);
     },
 
     raided: async (channel, username, viewers) => {
@@ -390,7 +391,7 @@ export function registerAlertsModule({
       const bits = Number(userstate?.bits || 0);
       if (bits < 100) return;
 
-      const msgPool = ["BITS HYPE! BITS HYPE! BITS HYPE!"];
+      const msgPool = ["tibb12Bits tibb12Bits tibb12Bits"];
       const randomMsg = msgPool[Math.floor(Math.random() * msgPool.length)];
 
       await sleep(1500);
@@ -538,7 +539,7 @@ export function registerAlertsModule({
             }
           }
 
-          const bucmsg = "HYPE!";
+          const bucmsg = "tibb12Bucc tibb12Bucc tibb12Bucc";
 
           let count = 1;
           if (amount >= 100) count = 25;

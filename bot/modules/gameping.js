@@ -215,7 +215,7 @@ export function registerGamepingModule({
             .join("\n"),
           embeds: [linkEmbed],
         });
-        return replyRaw(`Ping sent (${pingCfg.label})`);
+        return replyRaw(`Successfully pinged for ${pingCfg.label}.`);
       }
 
       if (!webhookClient) {

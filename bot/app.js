@@ -232,6 +232,43 @@ function formatDiscordCurrentTime(tz = DISCORD_TIMEZONE) {
   }
 }
 
+function getHourInTimezone(tz = DISCORD_TIMEZONE) {
+  const timeZone =
+    String(tz?.iana || "").trim() ||
+    DISCORD_TIMEZONE_ALIASES[DISCORD_TIMEZONE_DEFAULT];
+
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      hour12: false,
+    }).formatToParts(new Date());
+
+    const hourPart = parts.find(p => p.type === "hour");
+    return Number(hourPart?.value ?? 0);
+  } catch {
+    return new Date().getHours(); // fallback
+  }
+}
+
+function getTimeEmote(tz) {
+  const hour = getHourInTimezone(tz);
+
+  if (hour >= 5 && hour < 12) {
+    return ":tibb12Caveman:"
+  }
+
+  if (hour >= 12 && hour < 17) {
+    return ":tibb12Fax::JuiceTime: "
+  }
+
+  if (hour >= 17 && hour < 21) {
+    return ":MLADY:"
+  }
+
+  return ":Wankge:"
+}
+
 const DISCORD_TIMEZONE = resolveDiscordTimeZone(
   process.env.DISCORD_TIMEZONE || DISCORD_TIMEZONE_DEFAULT
 );
@@ -289,7 +326,27 @@ const PLAYTIME_PATH = String(
 ).trim();
 const SETTINGS_PATH = String(process.env.SETTINGS_PATH || "./SETTINGS.json").trim();
 const STREAMS_PATH = String(process.env.STREAMS_PATH || "./STREAMS.json").trim();
-const WORDS_PATH = String(process.env.WORDS_PATH || "./WORDS.json").trim();
+const DEFAULT_GLOBAL_WORDS_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "data",
+  "WORDS.json"
+);
+const LEGACY_ARCHIVE_WORDS_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "archive",
+  "WORDS.json"
+);
+const WORDS_PATH = path.resolve(
+  String(
+    process.env.WORDS_PATH ||
+      process.env.GLOBAL_WORDS_PATH ||
+      (fs.existsSync(DEFAULT_GLOBAL_WORDS_PATH)
+        ? DEFAULT_GLOBAL_WORDS_PATH
+        : LEGACY_ARCHIVE_WORDS_PATH)
+  ).trim()
+);
 const DEFAULT_VALID_MODES = ["!join.on", "!link.on", "!1v1.on", "!ticket.on", "!val.on", "!reddit.on"];
 const DEFAULT_SPECIAL_MODES = [
   "!ks.on",
@@ -342,6 +399,27 @@ function isSharedCommandCooldownActive(userstate = {}) {
   }
 
   return false;
+}
+
+function normalizeKeywordText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[`'’]+/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function messageContainsKeywordPhrase(message, phrase, normalizedMessage = "") {
+  const rawMessage = String(message || "").toLowerCase();
+  const rawPhrase = String(phrase || "").toLowerCase().trim();
+  if (!rawPhrase) return false;
+  if (rawMessage.includes(rawPhrase)) return true;
+
+  const normalizedPhrase = normalizeKeywordText(rawPhrase);
+  if (!normalizedPhrase) return false;
+  const normalized = normalizedMessage || normalizeKeywordText(rawMessage);
+  return normalized.includes(normalizedPhrase);
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -529,9 +607,18 @@ function readSettingsFromDisk() {
   }
 }
 
+function readWordsFromDisk() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(WORDS_PATH, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 let SETTINGS = readSettingsFromDisk();
 let STREAMS = JSON.parse(fs.readFileSync(STREAMS_PATH));
-let WORDS = JSON.parse(fs.readFileSync(WORDS_PATH));
+let WORDS = readWordsFromDisk();
 try {
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2), "utf8");
 } catch {}
@@ -893,7 +980,7 @@ async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
       return true;
     }
     const winner = pickRandom([senderLogin, arg1]) || senderLogin;
-    const hype = pickRandom(["Pog", "PogU", "PogChamp", "PagMan"]) || "Pog";
+    const hype = pickRandom([":Pog:", ":PogU:", ":PogChamp:", ":PagMan:"]) || ":Pog:";
     await replyToDiscordCommand(
       discordMessage,
       `${winner} won the fight ${hype} peepoSmash`
@@ -920,9 +1007,10 @@ async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
   }
 
   if (command === "!time") {
+    const emote = getTimeEmote(DISCORD_TIMEZONE);
     await replyToDiscordCommand(
       discordMessage,
-      `${channelDisplay} local time: ${formatDiscordCurrentTime()}.`
+      `${emote} It is currently ${formatDiscordCurrentTime()} for ${channelDisplay}. `
     );
     return true;
   }
@@ -942,12 +1030,12 @@ async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
         .trim();
       await replyToDiscordCommand(
         discordMessage,
-        `${linkedStreamerLogin} has been live for ${uptime || uptimeRaw}.`
+        `${channelDisplay} has been live for ${uptime || uptimeRaw}. :Okayge:`
       );
       return true;
     }
 
-    await replyToDiscordCommand(discordMessage, `${linkedStreamerLogin} is currently offline.`);
+    await replyToDiscordCommand(discordMessage, `${channelDisplay} is currently offline. :Sadge:`);
     return true;
   }
 
@@ -960,7 +1048,7 @@ async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
 
     const uptimeRaw = await fetchDecapiText("uptime", linkedStreamerLogin);
     if (uptimeRaw && !/is offline|offline/i.test(uptimeRaw)) {
-      await replyToDiscordCommand(discordMessage, `${linkedStreamerLogin} is currently live.`);
+      await replyToDiscordCommand(discordMessage, `${channelDisplay} is currently live. :Okayge:`);
       return true;
     }
 
@@ -975,14 +1063,14 @@ async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
       const offlineFor = formatDurationShort(Date.now() - lastEnd);
       await replyToDiscordCommand(
         discordMessage,
-        `${linkedStreamerLogin} has been offline for ${offlineFor}.`
+        `${channelDisplay} has been offline for ${offlineFor}. :Sadge:`
       );
       return true;
     }
 
     await replyToDiscordCommand(
       discordMessage,
-      `${linkedStreamerLogin} is offline (downtime unavailable).`
+      `${linkedStreamerLogin} is offline (downtime unavailable). :Sadge:`
     );
     return true;
   }
@@ -1982,6 +2070,7 @@ async function joinHandler(
   let responseLimit = 1;
   let responseCount = 0;
   const contextKillswitchOn = getContextKillswitchState(SETTINGS);
+  const normalizedKeywordMessage = normalizeKeywordText(message);
 
   if (contextKillswitchOn) return;
   if (isModOrBroadcaster) return;
@@ -1994,9 +2083,7 @@ async function joinHandler(
       const phraseList = Array.isArray(WORDS[wordSet]) ? WORDS[wordSet] : [];
       if (
         !phraseList.some((word) => {
-        const phrase = String(word || "").toLowerCase().trim();
-        if (!phrase) return false;
-        return message.toLowerCase().includes(phrase);
+          return messageContainsKeywordPhrase(message, word, normalizedKeywordMessage);
         })
       ) {
         continue;
@@ -2517,15 +2604,15 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
 
   const normalizedMessage = String(message || "").trim();
   const isBangCommand = normalizedMessage.startsWith("!");
+  const normalizedKeywordMessage = normalizeKeywordText(message);
   const messageArray = normalizedMessage ? normalizedMessage.split(/\s+/) : [];
   var isCommand = commandsList.includes((messageArray[0] || "").toLowerCase());
 
   if (!isBangCommand) {
     for (const wordSet in WORDS) {
-      if (WORDS[wordSet].some((word) => {
-        const phrase = String(word || "").toLowerCase().trim();
-        if (!phrase) return false;
-        return message.toLowerCase().includes(phrase);
+      const phraseList = Array.isArray(WORDS[wordSet]) ? WORDS[wordSet] : [];
+      if (phraseList.some((word) => {
+        return messageContainsKeywordPhrase(message, word, normalizedKeywordMessage);
       })) {
         keywords = true;
         continue;
@@ -2635,9 +2722,12 @@ try {
       client,
       twitchFunctions: TWITCH_FUNCTIONS,
       botOauth: BOT_OAUTH,
+      streamerOauth: STREAMER_TOKEN,
       channelId: CHANNEL_ID,
       botId: BOT_ID,
       channelName: CHANNEL_NAME,
+      settingsPath: SETTINGS_PATH,
+      streamsPath: STREAMS_PATH,
       liveUpHandler,
       liveDownHandler,
     });

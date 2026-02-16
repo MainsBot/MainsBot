@@ -25,6 +25,7 @@ const APP_ENV_KEYS_TO_CLEAR = [
   "PREDICTIONDATA_PATH",
   "POLLDATA_PATH",
   "WORDS_PATH",
+  "GLOBAL_WORDS_PATH",
   "TO_UNFRIEND_PATH",
   "AUBREY_TAB_PATH",
   "PLAYTIME_PATH",
@@ -174,7 +175,16 @@ function applyInstanceDefaults(ini) {
     setEnvOverride("USERDATA_PATH", path.join(stateDir, "USERDATA.json"));
     setEnvOverride("PREDICTIONDATA_PATH", path.join(stateDir, "PREDICTIONDATA.json"));
     setEnvOverride("POLLDATA_PATH", path.join(stateDir, "POLLDATA.json"));
-    setEnvOverride("WORDS_PATH", path.join(stateDir, "WORDS.json"));
+    const globalWordsPathRaw = String(
+      inst.words_path ||
+        inst.wordsPath ||
+        process.env.GLOBAL_WORDS_PATH ||
+        "./data/WORDS.json"
+    ).trim();
+    const globalWordsPath = asAbs(globalWordsPathRaw);
+    ensureDir(path.dirname(globalWordsPath));
+    setEnvOverride("GLOBAL_WORDS_PATH", globalWordsPath);
+    setEnvOverride("WORDS_PATH", globalWordsPath);
     setEnvOverride("TO_UNFRIEND_PATH", path.join(stateDir, "TOUNFRIEND.json"));
     setEnvOverride("AUBREY_TAB_PATH", path.join(stateDir, "aubrey_tab.json"));
     setEnvOverride("PLAYTIME_PATH", path.join(stateDir, "playtime.json"));
@@ -192,6 +202,12 @@ function applyInstanceDefaults(ini) {
   if (paths.twitch_token_store) setEnvOverride("TWITCH_TOKEN_STORE_PATH", paths.twitch_token_store);
   if (paths.roblox_token_store) setEnvOverride("ROBLOX_TOKEN_STORE_PATH", paths.roblox_token_store);
   if (paths.spotify_token_store) setEnvOverride("SPOTIFY_TOKEN_STORE_PATH", paths.spotify_token_store);
+  if (paths.words_path || paths.wordsPath) {
+    const wordsPath = asAbs(paths.words_path || paths.wordsPath);
+    ensureDir(path.dirname(wordsPath));
+    setEnvOverride("GLOBAL_WORDS_PATH", wordsPath);
+    setEnvOverride("WORDS_PATH", wordsPath);
+  }
 }
 
 function applyWebConfig(ini) {
@@ -246,6 +262,12 @@ function applyWebConfig(ini) {
 function applyStateConfig(ini) {
   const state = ini?.state && typeof ini.state === "object" ? ini.state : {};
   if (state.backend) setEnvOverride("STATE_BACKEND", state.backend);
+  if (state.words_path || state.wordsPath) {
+    const wordsPath = asAbs(state.words_path || state.wordsPath);
+    ensureDir(path.dirname(wordsPath));
+    setEnvOverride("GLOBAL_WORDS_PATH", wordsPath);
+    setEnvOverride("WORDS_PATH", wordsPath);
+  }
 }
 
 function applyModulesConfig(ini) {
@@ -560,6 +582,47 @@ function buildEmptyAubreyTabState() {
   return { balance: 0, lastTouchedMs: now, lastInterestAppliedMs: now };
 }
 
+function findLegacyWordsTemplate() {
+  const dataRoot = asAbs("./data");
+  if (!dataRoot || !fs.existsSync(dataRoot)) return "";
+  try {
+    const entries = fs.readdirSync(dataRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry?.isDirectory?.()) continue;
+      const candidate = path.join(dataRoot, entry.name, "WORDS.json");
+      if (!fs.existsSync(candidate)) continue;
+      const stat = fs.statSync(candidate);
+      if (stat.isFile() && stat.size > 2) {
+        return candidate;
+      }
+    }
+  } catch {}
+  return "";
+}
+
+function seedWordsFileIfMissing(wordsPath) {
+  if (!wordsPath) return;
+
+  const candidates = [
+    String(process.env.GLOBAL_WORDS_PATH || "").trim(),
+    "./WORDS.json",
+    "./archive/WORDS.json",
+    findLegacyWordsTemplate(),
+  ];
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const raw = String(candidate || "").trim();
+    if (!raw) continue;
+    const abs = asAbs(raw);
+    if (!abs || seen.has(abs)) continue;
+    seen.add(abs);
+    if (seedFileFromDiskIfMissing(wordsPath, abs)) return;
+  }
+
+  seedJsonFileIfMissing(wordsPath, {});
+}
+
 function seedInstanceStateFiles() {
   const dataDir = String(process.env.DATA_DIR || "").trim();
   if (!dataDir) return;
@@ -582,8 +645,7 @@ function seedInstanceStateFiles() {
     seedJsonFileIfMissing(quotesPath, buildEmptyQuotesState());
   }
   if (wordsPath) {
-    const seeded = seedFileFromDiskIfMissing(wordsPath, "./WORDS.json");
-    if (!seeded) seedJsonFileIfMissing(wordsPath, {});
+    seedWordsFileIfMissing(wordsPath);
   }
   if (gamepingRolesPath) {
     seedJsonFileIfMissing(gamepingRolesPath, { pings: {}, gameChangeRoleId: null });
@@ -655,13 +717,7 @@ function seedInstanceStateFiles() {
     seedJsonFileIfMissing(playtimePath, buildEmptyPlaytimeState());
   }
 
-  // WORDS.json: prefer copying the repo root default (lots of bot functionality depends on it).
-  if (wordsPath) {
-    const seeded = seedFileFromDiskIfMissing(wordsPath, "./WORDS.json");
-    if (!seeded) {
-      seedJsonFileIfMissing(wordsPath, {});
-    }
-  }
+  // WORDS.json is seeded once above (global/shared path).
 
   // USERDATA/PREDICTIONDATA/POLLDATA: start empty by default.
   if (userdataPath) {

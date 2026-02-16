@@ -234,7 +234,16 @@ export function registerSpotifyCommands({
           if (!uri || !track) return reply("No track found.");
         }
 
+        // URI/link inputs often don't have track metadata yet; resolve it so logs include song title.
+        if (!track && uri) {
+          const lookedUp = await SPOTIFY.getTrackByUri(uri).catch(() => null);
+          if (lookedUp?.ok && lookedUp.track) {
+            track = lookedUp.track;
+          }
+        }
+
         const r = await SPOTIFY.addToQueue(uri);
+        const trackLabel = formatSpotifyTrackLabel(track);
         try {
           await logModAction?.({
             action: "spotify_addsong",
@@ -248,13 +257,15 @@ export function registerSpotifyCommands({
             meta: {
               input,
               trackName: String(track?.name || ""),
+              trackArtists: String(track?.artists || ""),
               trackUri: String(track?.uri || uri || ""),
+              song: trackLabel || "",
             },
           });
         } catch {}
         return reply(
           r?.ok
-            ? `Successfully added ${track?.name || "that song"} to the queue.`
+            ? `Successfully added ${trackLabel || "that song"} to the queue.`
             : "Add failed."
         );
       } catch (err) {

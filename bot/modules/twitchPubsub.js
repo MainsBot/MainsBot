@@ -16,6 +16,21 @@ function flagFromValue(value) {
   return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
 }
 
+function normalizeAuthToken(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^oauth:/i, "")
+    .replace(/^bearer\s+/i, "");
+}
+
+function safeJsonParse(text, fallback = null) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
 export function isPubsubModuleEnabled() {
   const raw = String(process.env.MODULE_PUBSUB ?? "").trim();
   if (raw) return flagFromValue(raw);
@@ -26,27 +41,34 @@ export function startTwitchPubsub({
   client,
   twitchFunctions,
   botOauth,
+  streamerOauth,
   channelId,
   botId,
   channelName,
+  settingsPath = String(process.env.SETTINGS_PATH || "./SETTINGS.json").trim(),
+  streamsPath = String(process.env.STREAMS_PATH || "./STREAMS.json").trim(),
   liveUpHandler,
   liveDownHandler,
   logger = console,
 } = {}) {
   if (!client) throw new Error("startTwitchPubsub: missing client");
   if (!twitchFunctions) throw new Error("startTwitchPubsub: missing twitchFunctions");
-  if (!botOauth) throw new Error("startTwitchPubsub: missing botOauth");
   if (!channelId) throw new Error("startTwitchPubsub: missing channelId");
-  if (!botId) throw new Error("startTwitchPubsub: missing botId");
   if (!channelName) throw new Error("startTwitchPubsub: missing channelName");
   if (typeof liveUpHandler !== "function") throw new Error("startTwitchPubsub: missing liveUpHandler");
   if (typeof liveDownHandler !== "function") throw new Error("startTwitchPubsub: missing liveDownHandler");
 
   const TWITCH_FUNCTIONS = twitchFunctions;
-  const BOT_OAUTH = botOauth;
+  const BOT_OAUTH = normalizeAuthToken(botOauth);
+  const STREAMER_OAUTH = normalizeAuthToken(streamerOauth);
+  if (!BOT_OAUTH && !STREAMER_OAUTH) {
+    throw new Error("startTwitchPubsub: missing botOauth/streamerOauth");
+  }
   const CHANNEL_ID = channelId;
-  const BOT_ID = botId;
+  const BOT_ID = String(botId || "").trim();
   const CHANNEL_NAME = String(channelName).replace(/^#/, "");
+  const SETTINGS_PATH = settingsPath;
+  const STREAMS_PATH = streamsPath;
 
   const WAIT_UNTIL_FOC_OFF = Math.max(0, Number(process.env.WAIT_UNTIL_FOC_OFF) || 0);
   const WAIT_UNTIL_FOC_OFF_RAID = Math.max(0, Number(process.env.WAIT_UNTIL_FOC_OFF_RAID) || 0);
@@ -63,13 +85,40 @@ export function startTwitchPubsub({
 
 var pubsub;
 const myname = CHANNEL_NAME;
+const pendingListens = new Map();
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+
+function readJsonFile(filePath, fallback) {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    return safeJsonParse(raw, fallback) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function refreshRuntimeState() {
+  SETTINGS = readJsonFile(SETTINGS_PATH, {});
+  STREAMS = readJsonFile(STREAMS_PATH, {});
+  streamNumber = Object.keys(STREAMS || {}).length;
+}
+
+function scheduleReconnect(reason = "") {
+  if (stopped || reconnectTimer) return;
+  reconnectAttempt = Math.min(reconnectAttempt + 1, 8);
+  const waitMs = Math.min(30_000, 1_000 * 2 ** (reconnectAttempt - 1));
+  logger.warn(`[pubsub] reconnecting in ${waitMs}ms${reason ? ` (${reason})` : ""}`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    StartListener();
+  }, waitMs);
+}
 
 var ping = {};
 ping.pinger = false;
 ping.start = function () {
-  if (ping.pinger) {
-    clearInterval(ping.pinger);
-  }
+  ping.stop();
   ping.sendPing();
 
   ping.pinger = setInterval(function () {
@@ -78,8 +127,19 @@ ping.start = function () {
     }, Math.floor(Math.random() * 1000 + 1));
   }, 4 * 60 * 1000);
 };
+ping.stop = function () {
+  if (ping.pinger) {
+    clearInterval(ping.pinger);
+    ping.pinger = false;
+  }
+  if (ping.pingtimeout) {
+    clearTimeout(ping.pingtimeout);
+    ping.pingtimeout = null;
+  }
+};
 ping.sendPing = function () {
   try {
+    if (pubsub?.readyState !== WebSocket.OPEN) return;
     pubsub.send(
       JSON.stringify({
         type: "PING",
@@ -87,70 +147,122 @@ ping.sendPing = function () {
     );
     ping.awaitPong();
   } catch (e) {
-    console.log(e);
-
-    pubsub.close();
-    StartListener();
+    logger.warn("[pubsub] ping send failed:", String(e?.message || e));
+    try {
+      pubsub?.close?.();
+    } catch {}
   }
 };
 ping.awaitPong = function () {
+  clearTimeout(ping.pingtimeout);
   ping.pingtimeout = setTimeout(function () {
-    console.log("WS Pong Timeout");
-    pubsub.close();
-    StartListener();
-  }, 10000);
+    logger.warn("[pubsub] pong timeout");
+    try {
+      pubsub?.close?.();
+    } catch {}
+  }, 10_000);
 };
 
 ping.gotPong = function () {
   clearTimeout(ping.pingtimeout);
+  ping.pingtimeout = null;
 };
 
-var requestListen = function (topics, token) {
-  let pck = {};
-  pck.type = "LISTEN";
-  pck.nonce = myname + "-" + new Date().getTime();
-
-  pck.data = {};
-  pck.data.topics = topics;
-  if (token) {
-    pck.data.auth_token = token;
+var requestListen = function (topics, token, label = "topics") {
+  if (!Array.isArray(topics) || topics.length === 0) return;
+  if (!token) {
+    logger.warn(`[pubsub] missing auth token for ${label}; skipping LISTEN`);
+    return;
   }
-
+  if (pubsub?.readyState !== WebSocket.OPEN) {
+    logger.warn(`[pubsub] socket not open for ${label}; skipping LISTEN`);
+    return;
+  }
+  const nonce = `${myname}-${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+  const pck = {
+    type: "LISTEN",
+    nonce,
+    data: {
+      topics,
+      auth_token: token,
+    },
+  };
+  pendingListens.set(nonce, { topics, label });
   pubsub.send(JSON.stringify(pck));
+};
+
+const requestTopics = function (topics, token, label) {
+  const deduped = [...new Set((topics || []).filter(Boolean))];
+  for (const topic of deduped) {
+    requestListen([topic], token, `${label}:${topic}`);
+  }
 };
 
 var StartListener = function () {
   if (stopped) return;
   pubsub = new WebSocket("wss://pubsub-edge.twitch.tv");
   pubsub
-    .on("close", function () {
+    .on("close", function (code, reason) {
+      ping.stop();
       if (stopped) return;
-      console.log("Disconnected");
-      StartListener();
+      const reasonText = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
+      logger.warn(`[pubsub] disconnected (code=${code || "unknown"}${reasonText ? `, reason=${reasonText}` : ""})`);
+      scheduleReconnect("socket closed");
     })
     .on("open", function () {
+      reconnectAttempt = 0;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      logger.log("[pubsub] connected");
       ping.start();
       runAuth();
+    })
+    .on("error", function (err) {
+      logger.warn("[pubsub] websocket error:", String(err?.message || err));
     });
-  pubsub.on("message", async function (raw_data, flags) {
-    SETTINGS = JSON.parse(fs.readFileSync("./SETTINGS.json"));
-    STREAMS = JSON.parse(fs.readFileSync("./STREAMS.json"));
-    streamNumber = Object.keys(STREAMS).length;
-    var PData = JSON.parse(raw_data);
-    if (PData.type == "RECONNECT") {
-      console.log("Reconnect");
-      pubsub.close();
-    } else if (PData.type == "PONG") {
+  pubsub.on("message", async function (raw_data) {
+    refreshRuntimeState();
+
+    const text = Buffer.isBuffer(raw_data)
+      ? raw_data.toString("utf8")
+      : String(raw_data ?? "");
+    const packet = safeJsonParse(text, null);
+    if (!packet || typeof packet !== "object") {
+      logger.warn(`[pubsub] invalid packet: ${text.slice(0, 200)}`);
+      return;
+    }
+
+    if (packet.type == "RECONNECT") {
+      logger.log("[pubsub] RECONNECT requested by Twitch");
+      try {
+        pubsub?.close?.();
+      } catch {}
+    } else if (packet.type == "PONG") {
       ping.gotPong();
-    } else if (PData.type == "RESPONSE") {
-      console.log(PData);
-      console.log("RESPONSE: " + (PData.error ? PData.error : "OK"));
-    } else if (PData.type == "MESSAGE") {
-      PData = PData.data;
-      const pubTopic = PData.topic;
-      const pubMessage = PData.message;
-      const serverTime = pubMessage.server_time;
-      const type = JSON.parse(pubMessage).type;
+    } else if (packet.type == "RESPONSE") {
+      const nonce = String(packet?.nonce || "");
+      const listenMeta = pendingListens.get(nonce);
+      if (nonce) pendingListens.delete(nonce);
+      const label = listenMeta?.label || nonce || "unknown-listen";
+      if (packet?.error) {
+        logger.warn(`[pubsub] LISTEN failed (${label}): ${packet.error}`);
+      } else {
+        logger.log(`[pubsub] LISTEN ok (${label})`);
+      }
+    } else if (packet.type == "MESSAGE") {
+      const packetData = packet?.data || {};
+      const pubTopic = String(packetData?.topic || "");
+      const pubMessage = packetData?.message;
+      const messageData =
+        typeof pubMessage === "string"
+          ? safeJsonParse(pubMessage, {})
+          : pubMessage && typeof pubMessage === "object"
+            ? pubMessage
+            : {};
+      const type = String(messageData?.type || "");
+
       if (type == "stream-up") {
         // TO DO = first person to go to stream gets free channel points
         await TWITCH_FUNCTIONS.setFollowersOnlyMode(false).catch((e) => {
@@ -175,22 +287,33 @@ var StartListener = function () {
         });
         liveDownHandler();
       } else if (type == "viewcount") {
-        STREAMS[streamNumber]["averageViewersPer30Seconds"] =
-          pubMessage.viewers;
-        const sum = 0;
-        for (const key in STREAMS[streamNumber]["averageViewersPer30Seconds"]) {
-          sum += STREAMS[key];
+        const streamData = STREAMS?.[streamNumber];
+        if (streamData && typeof streamData === "object") {
+          const viewers = Number(messageData?.viewers);
+          const samples = Array.isArray(streamData.averageViewersPer30Seconds)
+            ? streamData.averageViewersPer30Seconds
+            : [];
+          if (Number.isFinite(viewers)) {
+            samples.push(viewers);
+          }
+          streamData.averageViewersPer30Seconds = samples.slice(-240);
+          if (streamData.averageViewersPer30Seconds.length > 0) {
+            let sum = 0;
+            for (const sample of streamData.averageViewersPer30Seconds) {
+              sum += Number(sample) || 0;
+            }
+            streamData.averageviewers =
+              sum / streamData.averageViewersPer30Seconds.length;
+          }
+          fs.writeFileSync(STREAMS_PATH, JSON.stringify(STREAMS));
         }
-        STREAMS[streamNumber]["averageviewers"] =
-          sum / Object.keys(STREAMS).length;
-        fs.writeFileSync("./STREAMS.json", JSON.stringify(STREAMS));
       } else if (type == "AD_POLL_CREATE") {
         TWITCH_FUNCTIONS.onMultiplayerAdStart();
       } else if (type == "AD_POLL_COMPLETE") {
-        var adData = pubMessage.data.poll;
+        const adData = messageData?.data?.poll || null;
         TWITCH_FUNCTIONS.onMultiplayerAdEnd(adData);
       } else if (type == "moderation_action") {
-        const followData = JSON.parse(pubMessage).data;
+        const followData = messageData?.data || {};
         const followChange = followData.moderation_action;
 
         if (followChange == "followers") {
@@ -212,8 +335,8 @@ var StartListener = function () {
           }
           // follow only mode gets disabled
         }
-        if (JSON.parse(pubMessage).data.moderation_action == "untimeout") {
-          const untimedoutUser = JSON.parse(pubMessage).data.target_user_login;
+        if (followData.moderation_action == "untimeout") {
+          const untimedoutUser = followData.target_user_login;
           FILTER_FUNCTIONS.onUntimedOut(untimedoutUser);
         }
       } else if (pubTopic == `stream-chat-room-v1.${CHANNEL_ID}`) {
@@ -581,13 +704,11 @@ var StartListener = function () {
       } else if (pubTopic == `predictions-channel-v1.${CHANNEL_ID}`) {
         if (type == "event-created") {
         } else if (type == "event-updated") {
-          const event = JSON.parse(pubMessage).data.event;
+          const event = messageData?.data?.event || {};
 
           const status = event.status;
 
           if (status == "RESOLVED") {
-            const winning_outcome_id = event.winning_outcome_id;
-            const prediction_id = event.id;
             const predictionData =
               await TWITCH_FUNCTIONS.getLatestPredictionData();
 
@@ -602,21 +723,24 @@ var StartListener = function () {
           const emoteonly = "27e600a4-1b2e-4ce3-b969-55e7cf89421f";
           const remotesuboremote = "d08999ad-8338-4270-b306-f28d893a3676";
           const removeoraddhat = "77ac0ea867ac50fb6e65f3839af51a31";
-          const skipSong = "c1177786-2fec-47bd-9500-530c239220da"
+          const skipSong = "c1177786-2fec-47bd-9500-530c239220da";
           const first = "0c4a5827-15f4-4a58-885e-14d785024e5b";
 
-
-          const redemptionId = JSON.parse(pubMessage).data.redemption.reward.id;
-
+          const redemption = messageData?.data?.redemption || {};
+          const redemptionId = redemption?.reward?.id;
+          const userInputRaw = String(redemption?.user_input || "").trim();
+          const twitchUsername = String(redemption?.user?.login || "").trim() || "unknown";
+          const twitchUserId = String(redemption?.user?.id || "").trim();
+          const twitchDisplayName = String(
+            redemption?.user?.display_name ||
+              redemption?.user?.displayName ||
+              twitchUsername
+          ).trim();
 
           if (redemptionId == vipEntry) {
-            SETTINGS = JSON.parse(fs.readFileSync('./SETTINGS.json'))
+            SETTINGS = readJsonFile(SETTINGS_PATH, SETTINGS || {});
             if (SETTINGS.currentMode == '!ticket.on') {
-                const userInputRaw = String(
-                  JSON.parse(pubMessage).data.redemption.user_input || ""
-                ).trim();
                 const userInput = userInputRaw.split(/\s+/)[0];
-                const twitchUsername = JSON.parse(pubMessage).data.redemption.user.login
 
                 if (!userInput) {
                   return client.say(
@@ -682,7 +806,7 @@ var StartListener = function () {
                   );
                 }
 
-                client.say(CHANNEL_NAME, `@${twitchUsername}, sent a friend request to ${result.username}.`)
+                client.say(CHANNEL_NAME, `@${twitchUsername}, sent a friend request to ${result.username}.`);
               }
             }
 
@@ -693,8 +817,8 @@ var StartListener = function () {
                 String(e?.message || e)
               );
             });
-            client.say(CHANNEL_NAME, 'EZY Clap non-subs')
-            await delay(5 * 60 * 1000)
+            client.say(CHANNEL_NAME, "EZY Clap non-subs");
+            await delay(5 * 60 * 1000);
             await TWITCH_FUNCTIONS.setSubscriberMode(false).catch((e) => {
               console.warn(
                 "[helix] failed to disable subscriber-only mode:",
@@ -711,8 +835,8 @@ var StartListener = function () {
                 String(e?.message || e)
               );
             });
-            client.say(CHANNEL_NAME, `The chat is now in emote only for 5 minutes.`)
-            await delay(5 * 60 * 1000)
+            client.say(CHANNEL_NAME, `The chat is now in emote only for 5 minutes.`);
+            await delay(5 * 60 * 1000);
             await TWITCH_FUNCTIONS.setEmoteMode(false).catch((e) => {
               console.warn(
                 "[helix] failed to disable emote-only mode:",
@@ -738,18 +862,19 @@ var StartListener = function () {
           }
 
           if (redemptionId == timeout) {
-            const userInput = JSON.parse(pubMessage).data.redemption.user_input;
-            const twitchUsername =
-              JSON.parse(pubMessage).data.redemption.user.login;
-
-            const userInputSplit = ([] = userInput.split(" "));
+            const userInputSplit = userInputRaw.split(/\s+/).filter(Boolean);
+            const timeoutTarget = userInputSplit[0];
+            if (!timeoutTarget) {
+              client.say(CHANNEL_NAME, `@${twitchUsername}, include a username to timeout.`);
+              return;
+            }
 
             client.say(
               CHANNEL_NAME,
-              `${userInputSplit[0]} was timed out for 60 seconds by ${twitchUsername} via timeout redemption.`
+              `${timeoutTarget} was timed out for 60 seconds by ${twitchUsername} via timeout redemption.`
             );
             await TWITCH_FUNCTIONS.timeoutUserByLogin(
-              userInputSplit[0],
+              timeoutTarget,
               60,
               `[AUTOMATIC] ${twitchUsername} redeemed a timeout on you.`
             ).catch((e) => {
@@ -761,8 +886,8 @@ var StartListener = function () {
           }
 
           if (redemptionId == removeoraddhat) {
-            await delay(30 * 60 * 100)
-            client.say(CHANNEL_NAME, `@${CHANNEL_NAME} 30 miniutes has passed since ${twitchUsername} redeemed the hat redemption.`);
+            await delay(30 * 60 * 1000);
+            client.say(CHANNEL_NAME, `@${CHANNEL_NAME} 30 minutes has passed since ${twitchUsername} redeemed the hat redemption.`);
           }
 
           if (redemptionId == skipSong) {
@@ -775,8 +900,12 @@ var StartListener = function () {
           }
 
           if (redemptionId == first) {
-            await TWITCH_FUNCTIONS.addPajbotPointsById(twitchUserId, 25_000);
-            client.say(CHANNEL_NAME, `@${twitchDisplayName} got 25,000 basement points for being first!`);
+            if (!twitchUserId) {
+              logger.warn("[pubsub] first redemption missing user id");
+            } else {
+              await TWITCH_FUNCTIONS.addPajbotPointsById(twitchUserId, 25_000);
+              client.say(CHANNEL_NAME, `@${twitchDisplayName} got 25,000 basement points for being first!`);
+            }
           }
         }
       }
@@ -785,93 +914,39 @@ var StartListener = function () {
 };
 
 var runAuth = function () {
-  requestListen(
-    [
-      // `activity-feed-alerts-v2.${CHANNEL_ID}`,
-      `ads.${CHANNEL_ID}`,
-      // `ads-manager.${CHANNEL_ID}`,
-      // `channel-ad-poll-update-events.${CHANNEL_ID}`,
-      // `ad-property-refresh.${CHANNEL_ID}`,
-      // `automod-levels-modification.${CHANNEL_ID}`,
-      // `automod-queue.${CHANNEL_ID}`,
-      `leaderboard-events-v1.${CHANNEL_ID}`,
-      // `bits-campaigns-v1.${CHANNEL_ID}`,
-      // `campaign-events.${CHANNEL_ID}`,
-      // `user-campaign-events.${CHANNEL_ID}`,
-      // `celebration-events-v1.${CHANNEL_ID}`,
-      // `channel-bits-events-v1.${CHANNEL_ID}`,
-      // `channel-bit-events-public.${CHANNEL_ID}`,
-      // `channel-event-updates.${CHANNEL_ID}`,
-      // `channel-squad-invites.${CHANNEL_ID}`,
-      // `channel-squad-updates.${CHANNEL_ID}`,
-      // `channel-subscribe-events-v1.${CHANNEL_ID}`,
-      // `channel-cheer-events-public-v1.${CHANNEL_ID}`,
-      // `broadcast-settings-update.${CHANNEL_ID}`,
-      // `channel-drop-events.${CHANNEL_ID}`,
-      // `channel-bounty-board-events.cta.${CHANNEL_ID}`,
-      // `chatrooms-user-v1.505216805`,
-      // `community-boost-events-v1.${CHANNEL_ID}`,
-      `community-moments-channel-v1.${CHANNEL_ID}`,
-      // `community-moments-user-v1.${CHANNEL_ID}`,
-      // `community-points-broadcaster-v1.${CHANNEL_ID}`,
-      `community-points-channel-v1.${CHANNEL_ID}`,
-      // `community-points-user-v1.${CHANNEL_ID}`,
-      `predictions-channel-v1.${CHANNEL_ID}`,
-      // `predictions-user-v1.${CHANNEL_ID}`,
-      // `creator-goals-events-v1.${CHANNEL_ID}`,
-      // `dashboard-activity-feed.${CHANNEL_ID}`,
-      // `dashboard-alert-status.${CHANNEL_ID}`,
-      // `dashboard-multiplayer-ads-events.${CHANNEL_ID}`,
-      // `emote-uploads.${CHANNEL_ID}`,
-      // `emote-animations.${CHANNEL_ID}`,
-      // `extension-control.upload.${CHANNEL_ID}`,
-      // `follows.${CHANNEL_ID}`,
-      // `friendship.${CHANNEL_ID}`,
-      // `hype-train-events-v1.${CHANNEL_ID}`,
-      // `user-image-update.${CHANNEL_ID}`,
-      // `low-trust-users.${CHANNEL_ID}`,
-      // `midnight-squid-recipient-v1.${CHANNEL_ID}`,
-      // //`chat_moderator_actions.${CHANNEL_ID}`
-      `chat_moderator_actions.${BOT_ID}.${CHANNEL_ID}`,
-      // `moderator-actions.${CHANNEL_ID}`,
-      // `multiview-chanlet-update.${CHANNEL_ID}`,
-      // `channel-sub-gifts-v1.${CHANNEL_ID}`,
-      // `onsite-notifications.${CHANNEL_ID}`,
-      // `payout-onboarding-events.${CHANNEL_ID}`,
-      `polls.${CHANNEL_ID}`,
-      // `presence.${CHANNEL_ID}`,
-      // `prime-gaming-offer.${CHANNEL_ID}`,
-      // `channel-prime-gifting-status.${CHANNEL_ID}`,
-      // `pv-watch-party-events.${CHANNEL_ID}`,
-      // `private-callout.${CHANNEL_ID}`,
-      // `purchase-fulfillment-events.${CHANNEL_ID}`,
-      // `raid.${CHANNEL_ID}`,
-      // `radio-events-v1.${CHANNEL_ID}`,
-      // `rocket-boost-channel-v1.${CHANNEL_ID}`,
-      // `squad-updates.${CHANNEL_ID}`,
-      // `stream-change-v1.${CHANNEL_ID}`,
-      // `stream-change-by-channel.${CHANNEL_ID}`,
-      `stream-chat-room-v1.${CHANNEL_ID}`,
-      // `subscribers-csv-v1.${CHANNEL_ID}`,
-      `channel-unban-requests.${BOT_ID}.${CHANNEL_ID}`,
-      // `user-unban-requests.${CHANNEL_ID}`,
-      `upload.${CHANNEL_ID}`,
-      // `user-bits-updates-v1.${CHANNEL_ID}`,
-      // `user-commerce-events.${CHANNEL_ID}`,
-      // `user-crate-events-v1.${CHANNEL_ID}`,
-      // `user-drop-events.${CHANNEL_ID}`,
-      // `user-moderation-notifications.${CHANNEL_ID}`,
-      // `user-preferences-update-v1.${CHANNEL_ID}`,
-      // `user-properties-update.${CHANNEL_ID}`,
-      // `user-subscribe-events-v1.${CHANNEL_ID}`,
-      `video-playback.${CHANNEL_ID}`,
-      `video-playback-by-id.${CHANNEL_ID}`,
-      // `video-thumbnail-processing.${CHANNEL_ID}`,
-      `whispers.${BOT_ID}`,
-    ],
-    BOT_OAUTH
-    // STREAMER_TOKEN
-  );
+  pendingListens.clear();
+
+  const streamerTopics = [
+    `ads.${CHANNEL_ID}`,
+    `leaderboard-events-v1.${CHANNEL_ID}`,
+    `community-moments-channel-v1.${CHANNEL_ID}`,
+    `community-points-channel-v1.${CHANNEL_ID}`,
+    `predictions-channel-v1.${CHANNEL_ID}`,
+    `polls.${CHANNEL_ID}`,
+    `stream-chat-room-v1.${CHANNEL_ID}`,
+    `upload.${CHANNEL_ID}`,
+    `video-playback.${CHANNEL_ID}`,
+    `video-playback-by-id.${CHANNEL_ID}`,
+  ];
+
+  const botTopics = [
+    BOT_ID ? `chat_moderator_actions.${BOT_ID}.${CHANNEL_ID}` : "",
+    BOT_ID ? `channel-unban-requests.${BOT_ID}.${CHANNEL_ID}` : "",
+    BOT_ID ? `whispers.${BOT_ID}` : "",
+  ];
+
+  const streamerToken = STREAMER_OAUTH || BOT_OAUTH;
+  const botToken = BOT_OAUTH || STREAMER_OAUTH;
+
+  if (!STREAMER_OAUTH && BOT_OAUTH) {
+    logger.warn("[pubsub] streamerOauth missing, falling back to botOauth for channel topics");
+  }
+  if (!BOT_OAUTH && STREAMER_OAUTH) {
+    logger.warn("[pubsub] botOauth missing, falling back to streamerOauth for bot topics");
+  }
+
+  requestTopics(streamerTopics, streamerToken, "streamer");
+  requestTopics(botTopics, botToken, "bot");
 };
 StartListener();
 
@@ -879,6 +954,12 @@ StartListener();
   return {
     stop() {
       stopped = true;
+      ping.stop();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      pendingListens.clear();
       try {
         pubsub?.close?.();
       } catch {}
