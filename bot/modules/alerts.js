@@ -279,9 +279,9 @@ export function registerAlertsModule({
     subscription: (channel, username) => {
       const s = loadSettings();
       if (isKs(s)) return;
-      client.say(CHANNEL_NAME, "SUB HYP");
-      client.say(CHANNEL_NAME, "SUB HYPE!");
-      client.say(CHANNEL_NAME, "SUB HYPE!");
+      client.say(CHANNEL_NAME, "tibb12Subhype tibb12Subhype tibb12Subhype");
+      client.say(CHANNEL_NAME, "tibb12Subhype tibb12Subhype tibb12Subhype");
+      client.say(CHANNEL_NAME, "tibb12Subhype tibb12Subhype tibb12Subhype");
     },
 
     giftpaidupgrade: async (channel, username) => {
