@@ -1005,6 +1005,14 @@ async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
     );
     return true;
   }
+  if (command === "!cum") {
+    const target = arg1 || senderLogin;
+    await replyToDiscordCommand(
+      discordMessage,
+      `Ew whats wrong with you ${target} <:MonkaShake:975633261156007936>`
+    );
+    return true;
+  }
 
   if (command === "!time") {
     const emote = getTimeEmote(DISCORD_TIMEZONE);
