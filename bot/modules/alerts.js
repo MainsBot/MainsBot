@@ -156,7 +156,8 @@ export function registerAlertsModule({
   let filtersDisabledUntilMs = 0;
   let filtersDisableSequence = 0;
 
-  async function toggleFiltersTemporarily(channel, ms, reason) {
+  async function toggleFiltersTemporarily(channel, ms, reason, options = {}) {
+    const logToModActions = options?.logToModActions !== false;
     const waitMs = Math.max(0, Number(ms) || 0);
     const now = Date.now();
     const proposedUntil = now + waitMs;
@@ -176,11 +177,15 @@ export function registerAlertsModule({
       0,
       Math.round((filtersDisabledUntilMs - Date.now()) / 1000)
     );
-    await modActionsLog(
-      channel,
-      modlogUser,
-      `[AUTO] ${reason} - Filters DISABLED for ${secondsLeft}s`
-    );
+    if (logToModActions) {
+      await modActionsLog(
+        channel,
+        modlogUser,
+        `[AUTO] ${reason} - Filters DISABLED for ${secondsLeft}s`
+      );
+    } else {
+      logger?.log?.(`[alerts] ${reason} - Filters DISABLED for ${secondsLeft}s`);
+    }
 
     while (Date.now() < filtersDisabledUntilMs) {
       await sleep(Math.min(1000, filtersDisabledUntilMs - Date.now()));
@@ -193,15 +198,23 @@ export function registerAlertsModule({
     settings2.lengthFilter = true;
     saveSettings(settings2);
 
-    await modActionsLog(channel, modlogUser, `[AUTO] Filters RE-ENABLED after ${reason}`);
+    if (logToModActions) {
+      await modActionsLog(channel, modlogUser, `[AUTO] Filters RE-ENABLED after ${reason}`);
+    } else {
+      logger?.log?.(`[alerts] Filters RE-ENABLED after ${reason}`);
+    }
   }
 
   async function setDonationMode(channel, ms) {
-    return toggleFiltersTemporarily(channel, ms, "[BIG DONO DETECTED]");
+    return toggleFiltersTemporarily(channel, ms, "[BIG DONO DETECTED]", {
+      logToModActions: false,
+    });
   }
 
   async function setBitsMode(channel, ms) {
-    return toggleFiltersTemporarily(channel, ms, "[BIG BIT DROP DETECTED]");
+    return toggleFiltersTemporarily(channel, ms, "[BIG BIT DROP DETECTED]", {
+      logToModActions: false,
+    });
   }
 
   async function spamBits(channel, count, msg, delayMs = 0) {
