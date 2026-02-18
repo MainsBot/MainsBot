@@ -349,10 +349,10 @@ var StartListener = function () {
         // }
       } else if (pubTopic == `ads.${CHANNEL_ID}`) {
         if (SETTINGS.ks == false) {
-          // client.say(
-          //   CHANNEL_NAME,
-          //   `An ad has been ran, subscribe with prime for free and enjoy watching with 0 ads all month for free, !prime for more info EZ PogU .`
-          // );
+          client.say(
+            CHANNEL_NAME,
+            `An ad has been ran, subscribe with prime for free and enjoy watching with 0 ads all month for free, !prime for more info EZ PogU .`
+          );
         }
       } else if (pubTopic == `community-moments-channel-v1.${CHANNEL_ID}`) {
         if (SETTINGS.ks == false) {
