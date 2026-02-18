@@ -317,6 +317,8 @@ const PAJBOT_OAUTH = String(process.env.PAJBOT_OAUTH || "").trim();
 
 const INSTANCE_NAME =
   String(process.env.INSTANCE_NAME || "default").trim() || "default";
+const BOT_STARTUP_MESSAGE = String(process.env.BOT_STARTUP_MESSAGE || "").trim();
+const BOT_SHUTDOWN_MESSAGE = String(process.env.BOT_SHUTDOWN_MESSAGE || "").trim();
 
 const COMMAND_COUNTER = createCommandCounter({ instance: INSTANCE_NAME });
 const NAMED_COUNTERS = createNamedCountStore({ instance: INSTANCE_NAME });
@@ -372,6 +374,26 @@ const DEFAULT_IGNORE_MODES = [
 ];
 
 const ver = '2.4'
+
+function formatLifecycleMessage(template = "", { signal = "" } = {}) {
+  const src = String(template || "").trim();
+  if (!src) return "";
+  return src
+    .replaceAll("{channel}", String(CHANNEL_NAME || "").trim())
+    .replaceAll("{channel_display}", String(STREAMER_DISPLAY_NAME || CHANNEL_NAME || "").trim())
+    .replaceAll("{instance}", String(INSTANCE_NAME || "").trim())
+    .replaceAll("{signal}", String(signal || "").trim() || "shutdown");
+}
+
+async function sendLifecycleChatMessage(template = "", ctx = {}) {
+  const text = formatLifecycleMessage(template, ctx);
+  if (!text) return;
+  try {
+    await client.say(CHANNEL_NAME, text);
+  } catch (e) {
+    console.warn("[lifecycle] chat message failed:", String(e?.message || e));
+  }
+}
 
 function flagFromEnv(value) {
   return /^(1|true|yes|on)$/i.test(String(value || "").trim());
@@ -1376,6 +1398,11 @@ attachClientEventLogs({
   appendLog,
   logRecentCommandResponse,
   defaultChannelName: CHANNEL_NAME,
+});
+
+client.once("connected", () => {
+  if (!BOT_STARTUP_MESSAGE) return;
+  void sendLifecycleChatMessage(BOT_STARTUP_MESSAGE, { signal: "startup" });
 });
 
 client.connect();
@@ -2922,6 +2949,10 @@ const WEB = startWebServer({ getStatusSnapshot, logDiscordModAction });
 async function gracefulShutdown(signal = "shutdown") {
   try {
     console.log(`[shutdown] ${signal}: flushing state...`);
+    if (BOT_SHUTDOWN_MESSAGE) {
+      await sendLifecycleChatMessage(BOT_SHUTDOWN_MESSAGE, { signal });
+      await delay(350);
+    }
     try {
       WEB?.stop?.();
     } catch {}

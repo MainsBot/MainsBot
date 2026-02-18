@@ -742,6 +742,55 @@ export async function isUserModerator({ broadcasterId, userId, preferredRole = "
   return Array.isArray(json?.data) && json.data.length > 0;
 }
 
+export async function listChannelModerators({
+  broadcasterId,
+  preferredRole = "auto",
+  limit = 500,
+} = {}) {
+  const targetBroadcasterId = String(broadcasterId || "").trim();
+  if (!targetBroadcasterId) return [];
+
+  const auth = await resolveHelixModeratorAuth({ preferred: preferredRole });
+  if (!auth?.accessToken || !auth?.clientId) return [];
+
+  const maxItems = Math.max(1, Math.min(2000, Number(limit) || 500));
+  const out = [];
+  let cursor = "";
+
+  while (out.length < maxItems) {
+    const url = new URL("https://api.twitch.tv/helix/moderation/moderators");
+    url.searchParams.set("broadcaster_id", targetBroadcasterId);
+    url.searchParams.set("first", "100");
+    if (cursor) url.searchParams.set("after", cursor);
+
+    const json = await fetchHelixJson({
+      url: url.toString(),
+      method: "GET",
+      clientId: auth.clientId,
+      accessToken: auth.accessToken,
+    });
+
+    const page = Array.isArray(json?.data) ? json.data : [];
+    for (const row of page) {
+      const userId = String(row?.user_id || "").trim();
+      const login = normalizeTwitchLogin(row?.user_login || "");
+      if (!userId && !login) continue;
+      out.push({ userId, login });
+      if (out.length >= maxItems) break;
+    }
+
+    cursor = String(json?.pagination?.cursor || "").trim();
+    if (!cursor || page.length === 0) break;
+  }
+
+  const dedup = new Map();
+  for (const row of out) {
+    const key = row.userId ? `id:${row.userId}` : `login:${row.login}`;
+    if (!dedup.has(key)) dedup.set(key, row);
+  }
+  return Array.from(dedup.values());
+}
+
 const helixUserIdCache = new Map();
 const HELIX_USER_ID_TTL_MS = 60 * 60 * 1000;
 

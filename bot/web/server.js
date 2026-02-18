@@ -12,7 +12,12 @@ import CleanCSS from "clean-css";
 
 import { flushStateNow } from "../../data/postgres/stateInterceptor.js";
 import { createWebAdminAuth } from "../api/twitch/webAdmin.js";
-import { isUserModerator, updateChannelInfo, getGameIdByName } from "../api/twitch/helix.js";
+import {
+  isUserModerator,
+  listChannelModerators,
+  updateChannelInfo,
+  getGameIdByName,
+} from "../api/twitch/helix.js";
 import {
   TWITCH_ROLES,
   buildAuthorizeUrl,
@@ -59,6 +64,13 @@ export function startWebServer(deps = {}) {
   const WEB_HOST = String(process.env.WEB_HOST || "127.0.0.1").trim() || "127.0.0.1";
   const WEB_SOCKET_PATH = String(process.env.WEB_SOCKET_PATH || "").trim();
   const WEB_PUBLIC_URL = String(process.env.WEB_PUBLIC_URL || "").trim();
+  const DATA_DIR = String(process.env.DATA_DIR || "").trim();
+  const WEB_MODS_CACHE_PATH = path.resolve(
+    String(process.env.WEB_MODS_CACHE_PATH || "").trim() ||
+      (DATA_DIR
+        ? path.join(DATA_DIR, "d", "channel_mods.json")
+        : path.join(ROOT_DIR, "data", "channel_mods.json"))
+  );
 
   const SCSS_PATH = path.join(STATIC_DIR, "style.scss");
   const CSS_PATH = path.join(STATIC_DIR, "style.css");
@@ -111,6 +123,55 @@ export function startWebServer(deps = {}) {
 
   function normalizeLogin(value) {
     return String(value || "").trim().toLowerCase();
+  }
+
+  function readCachedModerators() {
+    try {
+      const raw = fs.readFileSync(WEB_MODS_CACHE_PATH, "utf8");
+      const parsed = JSON.parse(String(raw || "{}"));
+      const rows = Array.isArray(parsed?.moderators) ? parsed.moderators : [];
+      return rows
+        .map((row) => ({
+          userId: String(row?.userId || "").trim(),
+          login: normalizeLogin(row?.login || ""),
+        }))
+        .filter((row) => row.userId || row.login);
+    } catch {
+      return [];
+    }
+  }
+
+  function writeCachedModerators(rows = []) {
+    try {
+      const dir = path.dirname(WEB_MODS_CACHE_PATH);
+      if (dir && !fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const payload = {
+        updatedAt: new Date().toISOString(),
+        channelId: TWITCH_CHANNEL_ID || null,
+        channelLogin: TWITCH_CHANNEL_NAME || null,
+        moderators: (Array.isArray(rows) ? rows : [])
+          .map((row) => ({
+            userId: String(row?.userId || "").trim(),
+            login: normalizeLogin(row?.login || ""),
+          }))
+          .filter((row) => row.userId || row.login),
+      };
+      fs.writeFileSync(WEB_MODS_CACHE_PATH, JSON.stringify(payload, null, 2), "utf8");
+    } catch (e) {
+      console.warn("[WEB][ADMIN] moderator cache write failed:", String(e?.message || e));
+    }
+  }
+
+  function isInModeratorList(rows = [], user = {}) {
+    const userId = String(user?.userId || "").trim();
+    const login = normalizeLogin(user?.login || "");
+    return rows.some((row) => {
+      const rowId = String(row?.userId || "").trim();
+      const rowLogin = normalizeLogin(row?.login || "");
+      if (userId && rowId && userId === rowId) return true;
+      if (login && rowLogin && login === rowLogin) return true;
+      return false;
+    });
   }
 
   function safeEqualText(a, b) {
@@ -4199,6 +4260,23 @@ const webServer = http.createServer(async (req, res) => {
               userId: String(user.userId),
               preferredRole: "auto",
             });
+          }
+          if (!isMod && TWITCH_CHANNEL_ID) {
+            const liveMods = await listChannelModerators({
+              broadcasterId: TWITCH_CHANNEL_ID,
+              preferredRole: "auto",
+              limit: 500,
+            }).catch(() => []);
+            if (Array.isArray(liveMods) && liveMods.length > 0) {
+              writeCachedModerators(liveMods);
+              isMod = isInModeratorList(liveMods, user);
+            }
+          }
+          if (!isMod) {
+            const cachedMods = readCachedModerators();
+            if (cachedMods.length > 0) {
+              isMod = isInModeratorList(cachedMods, user);
+            }
           }
         } catch (e) {
           console.warn(

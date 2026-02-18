@@ -64,6 +64,8 @@ const APP_ENV_KEYS_TO_CLEAR = [
   "WEB_IP_INTEL_ENABLED",
   "WEB_IP_INTEL_TIMEOUT_MS",
   "WEB_IP_INTEL_CACHE_MS",
+  "BOT_STARTUP_MESSAGE",
+  "BOT_SHUTDOWN_MESSAGE",
 ];
 
 function clearEnvKey(key) {
@@ -228,6 +230,9 @@ function applyWebConfig(ini) {
   }
   if (web.admin_origin || web.adminOrigin) setEnvOverride("WEB_ADMIN_ORIGIN", web.admin_origin || web.adminOrigin);
   if (web.admin_redirect_uri || web.adminRedirectUri) setEnvOverride("WEB_ADMIN_REDIRECT_URI", web.admin_redirect_uri || web.adminRedirectUri);
+  if (web.mods_cache_path || web.modsCachePath) {
+    setEnvOverride("WEB_MODS_CACHE_PATH", web.mods_cache_path || web.modsCachePath);
+  }
   if (web.allowed_users || web.allowedUsers) setEnvOverride("WEB_ALLOWED_USERS", web.allowed_users || web.allowedUsers);
   if (web.owner_user_id || web.ownerUserId) setEnvOverride("WEB_OWNER_USER_ID", web.owner_user_id || web.ownerUserId);
   if (web.owner_login || web.ownerLogin) setEnvOverride("WEB_OWNER_LOGIN", web.owner_login || web.ownerLogin);
@@ -330,6 +335,16 @@ function applySettingsSection(ini) {
         settings.discord_timezone ??
         settings.discordTimeZone
     );
+  }
+}
+
+function applyMessagesSection(ini) {
+  const messages = ini?.messages && typeof ini.messages === "object" ? ini.messages : {};
+  if (messages.startup || messages.on_start || messages.onStart) {
+    setEnvOverride("BOT_STARTUP_MESSAGE", messages.startup || messages.on_start || messages.onStart);
+  }
+  if (messages.shutdown || messages.on_stop || messages.onStop) {
+    setEnvOverride("BOT_SHUTDOWN_MESSAGE", messages.shutdown || messages.on_stop || messages.onStop);
   }
 }
 
@@ -761,6 +776,7 @@ export async function bootstrapConfig() {
     // Structured sections (recommended for new configs)
     applyModulesConfig(ini);
     applySettingsSection(ini);
+    applyMessagesSection(ini);
     applyDatabaseSection(ini);
     applyTwitchSection(ini);
     applySpotifySection(ini);
