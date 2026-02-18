@@ -22,7 +22,6 @@ import * as ROBLOX_FUNCTIONS from "./api/roblox/index.js";
 import * as TWITCH_FUNCTIONS from "./api/twitch/helix.js";
 import {
   attachClientEventLogs,
-  createOptionalTmiClient,
   createTmiClient,
 } from "./api/twitch/irc.js";
 import { buildLinkCommandText, setFossabotCommand } from "./api/fossabot/index.js";
@@ -308,12 +307,6 @@ const COMMAND_USER_COOLDOWN_MS = 30_000;
 let commandGlobalCooldownUntil = 0;
 const commandCooldownByUser = new Map();
 const missingKeywordResponseWarned = new Set();
-
-const PAJBOT_ENABLED = /^(1|true|yes|on)$/i.test(
-  String(process.env.PAJBOT_ENABLED ?? "0").trim()
-);
-const PAJBOT_NAME = String(process.env.PAJBOT_NAME || "").trim();
-const PAJBOT_OAUTH = String(process.env.PAJBOT_OAUTH || "").trim();
 
 const INSTANCE_NAME =
   String(process.env.INSTANCE_NAME || "default").trim() || "default";
@@ -873,18 +866,9 @@ const client = createTmiClient({
   debug: false,
 });
 
-const pajbot = PAJBOT_ENABLED
-  ? createOptionalTmiClient({
-      username: PAJBOT_NAME,
-      oauthToken: PAJBOT_OAUTH,
-      channelName: CHANNEL_NAME,
-      debug: false,
-    })
-  : null;
-
 // Optional: allow commands typed in Discord to be relayed to the bot.
 // Default mode is "simulate" (runs handlers without sending to Twitch chat).
-// Optional mode "tmi" will send the command into Twitch chat via [pajbot].
+// Relay mode is always simulated (no secondary chat account).
 let DISCORD_RELAY_OUT = {
   discordChannelId: "",
   discordMessage: null,
@@ -1180,10 +1164,7 @@ try {
       }
 
       if (mode === "tmi") {
-        if (!pajbot) throw new Error("PAJBOT is not configured (set [pajbot].enabled/name/oauth).");
-        if (debug) console.log("[discord][relay] tmi -> twitch:", msg);
-        await pajbot.say(CHANNEL_NAME, msg);
-        return;
+        console.warn("[discord][relay] relay_mode=tmi is no longer supported; using simulate mode.");
       }
 
       // simulate (default): run handlers without sending a chat message from a second account
@@ -1282,8 +1263,6 @@ try {
 } catch (e) {
   console.warn("[discord][relay] output mirror wrap failed:", String(e?.message || e));
 }
-
-// Keep pajbot on plain IRC/tmi.js transport (no Helix patching).
 
   // ---------- OPTIONAL MODULES ----------
 try {
@@ -1392,7 +1371,6 @@ try {
   if (isAlertsModuleEnabled()) {
     alertsController = registerAlertsModule({
       client,
-      pajbot,
       channelName: CHANNEL_NAME,
       twitchFunctions: TWITCH_FUNCTIONS,
       loadSettings,
@@ -1414,13 +1392,6 @@ attachClientEventLogs({
   logRecentCommandResponse,
   defaultChannelName: CHANNEL_NAME,
 });
-attachClientEventLogs({
-  tmiClient: pajbot,
-  label: "PAJBOT",
-  appendLog,
-  logRecentCommandResponse,
-  defaultChannelName: CHANNEL_NAME,
-});
 
 client.once("connected", () => {
   if (!BOT_STARTUP_MESSAGE) return;
@@ -1428,7 +1399,6 @@ client.once("connected", () => {
 });
 
 client.connect();
-if (pajbot) pajbot.connect();
 
 client.on("message", (channel, userstate, message, self) => {
   if (self) return;
@@ -2123,8 +2093,7 @@ async function joinHandler(
   message,
   twitchUsername,
   isModOrBroadcaster,
-  twitchUserId,
-  isVip = false
+  twitchUserId
 ) {
   const currentMode = SETTINGS.currentMode;
   let responseLimit = 1;
@@ -2149,8 +2118,8 @@ async function joinHandler(
         continue;
       }
 
-      // Mods/VIPs should not trigger "how do I join" keyword auto-responses.
-      if (wordSet === "join" && (isModOrBroadcaster || isVip)) {
+      // Only mods/broadcaster are exempt from "join" keyword auto-responses.
+      if (wordSet === "join" && isModOrBroadcaster) {
         continue;
       }
 
@@ -2699,7 +2668,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     SETTINGS.keywords == true &&
     !isPermitted
   ) {
-    joinHandler(message, twitchUsername, isPermitted, twitchUserId, isVip);
+    joinHandler(message, twitchUsername, isPermitted, twitchUserId);
   }
 
   if (shouldTrackKeywordCooldown) {

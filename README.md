@@ -69,7 +69,7 @@ Config (INI keys in `[web]` or env vars):
 
 State is stored in Postgres (JSONB) when enabled. This lets you run multiple instances without sharing JSON files.
 
-### Create DB (Debian/server, pajbot-style)
+### Create DB (Debian/server)
 
 Run as a Postgres superuser:
 - `sudo -u postgres psql -f deploy/sql/00-create-role-and-db.sql`
@@ -79,7 +79,7 @@ Then set these in your INI:
 - `[database].url = postgresql://mainsbot@127.0.0.1:5432/mainsbot`
 - `[database].schema = mainsbot_<streamername>` (example: `mainsbot_tibb12`)
 
-On Debian-like systems, a passwordless role can work because `pg_hba.conf` often allows peer auth for local users (same idea as pajbot).
+On Debian-like systems, a passwordless role can work because `pg_hba.conf` often allows peer auth for local users.
 
 ### Create DB (Windows local testing)
 

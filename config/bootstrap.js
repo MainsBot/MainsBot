@@ -12,7 +12,6 @@ const APP_ENV_PREFIXES_TO_CLEAR = [
   "GAMEPING_",
   "MODULE_",
   "DATABASE_",
-  "PAJBOT_",
 ];
 
 const APP_ENV_KEYS_TO_CLEAR = [
@@ -41,9 +40,6 @@ const APP_ENV_KEYS_TO_CLEAR = [
   "CLIENT_SECRET",
   "COOKIE",
   "STREAMLABS_SOCKET_TOKEN",
-  "PAJBOT_ENABLED",
-  "PAJBOT_NAME",
-  "PAJBOT_OAUTH",
   "REDDIT_RECAP_URL",
   "COOLDOWN",
   "MESSAGE_MEMORY",
@@ -505,16 +501,6 @@ function applyDiscordSection(ini) {
   }
 }
 
-function applyPajbotSection(ini) {
-  const pb = ini?.pajbot && typeof ini.pajbot === "object" ? ini.pajbot : {};
-
-  if (pb.enabled != null) setEnvOverride("PAJBOT_ENABLED", pb.enabled);
-  if (pb.name) setEnvOverride("PAJBOT_NAME", pb.name);
-  if (pb.oauth || pb.oauth_token || pb.oauthToken) {
-    setEnvOverride("PAJBOT_OAUTH", pb.oauth || pb.oauth_token || pb.oauthToken);
-  }
-}
-
 function applyStreamlabsSection(ini) {
   const sl =
     ini?.streamlabs && typeof ini.streamlabs === "object"
@@ -782,7 +768,6 @@ export async function bootstrapConfig() {
     applySpotifySection(ini);
     applyRobloxSection(ini);
     applyDiscordSection(ini);
-    applyPajbotSection(ini);
     applyStreamlabsSection(ini);
     applyLinkSection(ini);
     applyGamepingSection(ini);

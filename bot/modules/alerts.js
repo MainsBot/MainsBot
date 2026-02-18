@@ -108,7 +108,6 @@ function formatMoney(amount, { code, symbol }) {
 
 export function registerAlertsModule({
   client,
-  pajbot = null,
   channelName,
   twitchFunctions,
   loadSettings,
@@ -396,14 +395,8 @@ export function registerAlertsModule({
                 "[helix] donation announcement failed:",
                 String(e?.message || e)
               );
-              if (pajbot) {
-                pajbot.say(CHANNEL_NAME, msg);
-              } else {
-                client.say(CHANNEL_NAME, msg);
-              }
+              client.say(CHANNEL_NAME, msg);
             });
-          } else if (pajbot) {
-            pajbot.say(CHANNEL_NAME, msg);
           } else {
             client.say(CHANNEL_NAME, msg);
           }
