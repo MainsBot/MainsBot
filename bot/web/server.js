@@ -174,6 +174,42 @@ export function startWebServer(deps = {}) {
     });
   }
 
+  function clearAdminSessionCookieAllVariants(res) {
+    try {
+      const cookies = [];
+      try {
+        WEB_ADMIN_AUTH.clearSessionCookie(
+          {
+            setHeader(name, value) {
+              if (String(name || "").toLowerCase() === "set-cookie") {
+                if (Array.isArray(value)) cookies.push(...value);
+                else cookies.push(value);
+              }
+            },
+          },
+          { secure: false }
+        );
+      } catch {}
+      try {
+        WEB_ADMIN_AUTH.clearSessionCookie(
+          {
+            setHeader(name, value) {
+              if (String(name || "").toLowerCase() === "set-cookie") {
+                if (Array.isArray(value)) cookies.push(...value);
+                else cookies.push(value);
+              }
+            },
+          },
+          { secure: true }
+        );
+      } catch {}
+
+      if (cookies.length > 0) {
+        res.setHeader("set-cookie", cookies);
+      }
+    } catch {}
+  }
+
   function safeEqualText(a, b) {
     const aa = Buffer.from(String(a ?? ""), "utf8");
     const bb = Buffer.from(String(b ?? ""), "utf8");
@@ -2893,7 +2929,7 @@ const webServer = http.createServer(async (req, res) => {
   }
 
   if (routePath === "/admin/logout") {
-    WEB_ADMIN_AUTH.clearSessionCookie(res, { secure: isSecureRequest });
+    clearAdminSessionCookieAllVariants(res);
     return sendRedirect(res, "/admin/login");
   }
 
@@ -4253,6 +4289,7 @@ const webServer = http.createServer(async (req, res) => {
         });
 
         let isMod = false;
+        let modSource = "none";
         try {
           if (TWITCH_CHANNEL_ID && user?.userId) {
             isMod = await isUserModerator({
@@ -4260,6 +4297,7 @@ const webServer = http.createServer(async (req, res) => {
               userId: String(user.userId),
               preferredRole: "auto",
             });
+            if (isMod) modSource = "direct_check";
           }
           if (!isMod && TWITCH_CHANNEL_ID) {
             const liveMods = await listChannelModerators({
@@ -4270,12 +4308,14 @@ const webServer = http.createServer(async (req, res) => {
             if (Array.isArray(liveMods) && liveMods.length > 0) {
               writeCachedModerators(liveMods);
               isMod = isInModeratorList(liveMods, user);
+              if (isMod) modSource = "live_mod_list";
             }
           }
           if (!isMod) {
             const cachedMods = readCachedModerators();
             if (cachedMods.length > 0) {
               isMod = isInModeratorList(cachedMods, user);
+              if (isMod) modSource = "cached_mod_list";
             }
           }
         } catch (e) {
@@ -4285,7 +4325,21 @@ const webServer = http.createServer(async (req, res) => {
           );
         }
 
-        const session = { userId: user.userId, login: user.login, mode: "twitch", isMod };
+        if (isMod) {
+          console.log(
+            `[WEB][ADMIN] mod access granted for ${String(user?.login || "unknown")} (${String(
+              user?.userId || "unknown"
+            )}) via ${modSource}`
+          );
+        }
+
+        const session = {
+          userId: user.userId,
+          login: user.login,
+          mode: "twitch",
+          isMod,
+          modSource,
+        };
         if (!isAdminAllowedSession(session)) {
           WEB_ADMIN_AUTH.clearSessionCookie(res, { secure: isSecureRequest });
           return sendErrorPage(
