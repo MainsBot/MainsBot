@@ -181,7 +181,7 @@ function applyInstanceDefaults(ini) {
       inst.words_path ||
         inst.wordsPath ||
         process.env.GLOBAL_WORDS_PATH ||
-        "./data/WORDS.json"
+        path.join(stateDir, "words.json")
     ).trim();
     const globalWordsPath = asAbs(globalWordsPathRaw);
     ensureDir(path.dirname(globalWordsPath));

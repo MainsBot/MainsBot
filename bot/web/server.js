@@ -2838,10 +2838,23 @@ const webServer = http.createServer(async (req, res) => {
 
       const nextPath = sanitizeNextPath(parsedUrl.searchParams.get("next")) || "/admin";
       const wantsTwitchLogin = String(parsedUrl.searchParams.get("twitch") || "") === "1";
+      const manualLogin = String(parsedUrl.searchParams.get("manual") || "") === "1";
 
       const canWebTwitchLogin =
         !!String(process.env.CLIENT_ID || "").trim() &&
         !!String(process.env.CLIENT_SECRET || "").trim();
+
+      if (!usePasswordAuth && method === "GET" && manualLogin) {
+        return sendHtmlResponse(
+          res,
+          200,
+          renderAdminLoginHtml({
+            nextPath,
+            canWebTwitchLogin,
+          }),
+          { "cache-control": "no-store" }
+        );
+      }
 
       if (usePasswordAuth && !wantsTwitchLogin) {
         if (!passwordAuthConfigured) {
@@ -2930,7 +2943,7 @@ const webServer = http.createServer(async (req, res) => {
 
   if (routePath === "/admin/logout") {
     clearAdminSessionCookieAllVariants(res);
-    return sendRedirect(res, "/admin/login");
+    return sendRedirect(res, "/admin/login?manual=1&next=/admin");
   }
 
   if (routePath === "/admin/session" || routePath === "/api/admin/session") {

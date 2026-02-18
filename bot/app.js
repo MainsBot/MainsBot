@@ -632,15 +632,37 @@ function readSettingsFromDisk() {
 function readWordsFromDisk() {
   try {
     const parsed = JSON.parse(fs.readFileSync(WORDS_PATH, "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    const words =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    if (Object.keys(words).length > 0) return words;
+  } catch {}
+
+  try {
+    if (fs.existsSync(DEFAULT_GLOBAL_WORDS_PATH)) {
+      const fallbackParsed = JSON.parse(fs.readFileSync(DEFAULT_GLOBAL_WORDS_PATH, "utf8"));
+      if (fallbackParsed && typeof fallbackParsed === "object" && !Array.isArray(fallbackParsed)) {
+        return fallbackParsed;
+      }
+    }
+  } catch {}
+
+  try {
+    if (fs.existsSync(LEGACY_ARCHIVE_WORDS_PATH)) {
+      const fallbackParsed = JSON.parse(fs.readFileSync(LEGACY_ARCHIVE_WORDS_PATH, "utf8"));
+      if (fallbackParsed && typeof fallbackParsed === "object" && !Array.isArray(fallbackParsed)) {
+        return fallbackParsed;
+      }
+    }
   } catch {
     return {};
   }
+  return {};
 }
 
 let SETTINGS = readSettingsFromDisk();
 let STREAMS = JSON.parse(fs.readFileSync(STREAMS_PATH));
 let WORDS = readWordsFromDisk();
+console.log(`[KEYWORDS] loaded ${Object.keys(WORDS || {}).length} categories from ${WORDS_PATH}`);
 try {
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2), "utf8");
 } catch {}
