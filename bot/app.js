@@ -1005,6 +1005,7 @@ async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
     );
     return true;
   }
+
   if (command === "!cum") {
     const target = arg1 || senderLogin;
     await replyToDiscordCommand(
@@ -1266,6 +1267,8 @@ try {
       client,
       channelName: CHANNEL_NAME,
       getChatPerms,
+      getSettings: () => loadSettings(),
+      getRobloxPresenceName: () => String(EXTERNAL_STATUS?.roblox?.game || "").trim(),
       webhookClient,
       discordMessenger,
       discordChannelId: DISCORD_ANNOUNCE_CHANNEL_ID,

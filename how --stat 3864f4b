@@ -1,0 +1,15 @@
+[33mcommit 3864f4bf67cd054b63b797ba9aeb7585ede95fb2[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author: Skyler <skylerspear08@icloud.com>
+Date:   Mon Feb 16 02:50:28 2026 -0500
+
+    Admin auth gating, OAuth callback fixes, quotes UI/topbar updates
+
+ bot/api/spotify/index.js       |   3 [32m+[m[31m-[m
+ bot/api/spotify/search.js      |  32 [32m++[m[31m-[m
+ bot/app.js                     | 122 [32m++++++++++[m[31m--[m
+ bot/modules/alerts.js          |  15 [32m+[m[31m-[m
+ bot/modules/gameping.js        |   2 [32m+[m[31m-[m
+ bot/modules/spotifyCommands.js |  13 [32m+[m[31m-[m
+ bot/modules/twitchPubsub.js    | 427 [32m++++++++++++++++++++++++[m[31m-----------------[m
+ config/bootstrap.js            |  76 [32m+++++++[m[31m-[m
+ 8 files changed, 474 insertions(+), 216 deletions(-)

@@ -4197,10 +4197,15 @@ const webServer = http.createServer(async (req, res) => {
             isMod = await isUserModerator({
               broadcasterId: TWITCH_CHANNEL_ID,
               userId: String(user.userId),
-              preferredRole: "streamer",
+              preferredRole: "auto",
             });
           }
-        } catch {}
+        } catch (e) {
+          console.warn(
+            "[WEB][ADMIN] mod check failed during login:",
+            String(e?.message || e)
+          );
+        }
 
         const session = { userId: user.userId, login: user.login, mode: "twitch", isMod };
         if (!isAdminAllowedSession(session)) {

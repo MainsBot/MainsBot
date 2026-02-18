@@ -11,14 +11,6 @@ export function isAlertsModuleEnabled() {
   return true; // default on (backward compatible)
 }
 
-function parseGiftCount(...candidates) {
-  for (const value of candidates) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n > 0) return Math.floor(n);
-  }
-  return 1;
-}
-
 function getDonationAmount(d) {
   const raw = d?.raw && typeof d.raw === "object" ? d.raw : null;
 
@@ -212,64 +204,11 @@ export function registerAlertsModule({
     return toggleFiltersTemporarily(channel, ms, "[BIG BIT DROP DETECTED]");
   }
 
-  async function setSubGiftMode(channel, ms) {
-    return toggleFiltersTemporarily(channel, ms, "[LARGE AMOUNT OF SUB GIFTS DETECTED]");
-  }
-
   async function spamBits(channel, count, msg, delayMs = 0) {
     if (delayMs) await sleep(delayMs);
     for (let i = 0; i < count; i++) {
       client.say(channel, msg);
     }
-  }
-
-  async function spamSubgift(channel, count, msg, delayMs = 0) {
-    if (delayMs) await sleep(delayMs);
-    for (let i = 0; i < count; i++) {
-      client.say(channel, msg);
-    }
-  }
-
-  function getSubgiftHypePlan(giftCountInput) {
-    const giftCount = Math.max(1, parseGiftCount(giftCountInput));
-
-    let count = 3;
-    let disableForMs = 0;
-
-    if (giftCount >= 40) {
-      count = 40;
-      disableForMs = 60_000;
-    } else if (giftCount >= 20) {
-      count = 25;
-      disableForMs = 60_000;
-    } else if (giftCount >= 10) {
-      count = 15;
-      disableForMs = 60_000;
-    } else if (giftCount >= 5) {
-      count = 8;
-    }
-
-    return { giftCount, count, disableForMs };
-  }
-
-  async function runSubgiftHype(channel, giftCountInput, sourceTag) {
-    const s = loadSettings();
-    if (isKs(s)) return;
-
-    const { giftCount, count, disableForMs } = getSubgiftHypePlan(giftCountInput);
-    const msgPool = ["tibb12Subhype tibb12Subhype tibb12Subhype"];
-    const randomMsg = msgPool[Math.floor(Math.random() * msgPool.length)];
-
-    await sleep(1500);
-
-    if (disableForMs) {
-      setSubGiftMode(channel, disableForMs).catch(() => {});
-    }
-
-    await spamSubgift(channel, count, randomMsg, 0);
-    logger?.log?.(
-      `[SUBGIFT HYPE] source=${sourceTag} giftCount=${giftCount} spamCount=${count} disableMs=${disableForMs}`
-    );
   }
 
   const EMOTES = ["PogChamp", "Kappa", "SeemsGood"];
@@ -293,44 +232,6 @@ export function registerAlertsModule({
         logger?.warn?.("[helix] announcement failed:", String(e?.message || e));
         client.say(CHANNEL_NAME, text);
       });
-    },
-
-    subgift: async (channel, username, streakMonths, recipient, methods, userstate) => {
-      const giftCount = parseGiftCount(
-        userstate?.["msg-param-mass-gift-count"],
-        userstate?.["msg-param-sender-count"],
-        1
-      );
-      await runSubgiftHype(channel, giftCount, "subgift");
-    },
-
-    anonsubgift: async (channel, streakMonths, recipient, methods, userstate) => {
-      const giftCount = parseGiftCount(
-        userstate?.["msg-param-mass-gift-count"],
-        userstate?.["msg-param-sender-count"],
-        1
-      );
-      await runSubgiftHype(channel, giftCount, "anonsubgift");
-    },
-
-    submysterygift: async (channel, username, numbOfSubs, methods, userstate) => {
-      const giftCount = parseGiftCount(
-        numbOfSubs,
-        userstate?.["msg-param-mass-gift-count"],
-        userstate?.["msg-param-sender-count"],
-        1
-      );
-      await runSubgiftHype(channel, giftCount, "submysterygift");
-    },
-
-    anonsubmysterygift: async (channel, numbOfSubs, methods, userstate) => {
-      const giftCount = parseGiftCount(
-        numbOfSubs,
-        userstate?.["msg-param-mass-gift-count"],
-        userstate?.["msg-param-sender-count"],
-        1
-      );
-      await runSubgiftHype(channel, giftCount, "anonsubmysterygift");
     },
 
     resub: async (channel, username) => {
@@ -424,10 +325,6 @@ export function registerAlertsModule({
 
   client.on("subscription", handlers.subscription);
   client.on("giftpaidupgrade", handlers.giftpaidupgrade);
-  client.on("subgift", handlers.subgift);
-  client.on("anonsubgift", handlers.anonsubgift);
-  client.on("submysterygift", handlers.submysterygift);
-  client.on("anonsubmysterygift", handlers.anonsubmysterygift);
   client.on("resub", handlers.resub);
   client.on("raided", handlers.raided);
   client.on("clearchat", handlers.clearchat);
@@ -563,10 +460,6 @@ export function registerAlertsModule({
     try {
       client.removeListener("subscription", handlers.subscription);
       client.removeListener("giftpaidupgrade", handlers.giftpaidupgrade);
-      client.removeListener("subgift", handlers.subgift);
-      client.removeListener("anonsubgift", handlers.anonsubgift);
-      client.removeListener("submysterygift", handlers.submysterygift);
-      client.removeListener("anonsubmysterygift", handlers.anonsubmysterygift);
       client.removeListener("resub", handlers.resub);
       client.removeListener("raided", handlers.raided);
       client.removeListener("clearchat", handlers.clearchat);
@@ -580,4 +473,3 @@ export function registerAlertsModule({
 
   return { stop, streamlabsSocket };
 }
-

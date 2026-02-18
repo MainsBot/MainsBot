@@ -8,7 +8,7 @@ function flagFromValue(value) {
 export function isGamepingModuleEnabled() {
   const raw = String(process.env.MODULE_GAMEPING ?? "").trim();
   if (raw) return flagFromValue(raw);
-  return true; // default on (backward compatible)
+  return true;
 }
 
 function normalizeLogin(value) {
@@ -31,6 +31,8 @@ export function registerGamepingModule({
   client,
   channelName,
   getChatPerms,
+  getSettings,
+  getRobloxPresenceName,
   webhookClient,
   discordMessenger,
   discordChannelId = "",
@@ -153,6 +155,28 @@ export function registerGamepingModule({
     return mentions.join(" ");
   }
 
+  function getActivePrivateServerLink() {
+    if (typeof getSettings !== "function") return "";
+    try {
+      const s = getSettings() || {};
+      const mode = String(s.currentMode || "").trim().toLowerCase();
+      const link = String(s.currentLink || "").trim();
+      if (mode === "!link.on" && link) return link;
+    } catch {}
+    return "";
+  }
+
+  function getPresenceLabel(pingCfg) {
+    try {
+      const fromPresence =
+        typeof getRobloxPresenceName === "function"
+          ? String(getRobloxPresenceName() || "").trim()
+          : "";
+      if (fromPresence) return fromPresence;
+    } catch {}
+    return String(pingCfg?.label || "").trim();
+  }
+
   const handler = async (channel, userstate, message, self) => {
     try {
       if (self) return;
@@ -181,7 +205,12 @@ export function registerGamepingModule({
         return replyRaw(`Please specify a valid ping. Valid pings: ${validList}`);
       }
 
-      let pingKey = parts.slice(1).join(" ").trim().toLowerCase();
+      const pingArgs = parts.slice(1);
+      const scamFlag =
+        pingArgs.length > 0 &&
+        String(pingArgs[pingArgs.length - 1] || "").toLowerCase() === "scam";
+      const normalizedArgs = scamFlag ? pingArgs.slice(0, -1) : pingArgs;
+      let pingKey = normalizedArgs.join(" ").trim().toLowerCase();
       pingKey = PING_ALIASES[pingKey] || pingKey;
 
       const pingCfg = GAME_PINGS[pingKey];
@@ -190,8 +219,10 @@ export function registerGamepingModule({
         return replyRaw(`Invalid ping "${pingKey}". Valid pings: ${validList}`);
       }
 
-      const scamFlag = parts.some((p) => String(p).toLowerCase() === "scam");
       const roleMention = buildGamePingMentions(pingKey, pingCfg);
+      const presenceLabel = getPresenceLabel(pingCfg) || pingCfg.label;
+      const activePrivateServerLink = getActivePrivateServerLink();
+      const gameLine = `NEW GAME: ${presenceLabel}${scamFlag ? " (was scammed for)" : ""}`;
 
       const streamUrl = `https://twitch.tv/${CHANNEL_NAME}`;
       const linkEmbed = new EmbedBuilder()
@@ -204,18 +235,18 @@ export function registerGamepingModule({
 
       const previewImg = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${CHANNEL_NAME.toLowerCase()}-1280x720.jpg`;
       linkEmbed.setImage(previewImg);
+      if (activePrivateServerLink) {
+        linkEmbed.addFields([
+          { name: "Join", value: `[Private Server Link](${activePrivateServerLink})` },
+        ]);
+      }
 
       if (discordMessenger && resolvedDiscordChannelId) {
         await discordMessenger.send(resolvedDiscordChannelId, {
-          content: [
-            roleMention,
-            `🎮 GAME PING: ${pingCfg.label}${scamFlag ? " [GAME WAS SCAMMED FOR]" : ""}`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          content: [roleMention, `🎮 ${gameLine}`].filter(Boolean).join("\n"),
           embeds: [linkEmbed],
         });
-        return replyRaw(`Successfully pinged for ${pingCfg.label}.`);
+        return replyRaw(`Successfully pinged for ${presenceLabel}.`);
       }
 
       if (!webhookClient) {
@@ -223,12 +254,7 @@ export function registerGamepingModule({
       }
 
       await webhookClient.send({
-        content: [
-          roleMention,
-          `🎮 GAME PING: ${pingCfg.label}${scamFlag ? " [GAME WAS SCAMMED FOR]" : ""}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
+        content: [roleMention, `🎮 ${gameLine}`].filter(Boolean).join("\n"),
         username: "MainsBot",
       });
 
@@ -237,7 +263,7 @@ export function registerGamepingModule({
         username: "MainsBot",
       });
 
-      return replyRaw(`Ping sent (${pingCfg.label})`);
+      return replyRaw(`Ping sent (${presenceLabel})`);
     } catch (err) {
       logger?.error?.("[gameping] error:", err);
       try {

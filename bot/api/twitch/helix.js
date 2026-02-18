@@ -1794,9 +1794,7 @@ export const getLatestPredictionData = async () => {
   return(await r.json())
 };
 
-const PAJBOT_DATABASE_URL = String(
-  process.env.PAJBOT_DATABASE_URL || "postgres://pajbot@localhost:5432/pajbot"
-).trim();
+const PAJBOT_DATABASE_URL = "postgresql+psycopg2:///pajbot?options=-c%%20search_path%%3Dpajbot1_tibb12"
 
 function normalizePgIdent(value) {
   return String(value || "")
