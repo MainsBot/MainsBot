@@ -31,6 +31,13 @@ function safeJsonParse(text, fallback = null) {
   }
 }
 
+function normalizeEventType(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[-.\s]+/g, "_");
+}
+
 export function isPubsubModuleEnabled() {
   const raw = String(process.env.MODULE_PUBSUB ?? "").trim();
   if (raw) return flagFromValue(raw);
@@ -261,9 +268,16 @@ var StartListener = function () {
           : pubMessage && typeof pubMessage === "object"
             ? pubMessage
             : {};
-      const type = String(messageData?.type || "");
+      const rawType =
+        String(
+          messageData?.type ||
+            messageData?.event?.type ||
+            messageData?.data?.event?.type ||
+            ""
+        ).trim();
+      const type = normalizeEventType(rawType);
 
-      if (type == "stream-up") {
+      if (type === "STREAM_UP") {
         // TO DO = first person to go to stream gets free channel points
         await TWITCH_FUNCTIONS.setFollowersOnlyMode(false).catch((e) => {
           console.warn(
@@ -272,7 +286,7 @@ var StartListener = function () {
           );
         });
         liveUpHandler();
-      } else if (type == "stream-down") {
+      } else if (type === "STREAM_DOWN") {
         await TWITCH_FUNCTIONS.setFollowersOnlyMode(true).catch((e) => {
           console.warn(
             "[helix] failed to enable followers-only (stream-down):",
@@ -286,7 +300,7 @@ var StartListener = function () {
           );
         });
         liveDownHandler();
-      } else if (type == "viewcount") {
+      } else if (type === "VIEWCOUNT") {
         const streamData = STREAMS?.[streamNumber];
         if (streamData && typeof streamData === "object") {
           const viewers = Number(messageData?.viewers);
@@ -307,12 +321,12 @@ var StartListener = function () {
           }
           fs.writeFileSync(STREAMS_PATH, JSON.stringify(STREAMS));
         }
-      } else if (type == "AD_POLL_CREATE") {
+      } else if (type === "AD_POLL_CREATE") {
         TWITCH_FUNCTIONS.onMultiplayerAdStart();
-      } else if (type == "AD_POLL_COMPLETE") {
+      } else if (type === "AD_POLL_COMPLETE") {
         const adData = messageData?.data?.poll || null;
         TWITCH_FUNCTIONS.onMultiplayerAdEnd(adData);
-      } else if (type == "moderation_action") {
+      } else if (type === "MODERATION_ACTION") {
         const followData = messageData?.data || {};
         const followChange = followData.moderation_action;
 
@@ -363,16 +377,20 @@ var StartListener = function () {
           });
         }
       } else if (
-        type == "POLL_COMPLETE" ||
-        type == "POLL_TERMINATE" ||
-        type == "POLL_ARCHIVE"
+        type === "POLL_COMPLETE" ||
+        type === "POLL_TERMINATE" ||
+        type === "POLL_ARCHIVE"
       ) {
+        logger.log?.(
+          `[pubsub][poll] terminal event received: ${rawType || "(unknown)"} topic=${pubTopic}`
+        );
         // if (SETTINGS.ks == true) return
         const r = await TWITCH_FUNCTIONS.getLatestPollData();
 
-        if (r == "error") return;
+        if (r == "error" || !r || typeof r !== "object") return;
+        if (!Array.isArray(r.choices) || !Array.isArray(r.userNodes)) return;
 
-        if (type == "POLL_ARCHIVE") {
+        if (type === "POLL_ARCHIVE") {
           const nodes = r.userNodes;
 
           for (let i = 0; i < nodes.length; i++) {
@@ -419,7 +437,7 @@ var StartListener = function () {
               );
             }
           }
-        } else if (type == "POLL_TERMINATE" || type == "POLL_COMPLETE") {
+        } else if (type === "POLL_TERMINATE" || type === "POLL_COMPLETE") {
                     const nodes = r.userNodes;
 
                     for (let i = 0; i < nodes.length; i++) {
@@ -702,8 +720,8 @@ var StartListener = function () {
           }
         }
       } else if (pubTopic == `predictions-channel-v1.${CHANNEL_ID}`) {
-        if (type == "event-created") {
-        } else if (type == "event-updated") {
+        if (type === "EVENT_CREATED") {
+        } else if (type === "EVENT_UPDATED") {
           const event = messageData?.data?.event || {};
 
           const status = event.status;

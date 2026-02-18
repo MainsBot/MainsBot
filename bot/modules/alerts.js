@@ -211,7 +211,7 @@ export function registerAlertsModule({
     }
   }
 
-  const EMOTES = ["PogChamp", "Kappa", "SeemsGood"];
+  const EMOTES = ["tibb12Mrkrabs", "tibb12Bucc", "tibb12Love"];
   const randomEmote = () => EMOTES[Math.floor(Math.random() * EMOTES.length)];
 
   const handlers = {
