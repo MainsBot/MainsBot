@@ -79,6 +79,13 @@ export function startTwitchPubsub({
 
   const WAIT_UNTIL_FOC_OFF = Math.max(0, Number(process.env.WAIT_UNTIL_FOC_OFF) || 0);
   const WAIT_UNTIL_FOC_OFF_RAID = Math.max(0, Number(process.env.WAIT_UNTIL_FOC_OFF_RAID) || 0);
+  const POLL_FALLBACK_ENABLED = flagFromValue(
+    process.env.POLL_FALLBACK_ENABLED ?? "1"
+  );
+  const POLL_FALLBACK_INTERVAL_MS = Math.max(
+    10_000,
+    Number(process.env.POLL_FALLBACK_INTERVAL_MS) || 30_000
+  );
 
   const IS_BOT = /^(1|true|yes|on)$/i.test(String(process.env.IS_BOT ?? "").trim());
   const bot = IS_BOT ? "[??] " : "";
@@ -95,6 +102,8 @@ const myname = CHANNEL_NAME;
 const pendingListens = new Map();
 let reconnectTimer = null;
 let reconnectAttempt = 0;
+let pollFallbackTimer = null;
+let lastProcessedPollSignature = "";
 
 function readJsonFile(filePath, fallback) {
   try {
@@ -109,6 +118,209 @@ function refreshRuntimeState() {
   SETTINGS = readJsonFile(SETTINGS_PATH, {});
   STREAMS = readJsonFile(STREAMS_PATH, {});
   streamNumber = Object.keys(STREAMS || {}).length;
+}
+
+function isPollTerminalStatus(value) {
+  const status = normalizeEventType(value);
+  return (
+    status === "POLL_ARCHIVE" ||
+    status === "ARCHIVED" ||
+    status === "POLL_TERMINATE" ||
+    status === "TERMINATED" ||
+    status === "POLL_COMPLETE" ||
+    status === "COMPLETED"
+  );
+}
+
+async function processPollTerminalPayload(pollData, pollType = "", source = "pubsub") {
+  const r = pollData && typeof pollData === "object" ? pollData : null;
+  if (!r) return false;
+  if (!Array.isArray(r.choices) || !Array.isArray(r.userNodes)) return false;
+
+  const type = normalizeEventType(pollType || r.status || "");
+  logger.log?.(
+    `[pubsub][poll] processing terminal poll type=${type || "(unknown)"} source=${source} id=${String(r.id || "unknown")}`
+  );
+
+  if (type === "POLL_ARCHIVE" || type === "ARCHIVED") {
+    const nodes = r.userNodes;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const username = node?.user?.login;
+      const cp = Number(node?.tokens?.communityPoints || 0);
+      if (!username || !Number.isFinite(cp) || cp <= 1000) continue;
+
+      const getSubStatus = await TWITCH_FUNCTIONS.getSubStatus(node?.user?.id).catch(
+        () => null
+      );
+      const tier = Number(getSubStatus?.data?.[0]?.tier ?? 0);
+
+      const standardRate = 5.33333333;
+      const t1Rate = 5.3333333 * 1.2;
+      const t2Rate = 5.3333333 * 1.4;
+      const t3Rate = 5.3333333 * 2;
+
+      let rate = standardRate;
+      let sub = "you dont have a sub";
+      if (tier == 1000) {
+        rate = t1Rate;
+        sub = "you're a tier 1 sub";
+      } else if (tier == 2000) {
+        rate = t2Rate;
+        sub = "you're a tier 2 sub";
+      } else if (tier == 3000) {
+        rate = t3Rate;
+        sub = "you're a tier 3 sub";
+      }
+
+      const yearsFromPoints = cp / rate / (60 * 24 * 365);
+      const cpToHours = ROBLOX_FUNCTIONS.timeToAgo(yearsFromPoints);
+      client.say(
+        CHANNEL_NAME,
+        `@${username}, lost ${cp} channel points, since ${sub} thats ${cpToHours.timeString} of farming RIPBOZO`
+      );
+    }
+    return true;
+  }
+
+  if (
+    type !== "POLL_TERMINATE" &&
+    type !== "TERMINATED" &&
+    type !== "POLL_COMPLETE" &&
+    type !== "COMPLETED"
+  ) {
+    return false;
+  }
+
+  const choices = r.choices;
+  const userNodes = r.userNodes;
+
+  let winnerId = "";
+  let winnerVotes = 0;
+  for (const choice of choices) {
+    const totalVotes = Number(choice?.votes?.total || 0);
+    if (totalVotes > winnerVotes) {
+      winnerVotes = totalVotes;
+      winnerId = String(choice?.id || "");
+    }
+  }
+  if (!winnerId) return false;
+
+  const choiceTitleById = {};
+  for (const choice of choices) {
+    const cid = String(choice?.id || "");
+    if (!cid || cid === winnerId) continue;
+    choiceTitleById[cid] = String(choice?.title || cid);
+  }
+
+  const userLosses = {};
+  const packs = {};
+  for (const choiceId of Object.keys(choiceTitleById)) {
+    packs[choiceId] = {};
+  }
+
+  for (const node of userNodes) {
+    const userId = String(node?.user?.id || "");
+    if (!userId) continue;
+    const username = String(node?.user?.login || "");
+    const displayName = String(node?.user?.displayName || "");
+
+    const choiceTotals = {};
+    for (const userChoice of Array.isArray(node?.choices) ? node.choices : []) {
+      const choiceId = String(userChoice?.pollChoice?.id || "");
+      if (!choiceId) continue;
+      const amount = Number(userChoice?.tokens?.communityPoints ?? 0);
+      choiceTotals[choiceId] = Number(choiceTotals[choiceId] || 0) + amount;
+    }
+
+    const allLosses = {};
+    let winnerLoss = 0;
+    for (const [choiceId, amount] of Object.entries(choiceTotals)) {
+      if (choiceId === winnerId) {
+        winnerLoss = Number(amount || 0);
+      } else {
+        allLosses[choiceId] = Number(amount || 0);
+      }
+    }
+
+    userLosses[userId] = {
+      username,
+      displayName,
+      winnerLoss,
+      allLosses,
+    };
+
+    for (const [choiceId, loss] of Object.entries(allLosses)) {
+      if (!packs[choiceId]) continue;
+      packs[choiceId][userId] = Number(loss || 0);
+    }
+  }
+
+  const messages = {};
+  for (const [packId, members] of Object.entries(packs)) {
+    let packLeader = "";
+    let highestLoss = 0;
+    let totalPackLoss = 0;
+
+    for (const [memberId, loss] of Object.entries(members)) {
+      const amount = Number(loss || 0);
+      totalPackLoss += amount;
+      if (amount > highestLoss) {
+        highestLoss = amount;
+        packLeader = memberId;
+      }
+    }
+    if (!packLeader) continue;
+
+    const leaderData = userLosses[packLeader];
+    if (!leaderData) continue;
+    const winnerLoss = Number(leaderData.winnerLoss || 0);
+
+    if (totalPackLoss > 1000 && highestLoss > 500 && totalPackLoss > winnerLoss * 2) {
+      messages[packId] = `RIPBOZO ${choiceTitleById[packId]} pack -${totalPackLoss} channel points, pack leader ${leaderData.username} lost ${highestLoss} channel points.`;
+    }
+  }
+
+  for (const msg of Object.values(messages)) {
+    client.say(CHANNEL_NAME, String(msg));
+  }
+  return true;
+}
+
+async function processLatestTerminalPoll(triggerType = "", source = "pubsub") {
+  const r = await TWITCH_FUNCTIONS.getLatestPollData().catch((e) => {
+    logger.warn?.(`[pubsub][poll] getLatestPollData failed (${source}): ${String(e?.message || e)}`);
+    return null;
+  });
+  if (!r || r === "error" || typeof r !== "object") {
+    logger.warn?.(`[pubsub][poll] no latest poll data (${source})`);
+    return false;
+  }
+
+  const resolvedType = normalizeEventType(triggerType || r.status || "");
+  if (!isPollTerminalStatus(resolvedType)) return false;
+
+  const pollId = String(r.id || "latest");
+  const signature = `${pollId}:${resolvedType}`;
+  if (signature === lastProcessedPollSignature) {
+    return false;
+  }
+
+  const ok = await processPollTerminalPayload(r, resolvedType, source);
+  if (ok) lastProcessedPollSignature = signature;
+  return ok;
+}
+
+function startPollFallbackMonitor() {
+  if (!POLL_FALLBACK_ENABLED || pollFallbackTimer) return;
+  logger.log?.(
+    `[pubsub][poll] fallback monitor enabled (${POLL_FALLBACK_INTERVAL_MS}ms interval)`
+  );
+  pollFallbackTimer = setInterval(() => {
+    if (stopped) return;
+    void processLatestTerminalPoll("", "fallback_timer");
+  }, POLL_FALLBACK_INTERVAL_MS);
+  if (typeof pollFallbackTimer?.unref === "function") pollFallbackTimer.unref();
 }
 
 function scheduleReconnect(reason = "") {
@@ -225,6 +437,7 @@ var StartListener = function () {
       logger.log("[pubsub] connected");
       ping.start();
       runAuth();
+      startPollFallbackMonitor();
     })
     .on("error", function (err) {
       logger.warn("[pubsub] websocket error:", String(err?.message || err));
@@ -394,341 +607,7 @@ var StartListener = function () {
         logger.log?.(
           `[pubsub][poll] terminal event received: ${rawType || "(unknown)"} topic=${pubTopic}`
         );
-        // if (SETTINGS.ks == true) return
-        const r = await TWITCH_FUNCTIONS.getLatestPollData();
-
-        if (r == "error" || !r || typeof r !== "object") return;
-        if (!Array.isArray(r.choices) || !Array.isArray(r.userNodes)) return;
-
-        if (type === "POLL_ARCHIVE") {
-          const nodes = r.userNodes;
-
-          for (let i = 0; i < nodes.length; i++) {
-            const node = nodes[i];
-            const username = node.user.login;
-            const cp = node.tokens.communityPoints;
-
-            const getSubStatus = await TWITCH_FUNCTIONS.getSubStatus(node.user.id).catch(
-              () => null
-            );
-            const tier = Number(getSubStatus?.data?.[0]?.tier ?? 0);
-
-            const standardRate = 5.33333333;
-
-            const t1Rate = 5.3333333 * 1.2;
-            const t2Rate = 5.3333333 * 1.4;
-            const t3Rate = 5.3333333 * 2;
-
-            let rate;
-            let sub;
-
-            if (tier == 1000) {
-              rate = t1Rate;
-              sub = "you're a tier 1 sub";
-            } else if (tier == 2000) {
-              rate = t2Rate;
-              sub = "you're a tier 2 sub";
-            } else if (tier == 3000) {
-              rate = t3Rate;
-              sub = "you're a tier 3 sub";
-            } else {
-              rate = standardRate;
-              sub = "you dont have a sub";
-            }
-
-            const test = cp / rate / (60 * 24 * 365);
-
-            const cpToHours = ROBLOX_FUNCTIONS.timeToAgo(test);
-
-            if (cp > 1000) {
-              client.say(
-                CHANNEL_NAME,
-                `@${username}, lost ${cp} channel points, since ${sub} thats ${cpToHours.timeString} of farming RIPBOZO`
-              );
-            }
-          }
-        } else if (type === "POLL_TERMINATE" || type === "POLL_COMPLETE") {
-                    const nodes = r.userNodes;
-
-                    for (let i = 0; i < nodes.length; i++) {
-                      const node = nodes[i];
-                      const username = node.user.login;
-                      const cp = node.tokens.communityPoints;
-
-                      // console.log(JSON.stringify(r, null, 1));
-
-                      let winning_choice_id;
-                      let winning_choice_votes = 0;
-
-                      r.choices.forEach(function (choice) {
-                        if (choice.votes.total > winning_choice_votes) {
-                          winning_choice_votes = choice.votes.total;
-                          winning_choice_id = choice.id;
-                        }
-                      });
-
-                      //
-
-                      nodes.forEach(function (node) {
-                        var packs = [];
-                        node.choices.forEach(function (choice) {
-                          if (choice.id != winning_choice_id) {
-                            r.choices.forEach(function (mainChoice) {
-                              if (mainChoice.id == choice.id) {
-                                packs.push(mainChoice.title);
-                              }
-                            });
-                          }
-                        });
-                      });
-
-                      nodes.forEach(function (node) {
-                        var choiceArray = {};
-
-                        const user = node.user.login;
-
-                        node.choices.forEach(function (choice) {
-                          if (!choiceArray[choice.pollChoice.id]) {
-                            choiceArray[choice.pollChoice.id] =
-                              choice.tokens.communityPoints;
-                          } else {
-                            choiceArray[choice.pollChoice.id] =
-                              choiceArray[choice.pollChoice.id] +
-                              choice.tokens.communityPoints;
-                          }
-                        });
-
-                        let mostVotedFor;
-                        let mostedVoted = 0;
-                        let mostVotedForName;
-                        let total = 0;
-
-                        for (const key in choiceArray) {
-                          const amount = choiceArray[key];
-                          total += amount;
-                          if (amount > mostedVoted) {
-                            mostVotedFor = key;
-                          }
-                        }
-
-                        r.choices.forEach(function (mainChoice) {
-                          console.log(mostVotedFor);
-                          if (mainChoice.id == mostVotedFor) {
-                            mostVotedForName = mainChoice.title;
-                          }
-                        });
-
-                        console.log(
-                          `${user} spent in total ${total} channel points, spending the most on ${mostVotedForName} which they spent ${choiceArray[mostVotedFor]} channel points on.`
-                        );
-                      });
-                    }
-
-          var polldata = r;
-          var choices = polldata.choices;
-          var userNodes = polldata.userNodes;
-
-          const determineWinner = async () => {
-            let winner_id = "";
-            let winner_title = "";
-            let winner_votes = 0;
-
-            choices.forEach(function (choice, index) {
-              const totalVotes = choice.votes.total;
-              if (totalVotes > winner_votes) {
-                winner_id = choice.id;
-                winner_title = choice.title;
-                winner_votes = totalVotes;
-              }
-            });
-
-            return {
-              winner_id: winner_id,
-              winner_title: winner_title,
-              winner_votes: winner_votes,
-            };
-          };
-
-            const collateUserData = async () => {
-              const userData = {};
-
-              userNodes.forEach(function (node) {
-                const userChoices = Array.isArray(node?.choices) ? node.choices : [];
-
-                const userId = node?.user?.id;
-                if (!userId) return;
-                const username = node?.user?.login || "";
-                const displayName = node?.user?.displayName || "";
-
-                userData[userId] = {
-                  username: username,
-                  displayName: displayName,
-                };
-
-              userChoices.forEach(function (userChoice) {
-                const choiceId = userChoice?.pollChoice?.id;
-                if (!choiceId) return;
-                const amount = Number(userChoice?.tokens?.communityPoints ?? 0);
-                userData[userId][choiceId] =
-                  Number(userData[userId][choiceId] ?? 0) + amount;
-              });
-            });
-
-            return userData;
-          };
-
-          const collateUserLosses = async () => {
-            const userData = await collateUserData();
-            const winnerData = await determineWinner();
-
-            const userLosses = {};
-
-            for (const userId in userData) {
-              userLosses[userId] = {
-                biggestLoss: 0,
-                biggestLossId: "",
-                allLosses: {},
-                votedForWinner: false,
-                winnerLoss: 0,
-                winnerId: winnerData.winner_id,
-                username: userData[userId].username,
-                displayName: userData[userId].displayName,
-              };
-
-              for (const choice in userData[userId]) {
-                if (choice === "username" || choice === "displayName") continue;
-                if (choice != winnerData.winner_id) {
-                  userLosses[userId]["allLosses"][choice] = userData[userId][choice];
-                } else {
-                  userLosses[userId]["votedForWinner"] = true;
-                  userLosses[userId]["winnerLoss"] =
-                    Number(userData[userId][winnerData.winner_id] ?? 0);
-                }
-              }
-
-              for (const user in userLosses) {
-                for (const loss in userLosses[user]["allLosses"]) {
-                  const biggestLoss = userLosses[user]["biggestLoss"];
-
-                  if (userLosses[user]["allLosses"][loss] > biggestLoss) {
-                    userLosses[user]["biggestLoss"] =
-                      userLosses[user]["allLosses"][loss];
-                    userLosses[user]["biggestLossId"] = loss;
-                  }
-                }
-              }
-            }
-            return userLosses;
-          };
-
-          const choiceIdAndTitle = async () => {
-            const choiceArray = {};
-            const winnerData = await determineWinner();
-
-            choices.forEach(function (choice) {
-              if (choice.id != winnerData.winner_id) {
-                choiceArray[choice.id] = choice.title;
-              }
-            });
-            return choiceArray;
-          };
-
-          const processUserLosses = async () => {
-            const userLosses = await collateUserLosses();
-            const choiceArray = await choiceIdAndTitle();
-            const userData2 = await collateUserData();
-
-            const packs = {};
-
-            const packLeaders = {};
-
-            const messages = {};
-
-            for (const choiceId in choiceArray) {
-              packs[choiceId] = {};
-              packLeaders[choiceId] = {};
-            }
-
-            for (const userId in userLosses) {
-              const user = userLosses[userId];
-
-              for (const loss in user.allLosses) {
-                if (!packs[loss]) continue;
-                packs[loss][userId] = user.allLosses[loss];
-              }
-            }
-
-            for (const pack in packs) {
-              let highestLoss = 0;
-              let packLeader;
-              let totalPackLoss = 0;
-
-              for (const packMember in packs[pack]) {
-                totalPackLoss += packs[pack][packMember];
-
-                if (packs[pack][packMember] > highestLoss) {
-                  highestLoss = packs[pack][packMember];
-                  packLeader = packMember;
-                }
-              }
-
-              packLeaders[pack] = {
-                packLeader: packLeader,
-                loss: highestLoss,
-                totalPackLoss: totalPackLoss,
-              };
-            }
-            // console.log(userLosses)
-            // console.log(packs)
-            // console.log(packLeaders)
-
-            for (const pack in packLeaders) {
-              if (packLeaders[pack].packLeader != undefined) {
-                const leader = packLeaders[pack].packLeader;
-                const loss = packLeaders[pack].loss;
-                const totalLoss = packLeaders[pack].totalPackLoss;
-
-                const username = userData2[leader].username;
-                let totalLoss2 = 0;
-                let tempLoss2 = 0;
-
-                for (const userLoss in userLosses) {
-                  for (const loss2 in userLosses[userLoss].allLosses) {
-                    if (loss2 == pack) {
-                      tempLoss2 += userLosses[userLoss].allLosses[loss2];
-                    }
-                  }
-                }
-
-                if (
-                  totalLoss > 1000 &&
-                  loss > 500 &&
-                  tempLoss2 > userLosses[leader]["winnerLoss"] * 2
-                ) {
-                  for (const userLoss in userLosses) {
-                    for (const loss2 in userLosses[userLoss].allLosses) {
-                      if (loss2 == pack) {
-                        totalLoss2 += userLosses[userLoss].allLosses[loss2];
-                      }
-                    }
-                  }
-
-                  messages[
-                    pack
-                  ] = `RIPBOZO ${choiceArray[pack]} pack -${totalLoss2} channel points, pack leader ${userLosses[leader].username} lost ${userLosses[leader]["allLosses"][pack]} channel points.`;
-                }
-              }
-            }
-
-            return messages;
-          };
-
-          const processedData = await processUserLosses();
-
-          for (const message in processedData) {
-            client.say(CHANNEL_NAME, `${processedData[message]}`);
-          }
-        }
+        void processLatestTerminalPoll(type, "pubsub_event");
       } else if (pubTopic == `predictions-channel-v1.${CHANNEL_ID}`) {
         if (type === "EVENT_CREATED") {
         } else if (type === "EVENT_UPDATED") {
@@ -983,6 +862,10 @@ StartListener();
     stop() {
       stopped = true;
       ping.stop();
+      if (pollFallbackTimer) {
+        clearInterval(pollFallbackTimer);
+        pollFallbackTimer = null;
+      }
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;

@@ -625,39 +625,48 @@ function readSettingsFromDisk() {
 }
 
 function readWordsFromDisk() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(WORDS_PATH, "utf8"));
-    const words =
-      parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    if (Object.keys(words).length > 0) return words;
-  } catch {}
+  const candidates = [
+    WORDS_PATH,
+    path.join(path.dirname(WORDS_PATH), "WORDS.json"),
+    path.join(path.dirname(WORDS_PATH), "words.json"),
+    DEFAULT_GLOBAL_WORDS_PATH,
+    LEGACY_ARCHIVE_WORDS_PATH,
+  ];
+  const seen = new Set();
 
-  try {
-    if (fs.existsSync(DEFAULT_GLOBAL_WORDS_PATH)) {
-      const fallbackParsed = JSON.parse(fs.readFileSync(DEFAULT_GLOBAL_WORDS_PATH, "utf8"));
-      if (fallbackParsed && typeof fallbackParsed === "object" && !Array.isArray(fallbackParsed)) {
-        return fallbackParsed;
+  for (const candidate of candidates) {
+    const candidatePath = path.resolve(String(candidate || "").trim());
+    if (!candidatePath || seen.has(candidatePath)) continue;
+    seen.add(candidatePath);
+    if (!fs.existsSync(candidatePath)) continue;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+      const words =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      if (Object.keys(words).length > 0) {
+        return { words, sourcePath: candidatePath };
       }
-    }
-  } catch {}
-
-  try {
-    if (fs.existsSync(LEGACY_ARCHIVE_WORDS_PATH)) {
-      const fallbackParsed = JSON.parse(fs.readFileSync(LEGACY_ARCHIVE_WORDS_PATH, "utf8"));
-      if (fallbackParsed && typeof fallbackParsed === "object" && !Array.isArray(fallbackParsed)) {
-        return fallbackParsed;
-      }
-    }
-  } catch {
-    return {};
+    } catch {}
   }
-  return {};
+
+  return { words: {}, sourcePath: WORDS_PATH };
 }
 
 let SETTINGS = readSettingsFromDisk();
 let STREAMS = JSON.parse(fs.readFileSync(STREAMS_PATH));
-let WORDS = readWordsFromDisk();
-console.log(`[KEYWORDS] loaded ${Object.keys(WORDS || {}).length} categories from ${WORDS_PATH}`);
+const wordsLoad = readWordsFromDisk();
+let WORDS = wordsLoad.words;
+console.log(`[KEYWORDS] loaded ${Object.keys(WORDS || {}).length} categories from ${wordsLoad.sourcePath}`);
+try {
+  const missingHandlers = Object.keys(WORDS || {}).filter(
+    (key) => typeof RESPONSES?.responses?.[key] !== "function"
+  );
+  if (missingHandlers.length > 0) {
+    console.warn(
+      `[KEYWORDS] missing response handlers for: ${missingHandlers.join(", ")}`
+    );
+  }
+} catch {}
 try {
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2), "utf8");
 } catch {}
