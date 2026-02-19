@@ -587,7 +587,7 @@ export function initDiscord({ logger = console } = {}) {
                 ? 0x4aa3ff
                 : 0xffbd59;
         const authorName = safeTrimLine(who, 120) || "unknown";
-        const authorUrl = login ? `https://twitch.tv/${encodeURIComponent(login)}` : undefined;
+        const authorUrl = login ? `https://logs.mrcheeezz.com?channel=${channelName}&username=${encodeURIComponent(login)}` : undefined;
         const desc = safeTrimLine(message, 1900) || "-";
         const profileImageUrl = await getTwitchProfileImageUrl({
           login,
