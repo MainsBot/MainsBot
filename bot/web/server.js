@@ -184,7 +184,59 @@ export function startWebServer(deps = {}) {
     });
   }
 
+  const MODERATOR_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  let moderatorRefreshTimer = null;
+  let moderatorRefreshInFlight = null;
+
+  async function refreshModeratorAllowlist({ reason = "manual" } = {}) {
+    if (moderatorRefreshInFlight) return moderatorRefreshInFlight;
+
+    moderatorRefreshInFlight = (async () => {
+      if (!TWITCH_CHANNEL_ID) {
+        console.warn(
+          "[WEB][ADMIN] moderator allowlist refresh skipped: CHANNEL_ID is missing."
+        );
+        return [];
+      }
+
+      try {
+        const liveMods = await listChannelModerators({
+          broadcasterId: TWITCH_CHANNEL_ID,
+          preferredRole: "auto",
+          limit: 500,
+        });
+
+        if (Array.isArray(liveMods)) {
+          writeCachedModerators(liveMods);
+          console.log(
+            `[WEB][ADMIN] moderator allowlist refreshed (${liveMods.length} entries, reason=${reason}).`
+          );
+          return liveMods;
+        }
+
+        return [];
+      } catch (e) {
+        console.warn(
+          `[WEB][ADMIN] moderator allowlist refresh failed (reason=${reason}):`,
+          String(e?.message || e)
+        );
+        return [];
+      }
+    })();
+
+    try {
+      return await moderatorRefreshInFlight;
+    } finally {
+      moderatorRefreshInFlight = null;
+    }
+  }
+
   ensureModeratorCacheFile();
+  void refreshModeratorAllowlist({ reason: "startup" });
+  moderatorRefreshTimer = setInterval(() => {
+    void refreshModeratorAllowlist({ reason: "interval_24h" });
+  }, MODERATOR_REFRESH_INTERVAL_MS);
+  moderatorRefreshTimer?.unref?.();
 
   function clearAdminSessionCookieAllVariants(res) {
     try {
@@ -4325,14 +4377,9 @@ const webServer = http.createServer(async (req, res) => {
             if (isMod) modSource = "direct_check";
           }
           if (!isMod && TWITCH_CHANNEL_ID) {
-            const liveMods = await listChannelModerators({
-              broadcasterId: TWITCH_CHANNEL_ID,
-              preferredRole: "auto",
-              limit: 500,
-            }).catch(() => []);
-            if (Array.isArray(liveMods)) {
-              writeCachedModerators(liveMods);
-            }
+            const liveMods = await refreshModeratorAllowlist({
+              reason: "admin_login",
+            });
             if (Array.isArray(liveMods) && liveMods.length > 0) {
               isMod = isInModeratorList(liveMods, user);
               if (isMod) modSource = "live_mod_list";
@@ -4706,6 +4753,12 @@ if (wantSocket && WEB_SOCKET_PATH) {
   return {
     server: webServer,
     stop() {
+      if (moderatorRefreshTimer) {
+        try {
+          clearInterval(moderatorRefreshTimer);
+        } catch {}
+        moderatorRefreshTimer = null;
+      }
       try {
         webServer?.close?.();
       } catch {}
