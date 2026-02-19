@@ -54,6 +54,7 @@ function normalizeReward(row = {}) {
     prompt: String(row?.prompt || "").trim(),
     cost: nint(row?.cost, 1),
     is_enabled: Boolean(row?.is_enabled),
+    is_manageable: row?.is_manageable !== false,
     is_user_input_required: Boolean(row?.is_user_input_required),
     should_redemptions_skip_request_queue: Boolean(row?.should_redemptions_skip_request_queue),
   };
@@ -72,6 +73,7 @@ function App() {
     is_user_input_required: false,
     should_redemptions_skip_request_queue: false,
   });
+  const [onlyManageable, setOnlyManageable] = useState(false);
   const [redeemStatus, setRedeemStatus] = useState("UNFULFILLED");
   const [redemptions, setRedemptions] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -101,7 +103,9 @@ function App() {
   }
 
   async function loadRewards({ keepSelection = true } = {}) {
-    const body = await apiGet("/api/admin/redemptions/rewards?manageable=true");
+    const body = await apiGet(
+      `/api/admin/redemptions/rewards?manageable=${onlyManageable ? "true" : "false"}`
+    );
     const rows = Array.isArray(body?.rewards) ? body.rewards.map(normalizeReward) : [];
     setRewards(rows);
     if (!rows.length) {
@@ -147,6 +151,10 @@ function App() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    void loadRewards({ keepSelection: false });
+  }, [onlyManageable]);
 
   useEffect(() => {
     if (!selectedReward) return;
@@ -195,6 +203,10 @@ function App() {
 
   async function onUpdateReward() {
     if (!selectedRewardId) return;
+    if (selectedReward && selectedReward.is_manageable === false) {
+      setStatus("This reward is not manageable by this Twitch app. Turn on 'Only manageable' or recreate it.");
+      return;
+    }
     setStatus("Saving reward...");
     try {
       await apiPost("/api/admin/redemptions/rewards", {
@@ -220,6 +232,10 @@ function App() {
 
   async function onDeleteReward() {
     if (!selectedRewardId) return;
+    if (selectedReward && selectedReward.is_manageable === false) {
+      setStatus("This reward is not manageable by this Twitch app and cannot be deleted here.");
+      return;
+    }
     if (!window.confirm("Delete this reward?")) return;
     setStatus("Deleting reward...");
     try {
@@ -293,7 +309,21 @@ function App() {
               `)}
             </select>
             <button className="btn btn--sm btn--ghost" onClick=${() => loadRewards()}>Refresh</button>
+            <label className="row" style=${{ gap: "6px" }}>
+              <input
+                type="checkbox"
+                checked=${onlyManageable}
+                onChange=${(e) => setOnlyManageable(Boolean(e.target.checked))}
+              />
+              <span className="muted">Only manageable</span>
+            </label>
           </div>
+
+          ${selectedReward && selectedReward.is_manageable === false
+            ? html`<div className="meta" style=${{ marginTop: "10px", color: "#ffb37b" }}>
+                This reward was created by a different Twitch app and is read-only here.
+              </div>`
+            : null}
 
           <div className="fieldlist" style=${{ marginTop: "10px" }}>
             <div className="field">
@@ -334,7 +364,11 @@ function App() {
           <div className="row" style=${{ marginTop: "10px" }}>
             <button className="btn btn--sm" onClick=${onUpdateReward} disabled=${!selectedRewardId}>Save Reward</button>
             <button className="btn btn--sm btn--ghost" onClick=${onCreateReward}>Create New</button>
-            <button className="btn btn--sm btn--danger" onClick=${onDeleteReward} disabled=${!selectedRewardId}>Delete</button>
+            <button
+              className="btn btn--sm btn--danger"
+              onClick=${onDeleteReward}
+              disabled=${!selectedRewardId || (selectedReward && selectedReward.is_manageable === false)}
+            >Delete</button>
           </div>
         </div>
 

@@ -623,7 +623,7 @@ var StartListener = function () {
           }
         }
       } else if (pubTopic == `community-points-channel-v1.${CHANNEL_ID}`) {
-        if (type == "reward-redeemed") {
+        if (type === "REWARD_REDEEMED") {
           const vipEntry = "42693bf2-9dea-40a5-8a7c-7d088d220d21";
           const timeout = "efa070b5-6d12-4cc6-8ef8-160eded1fdec";
           const subonly = "f799d602-205b-4865-94a3-18b939d4c8ae";
