@@ -106,6 +106,17 @@ function formatMoney(amount, { code, symbol }) {
   }
 }
 
+function normalizeDonationAlertMode(value) {
+  const mode = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (mode === "emote_spam" || mode === "spam" || mode === "emote") {
+    return "emote_spam";
+  }
+  return "message";
+}
+
 export function registerAlertsModule({
   client,
   channelName,
@@ -115,6 +126,7 @@ export function registerAlertsModule({
   getContextKillswitchState,
   modlogUser = "sister_avanti",
   streamlabsSocketToken = process.env.STREAMLABS_SOCKET_TOKEN,
+  donationAlertMode = process.env.STREAMLABS_DONATION_ALERT_MODE,
   logger = console,
 } = {}) {
   if (!client || typeof client.on !== "function") {
@@ -131,6 +143,8 @@ export function registerAlertsModule({
   }
 
   const CHANNEL_NAME = String(channelName || "").trim().replace(/^#/, "");
+  const DONATION_ALERT_MODE = normalizeDonationAlertMode(donationAlertMode);
+  const DONATION_ALERT_EMOTE = "tibb12Bucc";
   const isKs = (settings) =>
     typeof getContextKillswitchState === "function"
       ? Boolean(getContextKillswitchState(settings))
@@ -364,21 +378,7 @@ export function registerAlertsModule({
             amountText,
           });
 
-          let msg;
-          let announce = false;
-          if (amount >= 100) {
-            announce = true;
-            msg = `MEGA DONO FROM @${name.toUpperCase()} JUST DROPPED ${amountText}! THANK YOU!`;
-          } else if (amount >= 50) {
-            announce = true;
-            msg = `BIG ${amountText} DONO FROM @${name.toUpperCase()}! THANK YOU!`;
-          } else if (amount >= 20) {
-            msg = `THANK YOU @${name} FOR THE ${amountText} TIP!`;
-          } else if (amount >= 5) {
-            msg = `W mans @${name} thank you for the ${amountText} tip ${randomEmote()}`;
-          } else {
-            msg = `Thank you @${name} for the ${amountText} tip ${randomEmote()}`;
-          }
+          const msg = `Thank you @${name} for the ${amountText} tip ${randomEmote()}`;
 
           let disableForMs = 0;
           if (amount >= 100) disableForMs = 60_000;
@@ -389,15 +389,7 @@ export function registerAlertsModule({
             setDonationMode(CHANNEL_NAME, disableForMs).catch(() => {});
           }
 
-          if (announce) {
-            await twitchFunctions.sendHelixAnnouncement(msg).catch((e) => {
-              logger?.warn?.(
-                "[helix] donation announcement failed:",
-                String(e?.message || e)
-              );
-              client.say(CHANNEL_NAME, msg);
-            });
-          } else {
+          if (DONATION_ALERT_MODE === "message") {
             client.say(CHANNEL_NAME, msg);
           }
 
@@ -442,16 +434,18 @@ export function registerAlertsModule({
             }
           }
 
-          const bucmsg = "tibb12Bucc tibb12Bucc tibb12Bucc";
+          if (DONATION_ALERT_MODE === "emote_spam") {
+            const spamLine = `${DONATION_ALERT_EMOTE} ${DONATION_ALERT_EMOTE} ${DONATION_ALERT_EMOTE}`;
 
-          let count = 1;
-          if (amount >= 100) count = 25;
-          else if (amount >= 50) count = 10;
-          else if (amount >= 20) count = 5;
-          else if (amount >= 5) count = 3;
+            let count = 1;
+            if (amount >= 100) count = 25;
+            else if (amount >= 50) count = 10;
+            else if (amount >= 20) count = 5;
+            else if (amount >= 5) count = 3;
 
-          for (let i = 0; i < count; i++) {
-            await client.say(CHANNEL_NAME, bucmsg);
+            for (let i = 0; i < count; i++) {
+              await client.say(CHANNEL_NAME, spamLine);
+            }
           }
         },
       });

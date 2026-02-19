@@ -510,6 +510,12 @@ function applyStreamlabsSection(ini) {
   if (sl.socket_token || sl.socketToken || sl.token) {
     setEnvOverride("STREAMLABS_SOCKET_TOKEN", sl.socket_token || sl.socketToken || sl.token);
   }
+  if (sl.donation_alert_mode || sl.donationAlertMode) {
+    setEnvOverride(
+      "STREAMLABS_DONATION_ALERT_MODE",
+      sl.donation_alert_mode || sl.donationAlertMode
+    );
+  }
 }
 
 function applyLinkSection(ini) {
