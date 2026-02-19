@@ -1416,6 +1416,17 @@ client.on("message", (channel, userstate, message, self) => {
     if (userstate?.__discordRelay) return;
     const msg = String(message || "").trim();
     if (!msg) return;
+    const configuredChannel = String(CHANNEL_NAME || "")
+      .replace(/^#/, "")
+      .trim()
+      .toLowerCase();
+    const incomingChannel = String(channel || "")
+      .replace(/^#/, "")
+      .trim()
+      .toLowerCase();
+    if (configuredChannel && incomingChannel && configuredChannel !== incomingChannel) {
+      return;
+    }
 
     const badges = userstate?.badges && typeof userstate.badges === "object" ? userstate.badges : {};
     const isBroadcaster = badges?.broadcaster === "1" || badges?.broadcaster === 1;
@@ -1424,7 +1435,7 @@ client.on("message", (channel, userstate, message, self) => {
     const isSubscriber = Boolean(userstate?.subscriber);
 
     void DISCORD?.logTwitchChat?.({
-      channelName: String(channel || CHANNEL_NAME || "").replace(/^#/, ""),
+      channelName: String(incomingChannel || configuredChannel || ""),
       message: msg,
       isVip,
       isMod,

@@ -419,14 +419,11 @@ export function initDiscord({ logger = console } = {}) {
 
   const chatLogEnabled = flagFromValue(readEnvString("DISCORD_TWITCH_CHAT_LOG_ENABLED") || "0");
   const chatCommandsOnly = flagFromValue(readEnvString("DISCORD_TWITCH_CHAT_LOG_COMMANDS_ONLY") || "0");
-  const chatMode = String(readEnvString("DISCORD_TWITCH_CHAT_LOG_MODE") || "batch")
+  const configuredChatMode = String(readEnvString("DISCORD_TWITCH_CHAT_LOG_MODE") || "per_message")
     .trim()
     .toLowerCase();
-  const chatPerMessage =
-    chatMode === "message" ||
-    chatMode === "per_message" ||
-    chatMode === "single" ||
-    chatMode === "embed";
+  const chatMode = "per_message";
+  const chatPerMessage = true;
   const chatFlushMs = Math.max(250, readEnvInt("DISCORD_TWITCH_CHAT_LOG_FLUSH_MS", 2500));
   const chatMaxLines = Math.max(1, readEnvInt("DISCORD_TWITCH_CHAT_LOG_MAX_LINES", 12));
   const chatChannelId = String(
@@ -434,6 +431,11 @@ export function initDiscord({ logger = console } = {}) {
   ).trim();
 
   try {
+    if (configuredChatMode === "batch") {
+      logger?.warn?.(
+        "[discord][chatlog] mode=batch is disabled; forcing per_message mode."
+      );
+    }
     if (chatLogEnabled) {
       logger?.log?.(
         `[discord][chatlog] enabled mode=${chatMode || "batch"} channel=${chatChannelId || "(missing)"}`
