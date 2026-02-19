@@ -162,6 +162,16 @@ export function startWebServer(deps = {}) {
     }
   }
 
+  function ensureModeratorCacheFile() {
+    try {
+      if (fs.existsSync(WEB_MODS_CACHE_PATH)) return;
+      writeCachedModerators([]);
+      console.log(`[WEB][ADMIN] initialized moderator cache: ${WEB_MODS_CACHE_PATH}`);
+    } catch (e) {
+      console.warn("[WEB][ADMIN] moderator cache init failed:", String(e?.message || e));
+    }
+  }
+
   function isInModeratorList(rows = [], user = {}) {
     const userId = String(user?.userId || "").trim();
     const login = normalizeLogin(user?.login || "");
@@ -173,6 +183,8 @@ export function startWebServer(deps = {}) {
       return false;
     });
   }
+
+  ensureModeratorCacheFile();
 
   function clearAdminSessionCookieAllVariants(res) {
     try {
@@ -4318,8 +4330,10 @@ const webServer = http.createServer(async (req, res) => {
               preferredRole: "auto",
               limit: 500,
             }).catch(() => []);
-            if (Array.isArray(liveMods) && liveMods.length > 0) {
+            if (Array.isArray(liveMods)) {
               writeCachedModerators(liveMods);
+            }
+            if (Array.isArray(liveMods) && liveMods.length > 0) {
               isMod = isInModeratorList(liveMods, user);
               if (isMod) modSource = "live_mod_list";
             }
