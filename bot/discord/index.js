@@ -1,4 +1,10 @@
-import { WebhookClient, EmbedBuilder } from "discord.js";
+import {
+  WebhookClient,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} from "discord.js";
 import { createDiscordMessenger } from "./messenger.js";
 import { getDiscordCommandRelayIntents, registerDiscordCommandRelay } from "./commandRelay.js";
 import { getRoleAccessToken, TWITCH_ROLES } from "../api/twitch/auth.js";
@@ -65,6 +71,22 @@ function spotifyAuditSong(meta = {}) {
   if (trackName && artists) return `${trackName} - ${artists}`;
   if (trackName) return trackName;
   if (song) return song;
+  return "";
+}
+
+function spotifyTrackUrlFromMeta(meta = {}) {
+  const m = meta && typeof meta === "object" ? meta : {};
+  const direct = String(
+    m.trackUrl || m.url || m.songUrl || m.track_url || m.song_url || ""
+  ).trim();
+  if (/^https?:\/\//i.test(direct)) return direct;
+
+  const uri = String(m.trackUri || m.uri || m.track_uri || "").trim();
+  const match = uri.match(/^spotify:track:([A-Za-z0-9]+)$/i);
+  if (match?.[1]) {
+    return `https://open.spotify.com/track/${match[1]}`;
+  }
+
   return "";
 }
 
@@ -304,6 +326,7 @@ export function initDiscord({ logger = console } = {}) {
       if (String(action || "").toLowerCase().startsWith("spotify_")) {
         const spotifyLabel = spotifyAuditLabel(action, isOk);
         const song = spotifyAuditSong(meta);
+        const songUrl = spotifyTrackUrlFromMeta(meta);
         const volume =
           meta && Number.isFinite(Number(meta.volume)) ? Number(meta.volume) : null;
         const whoLine = `${who}${userId ? ` (${userId})` : ""}`;
@@ -327,10 +350,30 @@ export function initDiscord({ logger = console } = {}) {
             })
           : { id: "", username: "" };
 
-        const bodyParts = [spotifyLabel];
-        if (song) bodyParts.push(song);
-        if (Number.isFinite(volume)) bodyParts.push(`Volume: ${volume}%`);
-        bodyParts.push(`By: ${whoLine}`);
+        const actionKey = String(action || "").trim().toLowerCase();
+        const bodyParts = [];
+
+        if (actionKey === "spotify_addsong") {
+          if (song) {
+            const linkedSong = songUrl ? `[${song}](${songUrl})` : song;
+            bodyParts.push(`${linkedSong} was added to the song queue by a moderator.`);
+          } else {
+            bodyParts.push("A song was added to the queue by a moderator.");
+          }
+        } else if (actionKey === "spotify_skip") {
+          bodyParts.push("The current song was skipped by a moderator.");
+        } else if (actionKey === "spotify_volume") {
+          bodyParts.push(
+            Number.isFinite(volume)
+              ? `Spotify volume was set to ${volume}% by a moderator.`
+              : "Spotify volume was updated by a moderator."
+          );
+        } else {
+          if (song) bodyParts.push(songUrl ? `[${song}](${songUrl})` : song);
+          if (Number.isFinite(volume)) bodyParts.push(`Volume: ${volume}%`);
+        }
+
+        bodyParts.push(`**Moderator:** \`${whoLine}\``);
         if (isWebAudit) {
           if (requestMethod || requestRoute) {
             bodyParts.push(
@@ -370,7 +413,7 @@ export function initDiscord({ logger = console } = {}) {
         }
 
         const spotifyEmbed = new EmbedBuilder()
-          .setTitle("Spotify")
+          .setTitle(spotifyLabel)
           .setColor(isOk ? 0x2ecc71 : 0xff5c5c)
           .setDescription(bodyParts.join("\n"))
           .setFooter({ text: `#${chan || "?"}` })
@@ -382,8 +425,21 @@ export function initDiscord({ logger = console } = {}) {
           ]);
         }
 
+        const components = [];
+        if (songUrl) {
+          components.push(
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setStyle(ButtonStyle.Link)
+                .setLabel("Open Song")
+                .setURL(songUrl)
+            )
+          );
+        }
+
         await discordMessenger.send(logChannelId, {
           embeds: [spotifyEmbed],
+          components,
           allowedMentions: { parse: [] },
         });
         return;

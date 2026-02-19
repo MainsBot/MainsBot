@@ -17,6 +17,12 @@ import {
   listChannelModerators,
   updateChannelInfo,
   getGameIdByName,
+  listCustomRewards,
+  createCustomReward,
+  updateCustomReward,
+  deleteCustomReward,
+  listRewardRedemptions,
+  updateRewardRedemptionStatus,
 } from "../api/twitch/helix.js";
 import {
   TWITCH_ROLES,
@@ -728,6 +734,9 @@ function resolveEnvPath(envName, fallbackRel) {
 
 const SETTINGS_FILE_PATH = resolveEnvPath("SETTINGS_PATH", "./SETTINGS.json");
 const QUOTES_FILE_PATH = resolveEnvPath("QUOTES_PATH", "./QUOTES.json");
+const REDEMPTIONS_LOG_PATH =
+  abs(String(process.env.REDEMPTIONS_LOG_PATH || "").trim()) ||
+  abs(DATA_DIR ? path.join(DATA_DIR, "d", "REDEMPTIONS_LOG.json") : "./data/REDEMPTIONS_LOG.json");
 
 function normalizeQuotesData(raw) {
   const base =
@@ -794,6 +803,97 @@ function saveQuotes(next) {
     throw e;
   }
   return normalized;
+}
+
+function normalizeRedemptionLogData(raw) {
+  const base = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const rows = Array.isArray(base.entries) ? base.entries : [];
+  const entries = rows
+    .map((row) => ({
+      redemptionId: String(row?.redemptionId || row?.id || "").trim(),
+      rewardId: String(row?.rewardId || "").trim(),
+      rewardTitle: String(row?.rewardTitle || "").trim(),
+      status: String(row?.status || "").trim().toUpperCase(),
+      userId: String(row?.userId || "").trim(),
+      userLogin: String(row?.userLogin || "").trim().toLowerCase(),
+      userName: String(row?.userName || "").trim(),
+      userInput: String(row?.userInput || "").trim(),
+      redeemedAt: String(row?.redeemedAt || "").trim(),
+      loggedAt: String(row?.loggedAt || "").trim(),
+    }))
+    .filter((row) => row.redemptionId)
+    .sort((a, b) => {
+      const aa = Date.parse(a.redeemedAt || a.loggedAt || 0) || 0;
+      const bb = Date.parse(b.redeemedAt || b.loggedAt || 0) || 0;
+      return bb - aa;
+    });
+  return {
+    entries: entries.slice(0, 3000),
+  };
+}
+
+function loadRedemptionLogs() {
+  try {
+    if (!REDEMPTIONS_LOG_PATH) return normalizeRedemptionLogData({});
+    if (!fs.existsSync(REDEMPTIONS_LOG_PATH)) {
+      const seeded = normalizeRedemptionLogData({ entries: [] });
+      fs.mkdirSync(path.dirname(REDEMPTIONS_LOG_PATH), { recursive: true });
+      fs.writeFileSync(REDEMPTIONS_LOG_PATH, JSON.stringify(seeded, null, 2), "utf8");
+      return seeded;
+    }
+    const text = fs.readFileSync(REDEMPTIONS_LOG_PATH, "utf8");
+    return normalizeRedemptionLogData(safeJsonParse(text, null));
+  } catch (e) {
+    console.warn("[redemptions] log load failed:", String(e?.message || e));
+    return normalizeRedemptionLogData({});
+  }
+}
+
+function saveRedemptionLogs(next) {
+  const normalized = normalizeRedemptionLogData(next);
+  try {
+    fs.mkdirSync(path.dirname(REDEMPTIONS_LOG_PATH), { recursive: true });
+    fs.writeFileSync(REDEMPTIONS_LOG_PATH, JSON.stringify(normalized, null, 2), "utf8");
+  } catch (e) {
+    console.warn("[redemptions] log save failed:", String(e?.message || e));
+  }
+  return normalized;
+}
+
+function logRedemptionActivity(redemptions = []) {
+  const rows = Array.isArray(redemptions) ? redemptions : [];
+  if (!rows.length) return loadRedemptionLogs();
+
+  const current = loadRedemptionLogs();
+  const byId = new Map(
+    (Array.isArray(current.entries) ? current.entries : []).map((row) => [
+      String(row?.redemptionId || "").trim(),
+      row,
+    ])
+  );
+  let changed = false;
+  for (const row of rows) {
+    const redemptionId = String(row?.id || row?.redemptionId || "").trim();
+    if (!redemptionId) continue;
+    const existing = byId.get(redemptionId) || {};
+    const merged = {
+      redemptionId,
+      rewardId: String(row?.reward?.id || row?.rewardId || existing.rewardId || "").trim(),
+      rewardTitle: String(row?.reward?.title || row?.rewardTitle || existing.rewardTitle || "").trim(),
+      status: String(row?.status || existing.status || "").trim().toUpperCase(),
+      userId: String(row?.user_id || row?.userId || existing.userId || "").trim(),
+      userLogin: String(row?.user_login || row?.userLogin || existing.userLogin || "").trim().toLowerCase(),
+      userName: String(row?.user_name || row?.userName || existing.userName || "").trim(),
+      userInput: String(row?.user_input || row?.userInput || existing.userInput || "").trim(),
+      redeemedAt: String(row?.redeemed_at || row?.redeemedAt || existing.redeemedAt || "").trim(),
+      loggedAt: existing.loggedAt || new Date().toISOString(),
+    };
+    byId.set(redemptionId, merged);
+    changed = true;
+  }
+
+  if (!changed) return current;
+  return saveRedemptionLogs({ entries: Array.from(byId.values()) });
 }
 
 function readRequestBodyText(req, { limitBytes = 1024 * 1024 } = {}) {
@@ -985,6 +1085,19 @@ function isAuthManagerSession(session) {
   if (TWITCH_CHANNEL_NAME && sessionLogin === TWITCH_CHANNEL_NAME) return true;
   if (TWITCH_BOT_NAME && sessionLogin === TWITCH_BOT_NAME) return true;
 
+  return false;
+}
+
+function isOwnerSession(session) {
+  if (!session?.userId && !session?.login) return false;
+  const sessionUserId = String(session?.userId || "").trim();
+  const sessionLogin = String(session?.login || "").trim().toLowerCase();
+  const ownerLogin = String(WEB_OWNER_LOGIN || "").trim().toLowerCase();
+  const ownerUserId = String(WEB_OWNER_USER_ID || "").trim();
+
+  if (!ownerLogin && !ownerUserId) return false;
+  if (ownerUserId && sessionUserId === ownerUserId) return true;
+  if (ownerLogin && sessionLogin === ownerLogin) return true;
   return false;
 }
 
@@ -1599,6 +1712,7 @@ function renderTopbar({ who = "", active = "" } = {}) {
       ${link("/", "Home", "home")}
       ${safeWho ? link("/admin", "Admin", "admin") : ""}
       ${safeWho ? link("/admin/quotes", "Quotes", "quotes") : ""}
+      ${safeWho ? link("/admin/redemptions", "Redemptions", "redemptions") : ""}
     </div>
     <div class="topbar__right">${right}</div>
   </div>`;
@@ -1677,6 +1791,7 @@ function buildOpenApiSpec({ requestOrigin = "" } = {}) {
       { name: "Status" },
       { name: "Spotify" },
       { name: "Roblox" },
+      { name: "Redemptions" },
     ],
     paths: {
       "/api/admin/session": {
@@ -2025,6 +2140,101 @@ function buildOpenApiSpec({ requestOrigin = "" } = {}) {
             200: { description: "Saved" },
             400: { description: "Validation error" },
             401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/admin/redemptions/rewards": {
+        get: {
+          tags: ["Redemptions"],
+          summary: "List channel point custom rewards (owner-only)",
+          responses: {
+            200: { description: "Rewards payload." },
+            401: { description: "Unauthorized." },
+            403: { description: "Owner required." },
+          },
+        },
+        post: {
+          tags: ["Redemptions"],
+          summary: "Create/update/delete custom rewards (owner-only)",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    action: { type: "string", enum: ["create", "update", "delete"] },
+                    rewardId: { type: "string" },
+                    reward: { type: "object", additionalProperties: true },
+                  },
+                  required: ["action"],
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Success." },
+            400: { description: "Validation error." },
+            401: { description: "Unauthorized." },
+            403: { description: "Owner required." },
+          },
+        },
+      },
+      "/api/admin/redemptions/list": {
+        get: {
+          tags: ["Redemptions"],
+          summary: "List redemptions for a custom reward (owner-only)",
+          parameters: [
+            { in: "query", name: "rewardId", required: true, schema: { type: "string" } },
+            { in: "query", name: "status", required: false, schema: { type: "string", enum: ["UNFULFILLED", "FULFILLED", "CANCELED"] } },
+            { in: "query", name: "sort", required: false, schema: { type: "string", enum: ["NEWEST", "OLDEST"] } },
+            { in: "query", name: "first", required: false, schema: { type: "integer", minimum: 1, maximum: 50 } },
+            { in: "query", name: "after", required: false, schema: { type: "string" } },
+          ],
+          responses: {
+            200: { description: "Redemptions payload." },
+            400: { description: "Validation error." },
+            401: { description: "Unauthorized." },
+            403: { description: "Owner required." },
+          },
+        },
+      },
+      "/api/admin/redemptions/status": {
+        post: {
+          tags: ["Redemptions"],
+          summary: "Mark redemptions fulfilled/canceled (owner-only)",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    rewardId: { type: "string" },
+                    redemptionIds: { type: "array", items: { type: "string" } },
+                    status: { type: "string", enum: ["FULFILLED", "CANCELED"] },
+                  },
+                  required: ["rewardId", "redemptionIds", "status"],
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Update payload." },
+            400: { description: "Validation error." },
+            401: { description: "Unauthorized." },
+            403: { description: "Owner required." },
+          },
+        },
+      },
+      "/api/admin/redemptions/log": {
+        get: {
+          tags: ["Redemptions"],
+          summary: "Read local redemption activity log (owner-only)",
+          responses: {
+            200: { description: "Log payload." },
+            401: { description: "Unauthorized." },
+            403: { description: "Owner required." },
           },
         },
       },
@@ -2418,6 +2628,20 @@ function renderQuotesAppHtml({ who = "" } = {}) {
       who: String(who || ""),
       active: "admin",
       body: '<div class="card"><div class="card__bd"><h1>Quotes UI missing</h1><div class="muted">Could not load <code>web/admin/quotes.html</code>.</div></div></div>',
+    });
+  }
+}
+
+function renderRedemptionsAppHtml({ who = "" } = {}) {
+  try {
+    const appHtmlPath = path.join(WEB_DIR, "admin", "redemptions.html");
+    return fs.readFileSync(appHtmlPath, "utf8");
+  } catch {
+    return renderShell({
+      title: "Redemptions",
+      who: String(who || ""),
+      active: "redemptions",
+      body: '<div class="card"><div class="card__bd"><h1>Redemptions UI missing</h1><div class="muted">Could not load <code>web/admin/redemptions.html</code>.</div></div></div>',
     });
   }
 }
@@ -3136,6 +3360,263 @@ const webServer = http.createServer(async (req, res) => {
         robloxSnapshot: robloxAuthSnapshot(),
         spotifySnapshot: spotifyAuthSnapshot(),
       }),
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/admin/redemptions") {
+    if (!adminAllowed) {
+      return sendRedirect(res, "/admin/login");
+    }
+    if (!isOwnerSession(adminSession)) {
+      return sendErrorPage(
+        res,
+        403,
+        "Forbidden",
+        "Redemptions management is restricted to the owner account."
+      );
+    }
+    return sendHtmlResponse(
+      res,
+      200,
+      renderRedemptionsAppHtml({ who: String(adminSession?.login || "") }),
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (
+    routePath === "/api/admin/redemptions/rewards" ||
+    routePath === "/api/admin/redemptions/list" ||
+    routePath === "/api/admin/redemptions/status" ||
+    routePath === "/api/admin/redemptions/log"
+  ) {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (!isOwnerSession(adminSession)) {
+      return sendJsonResponse(
+        res,
+        403,
+        { ok: false, error: "Owner access required." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    try {
+      if (routePath === "/api/admin/redemptions/rewards" && method === "GET") {
+        const onlyManageable = parseBooleanInput(
+          parsedUrl.searchParams.get("manageable") ?? "true",
+          true
+        );
+        const payload = await listCustomRewards({
+          onlyManageableRewards: onlyManageable,
+        });
+        return sendJsonResponse(
+          res,
+          200,
+          { ok: true, rewards: Array.isArray(payload?.data) ? payload.data : [] },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      if (routePath === "/api/admin/redemptions/rewards" && method === "POST") {
+        const body = await readJsonBody(req, { limitBytes: 256 * 1024 });
+        const action = String(body?.action || "").trim().toLowerCase();
+
+        if (action === "create") {
+          const created = await createCustomReward({
+            reward:
+              body?.reward && typeof body.reward === "object" && !Array.isArray(body.reward)
+                ? body.reward
+                : {},
+          });
+          return sendJsonResponse(
+            res,
+            200,
+            { ok: true, data: created?.data || [] },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        if (action === "update") {
+          const rewardId = String(body?.rewardId || "").trim();
+          if (!rewardId) {
+            return sendJsonResponse(
+              res,
+              400,
+              { ok: false, error: "Missing rewardId." },
+              { "cache-control": "no-store" }
+            );
+          }
+          const updated = await updateCustomReward({
+            rewardId,
+            reward:
+              body?.reward && typeof body.reward === "object" && !Array.isArray(body.reward)
+                ? body.reward
+                : {},
+          });
+          return sendJsonResponse(
+            res,
+            200,
+            { ok: true, data: updated?.data || [] },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        if (action === "delete") {
+          const rewardId = String(body?.rewardId || "").trim();
+          if (!rewardId) {
+            return sendJsonResponse(
+              res,
+              400,
+              { ok: false, error: "Missing rewardId." },
+              { "cache-control": "no-store" }
+            );
+          }
+          await deleteCustomReward({ rewardId });
+          return sendJsonResponse(
+            res,
+            200,
+            { ok: true },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: "Unknown action. Use create, update, or delete." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      if (routePath === "/api/admin/redemptions/list" && method === "GET") {
+        const rewardId = String(parsedUrl.searchParams.get("rewardId") || "").trim();
+        if (!rewardId) {
+          return sendJsonResponse(
+            res,
+            400,
+            { ok: false, error: "Missing rewardId query param." },
+            { "cache-control": "no-store" }
+          );
+        }
+        const status = String(parsedUrl.searchParams.get("status") || "UNFULFILLED")
+          .trim()
+          .toUpperCase();
+        const sort = String(parsedUrl.searchParams.get("sort") || "NEWEST")
+          .trim()
+          .toUpperCase();
+        const first = Math.max(
+          1,
+          Math.min(50, Number(parsedUrl.searchParams.get("first")) || 25)
+        );
+        const after = String(parsedUrl.searchParams.get("after") || "").trim();
+
+        const payload = await listRewardRedemptions({
+          rewardId,
+          status,
+          sort,
+          first,
+          after,
+        });
+
+        const data = Array.isArray(payload?.data) ? payload.data : [];
+        const log = logRedemptionActivity(data);
+        return sendJsonResponse(
+          res,
+          200,
+          {
+            ok: true,
+            redemptions: data,
+            pagination: payload?.pagination || {},
+            logEntries: Array.isArray(log?.entries) ? log.entries.slice(0, 100) : [],
+          },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      if (routePath === "/api/admin/redemptions/status" && method === "POST") {
+        const body = await readJsonBody(req, { limitBytes: 256 * 1024 });
+        const rewardId = String(body?.rewardId || "").trim();
+        const redemptionIds = Array.isArray(body?.redemptionIds) ? body.redemptionIds : [];
+        const status = String(body?.status || "").trim().toUpperCase();
+
+        if (!rewardId) {
+          return sendJsonResponse(
+            res,
+            400,
+            { ok: false, error: "Missing rewardId." },
+            { "cache-control": "no-store" }
+          );
+        }
+        if (!redemptionIds.length) {
+          return sendJsonResponse(
+            res,
+            400,
+            { ok: false, error: "Missing redemptionIds." },
+            { "cache-control": "no-store" }
+          );
+        }
+        if (status !== "FULFILLED" && status !== "CANCELED") {
+          return sendJsonResponse(
+            res,
+            400,
+            { ok: false, error: "status must be FULFILLED or CANCELED." },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        const payload = await updateRewardRedemptionStatus({
+          rewardId,
+          redemptionIds,
+          status,
+        });
+        logRedemptionActivity(Array.isArray(payload?.data) ? payload.data : []);
+
+        return sendJsonResponse(
+          res,
+          200,
+          { ok: true, data: payload?.data || [] },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      if (routePath === "/api/admin/redemptions/log" && method === "GET") {
+        const limit = Math.max(
+          1,
+          Math.min(500, Number(parsedUrl.searchParams.get("limit")) || 200)
+        );
+        const log = loadRedemptionLogs();
+        return sendJsonResponse(
+          res,
+          200,
+          {
+            ok: true,
+            entries: Array.isArray(log?.entries) ? log.entries.slice(0, limit) : [],
+            path: REDEMPTIONS_LOG_PATH || null,
+          },
+          { "cache-control": "no-store" }
+        );
+      }
+    } catch (e) {
+      return sendJsonResponse(
+        res,
+        500,
+        { ok: false, error: String(e?.message || e) },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    return sendJsonResponse(
+      res,
+      405,
+      { ok: false, error: "Method not allowed." },
       { "cache-control": "no-store" }
     );
   }

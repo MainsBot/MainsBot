@@ -438,6 +438,7 @@ function App() {
           </div>
           <div className="row">
             ${canManageAuth ? html`<a className="btn btn--sm btn--ghost" href="/admin/auth">Auth</a>` : null}
+            <a className="btn btn--sm btn--ghost" href="/admin/redemptions">Redemptions</a>
             <a className="btn btn--sm btn--ghost" href="/api/status" target="_blank" rel="noreferrer">Status JSON</a>
           </div>
         </div>

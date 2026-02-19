@@ -1829,6 +1829,216 @@ export async function getGameIdByName({ token, clientId, name }) {
   return game?.id || null;
 }
 
+async function resolveStreamerBroadcasterAuth({ minTtlSec = 120 } = {}) {
+  const auth = await getRoleAccessToken({
+    role: TWITCH_ROLES.STREAMER,
+    minTtlSec,
+  }).catch(() => null);
+
+  if (!auth?.accessToken || !auth?.clientId) {
+    throw new Error(
+      "Missing streamer OAuth token/client id (link streamer via /auth/twitch/streamer)."
+    );
+  }
+
+  const broadcasterId = String(
+    process.env.TWITCH_CHAT_BROADCASTER_ID || CHANNEL_ID || auth?.userId || ""
+  ).trim();
+  if (!broadcasterId) {
+    throw new Error("Missing broadcaster id (set CHANNEL_ID / TWITCH_CHAT_BROADCASTER_ID).");
+  }
+
+  return {
+    accessToken: String(auth.accessToken || "").trim(),
+    clientId: String(auth.clientId || "").trim(),
+    broadcasterId,
+  };
+}
+
+function cleanRewardPatch(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const out = {};
+
+  const maybeSetString = (key, minLen = 0) => {
+    if (!(key in src)) return;
+    const value = String(src[key] ?? "").trim();
+    if (value.length < minLen) return;
+    out[key] = value;
+  };
+  const maybeSetBool = (key) => {
+    if (!(key in src)) return;
+    out[key] = Boolean(src[key]);
+  };
+  const maybeSetInt = (key, min = 0, max = Number.MAX_SAFE_INTEGER) => {
+    if (!(key in src)) return;
+    const value = Math.floor(Number(src[key]));
+    if (!Number.isFinite(value)) return;
+    out[key] = Math.max(min, Math.min(max, value));
+  };
+
+  maybeSetString("title", 1);
+  maybeSetString("prompt", 0);
+  maybeSetInt("cost", 1, 1_000_000_000);
+  maybeSetString("background_color", 0);
+  maybeSetBool("is_enabled");
+  maybeSetBool("is_user_input_required");
+  maybeSetBool("is_max_per_stream_enabled");
+  maybeSetInt("max_per_stream", 1, 100_000);
+  maybeSetBool("is_max_per_user_per_stream_enabled");
+  maybeSetInt("max_per_user_per_stream", 1, 100_000);
+  maybeSetBool("is_global_cooldown_enabled");
+  maybeSetInt("global_cooldown_seconds", 1, 86_400);
+  maybeSetBool("should_redemptions_skip_request_queue");
+
+  return out;
+}
+
+function normalizeRedemptionStatus(status) {
+  const value = String(status || "").trim().toUpperCase();
+  if (value === "UNFULFILLED" || value === "FULFILLED" || value === "CANCELED") {
+    return value;
+  }
+  return "UNFULFILLED";
+}
+
+export async function listCustomRewards({ onlyManageableRewards = true } = {}) {
+  const auth = await resolveStreamerBroadcasterAuth();
+  const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards");
+  url.searchParams.set("broadcaster_id", auth.broadcasterId);
+  if (onlyManageableRewards != null) {
+    url.searchParams.set("only_manageable_rewards", onlyManageableRewards ? "true" : "false");
+  }
+
+  return fetchHelixJson({
+    url: url.toString(),
+    method: "GET",
+    clientId: auth.clientId,
+    accessToken: auth.accessToken,
+  });
+}
+
+export async function createCustomReward({ reward = {} } = {}) {
+  const auth = await resolveStreamerBroadcasterAuth();
+  const body = cleanRewardPatch(reward);
+  if (!body.title) throw new Error("Missing reward.title");
+  if (!Number.isFinite(Number(body.cost)) || Number(body.cost) < 1) {
+    throw new Error("Missing reward.cost");
+  }
+
+  const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards");
+  url.searchParams.set("broadcaster_id", auth.broadcasterId);
+
+  return fetchHelixJson({
+    url: url.toString(),
+    method: "POST",
+    clientId: auth.clientId,
+    accessToken: auth.accessToken,
+    body,
+  });
+}
+
+export async function updateCustomReward({ rewardId, reward = {} } = {}) {
+  const auth = await resolveStreamerBroadcasterAuth();
+  const id = String(rewardId || "").trim();
+  if (!id) throw new Error("Missing rewardId");
+
+  const body = cleanRewardPatch(reward);
+  if (!Object.keys(body).length) throw new Error("Missing reward update fields");
+
+  const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards");
+  url.searchParams.set("broadcaster_id", auth.broadcasterId);
+  url.searchParams.set("id", id);
+
+  return fetchHelixJson({
+    url: url.toString(),
+    method: "PATCH",
+    clientId: auth.clientId,
+    accessToken: auth.accessToken,
+    body,
+  });
+}
+
+export async function deleteCustomReward({ rewardId } = {}) {
+  const auth = await resolveStreamerBroadcasterAuth();
+  const id = String(rewardId || "").trim();
+  if (!id) throw new Error("Missing rewardId");
+
+  const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards");
+  url.searchParams.set("broadcaster_id", auth.broadcasterId);
+  url.searchParams.set("id", id);
+
+  await fetchHelixJson({
+    url: url.toString(),
+    method: "DELETE",
+    clientId: auth.clientId,
+    accessToken: auth.accessToken,
+  });
+  return { ok: true };
+}
+
+export async function listRewardRedemptions({
+  rewardId,
+  status = "UNFULFILLED",
+  sort = "NEWEST",
+  first = 50,
+  after = "",
+} = {}) {
+  const auth = await resolveStreamerBroadcasterAuth();
+  const id = String(rewardId || "").trim();
+  if (!id) throw new Error("Missing rewardId");
+
+  const limit = Math.max(1, Math.min(50, Number(first) || 50));
+  const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions");
+  url.searchParams.set("broadcaster_id", auth.broadcasterId);
+  url.searchParams.set("reward_id", id);
+  url.searchParams.set("status", normalizeRedemptionStatus(status));
+  url.searchParams.set("sort", String(sort || "NEWEST").trim().toUpperCase() === "OLDEST" ? "OLDEST" : "NEWEST");
+  url.searchParams.set("first", String(limit));
+  if (String(after || "").trim()) url.searchParams.set("after", String(after).trim());
+
+  return fetchHelixJson({
+    url: url.toString(),
+    method: "GET",
+    clientId: auth.clientId,
+    accessToken: auth.accessToken,
+  });
+}
+
+export async function updateRewardRedemptionStatus({
+  rewardId,
+  redemptionIds = [],
+  status = "FULFILLED",
+} = {}) {
+  const auth = await resolveStreamerBroadcasterAuth();
+  const id = String(rewardId || "").trim();
+  if (!id) throw new Error("Missing rewardId");
+
+  const ids = Array.isArray(redemptionIds)
+    ? redemptionIds.map((v) => String(v || "").trim()).filter(Boolean).slice(0, 50)
+    : [];
+  if (!ids.length) throw new Error("Missing redemptionIds");
+
+  const normalizedStatus = String(status || "").trim().toUpperCase();
+  if (normalizedStatus !== "FULFILLED" && normalizedStatus !== "CANCELED") {
+    throw new Error("status must be FULFILLED or CANCELED");
+  }
+
+  const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions");
+  url.searchParams.set("broadcaster_id", auth.broadcasterId);
+  url.searchParams.set("reward_id", id);
+  for (const redemptionId of ids) {
+    url.searchParams.append("id", redemptionId);
+  }
+
+  return fetchHelixJson({
+    url: url.toString(),
+    method: "PATCH",
+    clientId: auth.clientId,
+    accessToken: auth.accessToken,
+    body: { status: normalizedStatus },
+  });
+}
+
 export const getLatestPredictionData = async () => {
   const r = await fetch("https://gql.twitch.tv/gql#origin=twilight", {
     headers: {

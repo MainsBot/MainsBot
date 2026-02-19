@@ -259,6 +259,7 @@ export function registerSpotifyCommands({
               trackName: String(track?.name || ""),
               trackArtists: String(track?.artists || ""),
               trackUri: String(track?.uri || uri || ""),
+              trackUrl: String(track?.url || ""),
               song: trackLabel || "",
             },
           });

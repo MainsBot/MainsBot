@@ -21,9 +21,13 @@ const DEFAULT_BOT_SCOPES = [
   "user:write:chat",
   "user:bot",
   "moderation:read",
+  "moderator:read:chatters",
   "moderator:manage:banned_users",
+  "moderator:manage:chat_messages",
   "moderator:manage:chat_settings",
   "moderator:manage:announcements",
+  "moderator:read:blocked_terms",
+  "moderator:manage:blocked_terms",
 ];
 
 const DEFAULT_STREAMER_SCOPES = [
