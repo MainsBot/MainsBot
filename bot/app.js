@@ -54,6 +54,7 @@ import { tryHandleGlobalCommands } from "./modules/globalCommands.js";
 import { startTimers } from "./functions/timers.js";
 import { createCommandCounter } from "./functions/commandCounts.js";
 import { createNamedCountStore } from "./functions/namedCounts.js";
+import { getBuildInfo } from "./functions/buildInfo.js";
 import { startWebServer } from "./web/server.js";
 import { isCustomCommandsModuleEnabled, registerCustomCommandsModule } from "./modules/customCommands.js";
 import {
@@ -367,6 +368,7 @@ const DEFAULT_IGNORE_MODES = [
 ];
 
 const ver = '2.4'
+const BUILD_INFO = getBuildInfo({ appVersion: ver });
 
 function formatLifecycleMessage(template = "", { signal = "" } = {}) {
   const src = String(template || "").trim();
@@ -1569,6 +1571,54 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
   if (tryHandleQuotesModCommand({ message, twitchUsername, reply })) return;
 
   const trimmedMessage = String(message || "").trim();
+  const parseIntervalMs = (raw) => {
+    const text = String(raw || "").trim().toLowerCase();
+    const m = text.match(/^(\d+(?:\.\d+)?)(ms|s|m)?$/i);
+    if (!m) return null;
+    const n = Number(m[1]);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const unit = String(m[2] || "s").toLowerCase();
+    if (unit === "ms") return Math.round(n);
+    if (unit === "m") return Math.round(n * 60_000);
+    return Math.round(n * 1000);
+  };
+
+  if (trimmedMessage.toLowerCase() === "!autofoc") {
+    const enabled = SETTINGS?.autoFocOffEnabled !== false;
+    const delayMsRaw = Number(SETTINGS?.autoFocOffDelayMs);
+    const delayMs = Number.isFinite(delayMsRaw) && delayMsRaw >= 0
+      ? Math.floor(delayMsRaw)
+      : Math.max(0, Number(process.env.WAIT_UNTIL_FOC_OFF) || 0);
+    return reply(
+      `Auto FOC OFF: ${enabled ? "ON" : "OFF"} | Delay: ${Math.round(
+        delayMs / 1000
+      )}s (${delayMs}ms)`
+    );
+  }
+
+  if (trimmedMessage.toLowerCase() === "!autofoc.on") {
+    SETTINGS.autoFocOffEnabled = true;
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2));
+    return reply("Auto FOC OFF is now ON.");
+  }
+
+  if (trimmedMessage.toLowerCase() === "!autofoc.off") {
+    SETTINGS.autoFocOffEnabled = false;
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2));
+    return reply("Auto FOC OFF is now OFF.");
+  }
+
+  if (trimmedMessage.toLowerCase().startsWith("!autofoc.interval")) {
+    const raw = trimmedMessage.slice("!autofoc.interval".length).trim();
+    const delayMs = parseIntervalMs(raw);
+    if (delayMs == null) {
+      return reply("Usage: !autofoc.interval <number>[ms|s|m] (default unit: seconds)");
+    }
+    SETTINGS.autoFocOffDelayMs = delayMs;
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2));
+    return reply(`Auto FOC OFF delay set to ${Math.round(delayMs / 1000)}s (${delayMs}ms).`);
+  }
+
   const addKeyMatch = trimmedMessage.match(/^!addkey\s+(.+)$/i);
   if (addKeyMatch) {
     const rawPayload = String(addKeyMatch[1] || "").replace(/[\r\n]+/g, " ").trim();
@@ -2811,7 +2861,7 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       userstate,
       message,
       botPrefix: bot,
-      version: ver,
+      version: BUILD_INFO.summary,
       webPublicUrl: WEB_PUBLIC_URL,
       twitchFunctions: TWITCH_FUNCTIONS,
       isSharedCommandCooldownActive,
@@ -2900,6 +2950,7 @@ const BOT_STATUS = {
   timers: SETTINGS?.timers,
   keywords: SETTINGS?.keywords,
   lastError: null,
+  build: BUILD_INFO,
 };
 
 function setStatus(patch) {
@@ -2919,6 +2970,7 @@ function getStatusSnapshot() {
     channelName: CHANNEL_NAME || null,
     channelDisplayName: STREAMER_DISPLAY_NAME,
     webPublicUrl: WEB_PUBLIC_URL || null,
+    build: BUILD_INFO,
     ks: settings?.ks ?? BOT_STATUS.ks,
     currentMode: settings?.currentMode ?? BOT_STATUS.currentMode,
     timers: settings?.timers ?? BOT_STATUS.timers,

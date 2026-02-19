@@ -341,17 +341,23 @@ async function refreshStatus() {
 
     if (els.footer) {
       const url = String(s.webPublicUrl || "").trim();
+      const build = s.build && typeof s.build === "object" ? s.build : null;
+      const buildText = build
+        ? `${String(build.version || "dev")} | ${String(build.branch || "unknown")} @ ${String(
+            build.commit || "unknown"
+          )}${build.dirty ? " (dirty)" : ""}`
+        : "";
+      let left = "MainsBot";
       if (url) {
         try {
-          setText(els.footer, new URL(url).host);
+          left = new URL(url).host;
         } catch {
-          setText(els.footer, url);
+          left = url;
         }
       } else if (channelLabel) {
-        setText(els.footer, channelLabel);
-      } else {
-        setText(els.footer, "MainsBot");
+        left = channelLabel;
       }
+      setText(els.footer, buildText ? `${left} • ${buildText}` : left);
     }
     setText(
       els.uptime,

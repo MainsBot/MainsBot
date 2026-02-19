@@ -329,6 +329,12 @@ var StartListener = function () {
       } else if (type === "MODERATION_ACTION") {
         const followData = messageData?.data || {};
         const followChange = followData.moderation_action;
+        const autoFocEnabled = SETTINGS?.autoFocOffEnabled !== false;
+        const autoFocDelayMsRaw = Number(SETTINGS?.autoFocOffDelayMs);
+        const autoFocDelayMs =
+          Number.isFinite(autoFocDelayMsRaw) && autoFocDelayMsRaw >= 0
+            ? Math.floor(autoFocDelayMsRaw)
+            : WAIT_UNTIL_FOC_OFF;
 
         if (followChange == "followers") {
           // follow only mode gets enabled
@@ -336,13 +342,17 @@ var StartListener = function () {
             SETTINGS.ks == false &&
             (await TWITCH_FUNCTIONS.isLive()) == true
           ) {
-            await delay(WAIT_UNTIL_FOC_OFF);
-            await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, { preferredRole: "bot" }).catch((e) => {
-              console.warn(
-                "[helix] failed to disable followers-only (delayed):",
-                String(e?.message || e)
-              );
-            });
+            if (!autoFocEnabled) {
+              logger.log("[pubsub] auto FOC OFF disabled; leaving followers-only enabled");
+            } else {
+              await delay(autoFocDelayMs);
+              await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, { preferredRole: "bot" }).catch((e) => {
+                console.warn(
+                  "[helix] failed to disable followers-only (delayed):",
+                  String(e?.message || e)
+                );
+              });
+            }
           }
         } else if (followChange == "followersoff") {
           if (!SETTINGS.ks) {
