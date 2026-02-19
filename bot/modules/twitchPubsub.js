@@ -279,7 +279,7 @@ var StartListener = function () {
 
       if (type === "STREAM_UP") {
         // TO DO = first person to go to stream gets free channel points
-        await TWITCH_FUNCTIONS.setFollowersOnlyMode(false).catch((e) => {
+        await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, { preferredRole: "bot" }).catch((e) => {
           console.warn(
             "[helix] failed to disable followers-only (stream-up):",
             String(e?.message || e)
@@ -287,13 +287,13 @@ var StartListener = function () {
         });
         liveUpHandler();
       } else if (type === "STREAM_DOWN") {
-        await TWITCH_FUNCTIONS.setFollowersOnlyMode(true).catch((e) => {
+        await TWITCH_FUNCTIONS.setFollowersOnlyMode(true, 0, { preferredRole: "bot" }).catch((e) => {
           console.warn(
             "[helix] failed to enable followers-only (stream-down):",
             String(e?.message || e)
           );
         });
-        await TWITCH_FUNCTIONS.setSlowMode(true, 5).catch((e) => {
+        await TWITCH_FUNCTIONS.setSlowMode(true, 5, { preferredRole: "bot" }).catch((e) => {
           console.warn(
             "[helix] failed to enable slow mode (stream-down):",
             String(e?.message || e)
@@ -337,7 +337,7 @@ var StartListener = function () {
             (await TWITCH_FUNCTIONS.isLive()) == true
           ) {
             await delay(WAIT_UNTIL_FOC_OFF);
-            await TWITCH_FUNCTIONS.setFollowersOnlyMode(false).catch((e) => {
+            await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, { preferredRole: "bot" }).catch((e) => {
               console.warn(
                 "[helix] failed to disable followers-only (delayed):",
                 String(e?.message || e)

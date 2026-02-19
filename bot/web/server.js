@@ -202,7 +202,7 @@ export function startWebServer(deps = {}) {
       try {
         const liveMods = await listChannelModerators({
           broadcasterId: TWITCH_CHANNEL_ID,
-          preferredRole: "auto",
+          preferredRole: "streamer",
           limit: 500,
         });
 
