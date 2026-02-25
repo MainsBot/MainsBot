@@ -308,6 +308,7 @@ const COMMAND_USER_COOLDOWN_MS = 30_000;
 let commandGlobalCooldownUntil = 0;
 const commandCooldownByUser = new Map();
 const missingKeywordResponseWarned = new Set();
+const keywordResponseIndex = new Map();
 
 const INSTANCE_NAME =
   String(process.env.INSTANCE_NAME || "default").trim() || "default";
@@ -437,6 +438,37 @@ function messageContainsKeywordPhrase(message, phrase, normalizedMessage = "") {
   if (!normalizedPhrase) return false;
   const normalized = normalizedMessage || normalizeKeywordText(rawMessage);
   return normalized.includes(normalizedPhrase);
+}
+
+function normalizeKeywordCategoryName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function rebuildKeywordResponseIndex() {
+  keywordResponseIndex.clear();
+  const table = RESPONSES?.responses;
+  if (!table || typeof table !== "object") return;
+  for (const key of Object.keys(table)) {
+    if (typeof table[key] !== "function") continue;
+    keywordResponseIndex.set(key, key);
+    keywordResponseIndex.set(String(key).toLowerCase(), key);
+    keywordResponseIndex.set(normalizeKeywordCategoryName(key), key);
+  }
+}
+
+function resolveKeywordResponseHandler(wordSet) {
+  const raw = String(wordSet || "");
+  if (!raw) return null;
+  const direct = keywordResponseIndex.get(raw);
+  if (direct) return { key: direct, fn: RESPONSES.responses[direct] };
+  const lower = keywordResponseIndex.get(raw.toLowerCase());
+  if (lower) return { key: lower, fn: RESPONSES.responses[lower] };
+  const normalized = keywordResponseIndex.get(normalizeKeywordCategoryName(raw));
+  if (normalized) return { key: normalized, fn: RESPONSES.responses[normalized] };
+  return null;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -656,7 +688,13 @@ let SETTINGS = readSettingsFromDisk();
 let STREAMS = JSON.parse(fs.readFileSync(STREAMS_PATH));
 const wordsLoad = readWordsFromDisk();
 let WORDS = wordsLoad.words;
+rebuildKeywordResponseIndex();
 console.log(`[KEYWORDS] loaded ${Object.keys(WORDS || {}).length} categories from ${wordsLoad.sourcePath}`);
+if (Object.keys(WORDS || {}).length === 0) {
+  console.warn(
+    `[KEYWORDS] no keyword categories loaded. Check WORDS_PATH / GLOBAL_WORDS_PATH and ensure WORDS.json exists at: ${wordsLoad.sourcePath}`
+  );
+}
 try {
   const missingHandlers = Object.keys(WORDS || {}).filter(
     (key) => typeof RESPONSES?.responses?.[key] !== "function"
@@ -2193,7 +2231,9 @@ async function joinHandler(
         continue;
       }
 
-      const keywordHandler = RESPONSES?.responses?.[wordSet];
+      const resolvedKeyword = resolveKeywordResponseHandler(wordSet);
+      const keywordHandler = resolvedKeyword?.fn;
+      const keywordKey = resolvedKeyword?.key || String(wordSet || "").trim();
       if (typeof keywordHandler !== "function") {
         if (!missingKeywordResponseWarned.has(wordSet)) {
           missingKeywordResponseWarned.add(wordSet);
@@ -2203,14 +2243,14 @@ async function joinHandler(
       }
 
       try {
-        if (wordSet === "corrections") {
+        if (keywordKey === "corrections") {
           await keywordHandler(
             client,
             twitchUsername,
             message,
             isModOrBroadcaster
           );
-        } else if (wordSet === "whogiftedme") {
+        } else if (keywordKey === "whogiftedme") {
           await keywordHandler(
             client,
             twitchUsername,
@@ -2218,7 +2258,7 @@ async function joinHandler(
             isModOrBroadcaster,
             twitchUserId
           );
-        } else if (wordSet === "game") {
+        } else if (keywordKey === "game") {
           await keywordHandler(client, twitchUsername);
         } else {
           await keywordHandler(client, twitchUsername, message);
@@ -2738,7 +2778,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
     SETTINGS.keywords == true &&
     !isPermitted
   ) {
-    joinHandler(message, twitchUsername, isPermitted, twitchUserId);
+    joinHandler(message, twitchUsername, ModOrBroadcaster, twitchUserId);
   }
 
   if (shouldTrackKeywordCooldown) {
@@ -3055,7 +3095,5 @@ process.on("uncaughtException", e =>
 process.on("unhandledRejection", e =>
   setStatus({ lastError: String(e?.message || e) })
 );
-
-
 
 

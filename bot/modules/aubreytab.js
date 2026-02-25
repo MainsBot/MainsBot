@@ -142,6 +142,11 @@ export function registerAubreyTabModule({
     await writeStateValue({ schema, instance, key: stateKey, value: state });
   }
 
+  async function RemoveTabState(state) {
+    if (!userDb) return;
+    
+  }
+
   client.on("message", async (channel, userstate, message, self) => {
     try {
       if (self) return;
