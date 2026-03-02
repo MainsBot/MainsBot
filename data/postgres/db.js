@@ -1,4 +1,5 @@
 import pg from "pg";
+import { resolveInstanceName } from "../../bot/functions/instance.js";
 
 let pool = null;
 
@@ -7,10 +8,9 @@ function normalizeSslMode(value) {
 }
 
 function buildPoolConfig() {
-  const connectionString = String(process.env.DATABASE_URL || "").trim();
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is missing (set it in your INI [database].url).");
-  }
+  const connectionString =
+    String(process.env.DATABASE_URL || "").trim() ||
+    "postgresql://mainsbot@127.0.0.1:5432/mainsbot";
 
   const sslmode = normalizeSslMode(process.env.PGSSLMODE || process.env.PGSSL || "");
   const ssl =
@@ -46,10 +46,11 @@ export function normalizePgIdentifier(value) {
 }
 
 export function resolveStateSchema() {
+  const instance = normalizePgIdentifier(resolveInstanceName()) || "default";
+  const defaultSchema = `mainsbot_${instance}`;
   const raw =
     String(process.env.DATABASE_SCHEMA || process.env.PGSCHEMA || "").trim() ||
-    "public";
-  const schema = normalizePgIdentifier(raw) || "public";
+    defaultSchema;
+  const schema = normalizePgIdentifier(raw) || defaultSchema;
   return schema;
 }
-

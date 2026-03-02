@@ -1,4 +1,5 @@
 // web/base.js (BROWSER ONLY)
+import { applyStreamerThemeFromStatus } from "/static/theme.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -73,6 +74,11 @@ function fmtDuration(ms) {
 }
 
 function buildCommandCooldownLabel(cooldownKey) {
+  if (typeof cooldownKey === "number" || /^\d+$/.test(String(cooldownKey || "").trim())) {
+    const ms = Math.max(0, Number(cooldownKey) || 0);
+    if (ms <= 0) return "";
+    return `Cooldown: ${fmtDuration(ms)} per user`;
+  }
   const key = String(cooldownKey || "")
     .toLowerCase()
     .replace(/\s+/g, "");
@@ -198,13 +204,20 @@ async function initTopbarSession() {
 function initThemeToggle() {
   if (!els.themeToggle) return;
 
+  const setThemeLabel = () => {
+    const isLight = document.documentElement.dataset.theme === "light";
+    els.themeToggle.textContent = isLight ? "Dark" : "Light";
+  };
+
   const saved = localStorage.getItem("theme");
   document.documentElement.dataset.theme = saved === "light" ? "light" : "dark";
+  setThemeLabel();
 
   els.themeToggle.addEventListener("click", () => {
     const isLight = document.documentElement.dataset.theme === "light";
     document.documentElement.dataset.theme = isLight ? "dark" : "light";
     localStorage.setItem("theme", isLight ? "dark" : "light");
+    setThemeLabel();
     render();
   });
 }
@@ -214,8 +227,8 @@ function initThemeToggle() {
    ========================= */
 
 async function loadCommands() {
-  const res = await fetch("commands.json", { cache: "no-store" });
-  if (!res.ok) throw new Error(`commands.json http ${res.status}`);
+  const res = await fetch("/api/commands?platform=all", { cache: "no-store" });
+  if (!res.ok) throw new Error(`/api/commands http ${res.status}`);
 
   const data = await res.json();
 
@@ -233,6 +246,8 @@ async function loadCommands() {
         desc: c.desc || "",
         modOnly: !!c.modOnly,
         cooldown: c.cooldown || "",
+        source: c.source || "default",
+        platforms: Array.isArray(c.platforms) ? c.platforms : ["twitch"],
       });
     }
   }
@@ -293,8 +308,10 @@ function render() {
                   <div class="cmdcard__desc">${escapeHtml(c.desc)}</div>
                   ${cooldownText ? `<div class="cmdcard__cooldown">${escapeHtml(cooldownText)}</div>` : ``}
                   ${c.modOnly ? `<div class="cmdcard__modline">mod only</div>` : ``}
+                  <div class="cmdcard__cooldown">Platforms: ${escapeHtml((c.platforms || []).join(", ") || "twitch")}</div>
                 </div>
                 <div class="cmdcard__right">
+                  ${c.source === "custom" ? `<span class="badge">CUSTOM</span>` : ``}
                   ${c.modOnly ? `<span class="badge">MOD</span>` : ``}
                 </div>
               </div>
@@ -321,6 +338,7 @@ async function refreshStatus() {
     if (!r.ok) throw new Error(`status http ${r.status}`);
 
     const s = await r.json();
+    applyStreamerThemeFromStatus(s);
 
     const online = !!s.online;
 
@@ -467,7 +485,7 @@ async function main() {
   } catch (e) {
     console.error("[WEB] commands load failed:", e);
     if (els.root)
-      els.root.innerHTML = `<div class="empty">Failed to load commands.json</div>`;
+      els.root.innerHTML = `<div class="empty">Failed to load command catalog</div>`;
     setText(els.lastErr, e?.message || String(e));
   }
 

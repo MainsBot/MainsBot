@@ -21,6 +21,7 @@ export function handleKillswitchToggle({
   userstate,
   settings,
   settingsPath = "./SETTINGS.json",
+  onActivity = null,
 } = {}) {
   const msg = String(lowerMessage || "").trim().toLowerCase();
   if (msg !== "!ks.on" && msg !== "!ks.off") return false;
@@ -34,6 +35,15 @@ export function handleKillswitchToggle({
     }
     settings.ks = true;
     fs.writeFileSync(settingsPath, JSON.stringify(settings));
+    try {
+      onActivity?.({
+        action: "toggle_killswitch",
+        source: "chat",
+        actor: String(userstate?.username || "").trim().toLowerCase() || "unknown",
+        detail: "!ks.on",
+        meta: { value: true },
+      });
+    } catch {}
     replyRaw(
       client,
       channelName,
@@ -50,6 +60,15 @@ export function handleKillswitchToggle({
     }
     settings.ks = false;
     fs.writeFileSync(settingsPath, JSON.stringify(settings));
+    try {
+      onActivity?.({
+        action: "toggle_killswitch",
+        source: "chat",
+        actor: String(userstate?.username || "").trim().toLowerCase() || "unknown",
+        detail: "!ks.off",
+        meta: { value: false },
+      });
+    } catch {}
     replyRaw(
       client,
       channelName,
@@ -69,6 +88,7 @@ export function handleKeywordsToggle({
   userstate,
   settings,
   settingsPath = "./SETTINGS.json",
+  onActivity = null,
 } = {}) {
   const msg = String(lowerMessage || "").trim().toLowerCase();
   if (msg !== "!keywords.on" && msg !== "!keywords.off") return false;
@@ -82,6 +102,15 @@ export function handleKeywordsToggle({
     }
     settings.keywords = true;
     fs.writeFileSync(settingsPath, JSON.stringify(settings));
+    try {
+      onActivity?.({
+        action: "toggle_keywords",
+        source: "chat",
+        actor: String(userstate?.username || "").trim().toLowerCase() || "unknown",
+        detail: "!keywords.on",
+        meta: { value: true },
+      });
+    } catch {}
     replyRaw(
       client,
       channelName,
@@ -98,6 +127,15 @@ export function handleKeywordsToggle({
     }
     settings.keywords = false;
     fs.writeFileSync(settingsPath, JSON.stringify(settings));
+    try {
+      onActivity?.({
+        action: "toggle_keywords",
+        source: "chat",
+        actor: String(userstate?.username || "").trim().toLowerCase() || "unknown",
+        detail: "!keywords.off",
+        meta: { value: false },
+      });
+    } catch {}
     replyRaw(
       client,
       channelName,
@@ -118,6 +156,7 @@ export function handleTimersToggle({
   userstate,
   settings,
   settingsPath = "./SETTINGS.json",
+  onActivity = null,
 } = {}) {
   const msg = String(lowerMessage || "").trim().toLowerCase();
   const isOn = msg === "!timer.on" || msg === "!timers.on";
@@ -133,6 +172,15 @@ export function handleTimersToggle({
     }
     settings.timers = true;
     fs.writeFileSync(settingsPath, JSON.stringify(settings));
+    try {
+      onActivity?.({
+        action: "toggle_timers",
+        source: "chat",
+        actor: String(userstate?.username || "").trim().toLowerCase() || "unknown",
+        detail: msg,
+        meta: { value: true },
+      });
+    } catch {}
     replyRaw(
       client,
       channelName,
@@ -149,6 +197,15 @@ export function handleTimersToggle({
     }
     settings.timers = false;
     fs.writeFileSync(settingsPath, JSON.stringify(settings));
+    try {
+      onActivity?.({
+        action: "toggle_timers",
+        source: "chat",
+        actor: String(userstate?.username || "").trim().toLowerCase() || "unknown",
+        detail: msg,
+        meta: { value: false },
+      });
+    } catch {}
     replyRaw(
       client,
       channelName,
@@ -160,4 +217,3 @@ export function handleTimersToggle({
 
   return false;
 }
-

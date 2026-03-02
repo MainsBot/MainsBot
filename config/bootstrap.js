@@ -12,6 +12,7 @@ const APP_ENV_PREFIXES_TO_CLEAR = [
   "GAMEPING_",
   "MODULE_",
   "DATABASE_",
+  "REDIS_",
 ];
 
 const APP_ENV_KEYS_TO_CLEAR = [
@@ -26,9 +27,18 @@ const APP_ENV_KEYS_TO_CLEAR = [
   "WORDS_PATH",
   "GLOBAL_WORDS_PATH",
   "TO_UNFRIEND_PATH",
+  "TAB_PATH",
   "AUBREY_TAB_PATH",
   "PLAYTIME_PATH",
   "PGSSLMODE",
+  "REDIS_URL",
+  "REDIS_ENABLED",
+  "REDIS_HOST",
+  "REDIS_PORT",
+  "REDIS_USERNAME",
+  "REDIS_PASSWORD",
+  "REDIS_DB",
+  "REDIS_TLS",
   "BOT_TOKEN",
   "BOT_OAUTH",
   "BOT_NAME",
@@ -184,7 +194,7 @@ function applyInstanceDefaults(ini) {
     setEnvOverride("GLOBAL_WORDS_PATH", globalWordsPath);
     setEnvOverride("WORDS_PATH", globalWordsPath);
     setEnvOverride("TO_UNFRIEND_PATH", path.join(stateDir, "TOUNFRIEND.json"));
-    setEnvOverride("AUBREY_TAB_PATH", path.join(stateDir, "aubrey_tab.json"));
+    setEnvOverride("TAB_PATH", path.join(stateDir, "tab.json"));
     setEnvOverride("PLAYTIME_PATH", path.join(stateDir, "playtime.json"));
 
     // Optional module data
@@ -200,6 +210,12 @@ function applyInstanceDefaults(ini) {
   if (paths.twitch_token_store) setEnvOverride("TWITCH_TOKEN_STORE_PATH", paths.twitch_token_store);
   if (paths.roblox_token_store) setEnvOverride("ROBLOX_TOKEN_STORE_PATH", paths.roblox_token_store);
   if (paths.spotify_token_store) setEnvOverride("SPOTIFY_TOKEN_STORE_PATH", paths.spotify_token_store);
+  if (paths.tab_path || paths.tabPath || paths.aubrey_tab_path || paths.aubreyTabPath) {
+    setEnvOverride(
+      "TAB_PATH",
+      paths.tab_path || paths.tabPath || paths.aubrey_tab_path || paths.aubreyTabPath
+    );
+  }
   if (paths.words_path || paths.wordsPath) {
     const wordsPath = asAbs(paths.words_path || paths.wordsPath);
     ensureDir(path.dirname(wordsPath));
@@ -269,19 +285,26 @@ function applyStateConfig(ini) {
     setEnvOverride("GLOBAL_WORDS_PATH", wordsPath);
     setEnvOverride("WORDS_PATH", wordsPath);
   }
+  if (state.tab_path || state.tabPath || state.aubrey_tab_path || state.aubreyTabPath) {
+    setEnvOverride(
+      "TAB_PATH",
+      state.tab_path || state.tabPath || state.aubrey_tab_path || state.aubreyTabPath
+    );
+  }
 }
 
 function applyModulesConfig(ini) {
   const mods = ini?.modules && typeof ini.modules === "object" ? ini.modules : {};
+  if (mods.web != null) setEnvOverride("MODULE_WEB", mods.web);
   if (mods.spotify != null) setEnvOverride("MODULE_SPOTIFY", mods.spotify);
   if (mods.roblox != null) setEnvOverride("MODULE_ROBLOX", mods.roblox);
   if (mods.discord != null) setEnvOverride("MODULE_DISCORD", mods.discord);
   if (mods.gameping != null) setEnvOverride("MODULE_GAMEPING", mods.gameping);
   if (mods.pubsub != null) setEnvOverride("MODULE_PUBSUB", mods.pubsub);
   if (mods.alerts != null) setEnvOverride("MODULE_ALERTS", mods.alerts);
-  if (mods.tab != null) setEnvOverride("MODULE_AUBREYTAB", mods.tab);
+  if (mods.tab != null) setEnvOverride("MODULE_TAB", mods.tab);
   // backward compatible name (deprecated)
-  if (mods.aubreytab != null) setEnvOverride("MODULE_AUBREYTAB", mods.aubreytab);
+  if (mods.aubreytab != null) setEnvOverride("MODULE_TAB", mods.aubreytab);
   if (mods.custom_commands != null || mods.customCommands != null) {
     setEnvOverride("MODULE_CUSTOM_COMMANDS", mods.custom_commands ?? mods.customCommands);
   }
@@ -360,6 +383,26 @@ function applyDatabaseSection(ini) {
   if (db.sslmode || db.pgsslmode || db.PGSSLMODE) {
     setEnvOverride("PGSSLMODE", db.sslmode || db.pgsslmode || db.PGSSLMODE);
   }
+}
+
+function applyRedisSection(ini) {
+  const redis =
+    ini?.redis && typeof ini.redis === "object"
+      ? ini.redis
+      : ini?.cache && typeof ini.cache === "object"
+        ? ini.cache
+        : {};
+
+  if (redis.url || redis.redis_url || redis.redisUrl) {
+    setEnvOverride("REDIS_URL", redis.url || redis.redis_url || redis.redisUrl);
+  }
+  if (redis.enabled != null) setEnvOverride("REDIS_ENABLED", redis.enabled);
+  if (redis.host) setEnvOverride("REDIS_HOST", redis.host);
+  if (redis.port != null) setEnvOverride("REDIS_PORT", redis.port);
+  if (redis.username || redis.user) setEnvOverride("REDIS_USERNAME", redis.username || redis.user);
+  if (redis.password || redis.pass) setEnvOverride("REDIS_PASSWORD", redis.password || redis.pass);
+  if (redis.db != null || redis.database != null) setEnvOverride("REDIS_DB", redis.db ?? redis.database);
+  if (redis.tls != null || redis.ssl != null) setEnvOverride("REDIS_TLS", redis.tls ?? redis.ssl);
 }
 
 function applyTwitchSection(ini) {
@@ -585,6 +628,10 @@ function buildEmptyQuotesState() {
 }
 
 function buildEmptyAubreyTabState() {
+  return buildEmptyTabState();
+}
+
+function buildEmptyTabState() {
   const now = Date.now();
   return { balance: 0, lastTouchedMs: now, lastInterestAppliedMs: now };
 }
@@ -643,7 +690,7 @@ function seedInstanceStateFiles() {
   const polldataPath = String(process.env.POLLDATA_PATH || "").trim();
   const wordsPath = String(process.env.WORDS_PATH || "").trim();
   const toUnfriendPath = String(process.env.TO_UNFRIEND_PATH || "").trim();
-  const aubreyTabPath = String(process.env.AUBREY_TAB_PATH || "").trim();
+  const tabPath = String(process.env.TAB_PATH || process.env.AUBREY_TAB_PATH || "").trim();
   const playtimePath = String(process.env.PLAYTIME_PATH || "").trim();
   const gamepingRolesPath = String(process.env.GAMEPING_ROLES_PATH || "").trim();
 
@@ -742,9 +789,9 @@ function seedInstanceStateFiles() {
     seedJsonFileIfMissing(toUnfriendPath, {});
   }
 
-  // aubrey_tab.json: seed minimal ledger
-  if (aubreyTabPath) {
-    seedJsonFileIfMissing(aubreyTabPath, buildEmptyAubreyTabState());
+  // tab.json: seed minimal ledger
+  if (tabPath) {
+    seedJsonFileIfMissing(tabPath, buildEmptyTabState());
   }
 }
 
@@ -770,6 +817,7 @@ export async function bootstrapConfig() {
     applySettingsSection(ini);
     applyMessagesSection(ini);
     applyDatabaseSection(ini);
+    applyRedisSection(ini);
     applyTwitchSection(ini);
     applySpotifySection(ini);
     applyRobloxSection(ini);

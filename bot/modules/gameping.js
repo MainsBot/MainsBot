@@ -40,6 +40,7 @@ export function registerGamepingModule({
   gamePingsPath = "",
   allowedUsers = process.env.GAMEPING_ALLOWED_USERS || "",
   enableGameChangePing = true,
+  onActivity = null,
   logger = console,
 } = {}) {
   if (!client || typeof client.on !== "function") {
@@ -246,6 +247,15 @@ export function registerGamepingModule({
           content: [roleMention, `🎮 ${gameLine}`].filter(Boolean).join("\n"),
           embeds: [linkEmbed],
         });
+        try {
+          onActivity?.({
+            action: "gameping",
+            source: "chat",
+            actor: String(userstate?.username || "").trim().toLowerCase() || "unknown",
+            detail: `!gameping ${pingKey}`,
+            meta: { game: presenceLabel, scam: Boolean(scamFlag) },
+          });
+        } catch {}
         return replyRaw(`Successfully pinged for ${presenceLabel}.`);
       }
 
@@ -263,6 +273,15 @@ export function registerGamepingModule({
         username: "MainsBot",
       });
 
+      try {
+        onActivity?.({
+          action: "gameping",
+          source: "chat",
+          actor: String(userstate?.username || "").trim().toLowerCase() || "unknown",
+          detail: `!gameping ${pingKey}`,
+          meta: { game: presenceLabel, scam: Boolean(scamFlag) },
+        });
+      } catch {}
       return replyRaw(`Ping sent (${presenceLabel})`);
     } catch (err) {
       logger?.error?.("[gameping] error:", err);

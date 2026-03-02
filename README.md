@@ -1,5 +1,5 @@
 # MainsBot
-### Current Version: 2.6.8
+### Current Version: managed in `package.json` (`version`)
 <!-- ![](https://cdn.7tv.app/emote/61a157c215b3ff4a5bb7dcc0/4x.avif) --> 
 
 ## Bot Features
@@ -34,9 +34,18 @@ Run:
 cd MainsBot && pm2 start main.js && cd ..
 ```
 
+Split runtime (recommended):
+```bash
+# bot only
+node main.js --config config/myinstance.ini
+
+# web only (optional)
+node main-web.js --config config/myinstance.ini
+```
+
 ## Code layout
 
-- Entry point: `main.js`
+- Entry points: `main.js` (bot), `main-web.js` (web)
 - Bot runtime: `bot/app.js`
 - Optional modules: `bot/modules/*`
 
@@ -47,6 +56,7 @@ cd MainsBot && pm2 start main.js && cd ..
 - Run one bot per config:
   - `node main.js --config config/myinstance.ini`
   - `pm2 start main.js --name mainsbot:myinstance -- --config config/myinstance.ini`
+  - Optional web process: `node main-web.js --config config/myinstance.ini`
 
 If `instance.data_dir` is set, per-instance state lives under that directory (file backend) or in Postgres (postgres backend). Files under `data_dir` are still used to seed defaults on first run.
 
@@ -64,6 +74,14 @@ Config (INI keys in `[web]` or env vars):
 
 - Set `[web].listen=socket` + `[web].socket_path` and proxy to it in nginx.
 - Example: `deploy/nginx-mainsbot-socket.conf.example`
+
+## systemd split services
+
+- Bot only service template: `deploy/systemd/mainsbot@.service.example`
+- Web only service template: `deploy/systemd/mainsbot-web@.service.example`
+- Typical setup:
+  - `systemctl enable --now mainsbot@streamername`
+  - `systemctl enable --now mainsbot-web@streamername`
 
 ## Postgres state (recommended)
 

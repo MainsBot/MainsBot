@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Redemptions | MainsBot</title>
-  <meta name="description" content="Manage Twitch channel point rewards and redemptions." />
+  <title>Keywords | MainsBot</title>
+  <meta name="description" content="Manage MainsBot keyword categories and phrases." />
   <meta name="theme-color" content="#ffbd59" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="MainsBot" />
-  <meta property="og:title" content="Redemptions | MainsBot" />
-  <meta property="og:description" content="Manage Twitch channel point rewards and redemptions." />
+  <meta property="og:title" content="Keywords | MainsBot" />
+  <meta property="og:description" content="Manage MainsBot keyword categories and phrases." />
   <meta property="og:image" content="/favicon.svg" />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="Redemptions | MainsBot" />
-  <meta name="twitter:description" content="Manage Twitch channel point rewards and redemptions." />
+  <meta name="twitter:title" content="Keywords | MainsBot" />
+  <meta name="twitter:description" content="Manage MainsBot keyword categories and phrases." />
   <meta name="twitter:image" content="/favicon.svg" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.svg" />
@@ -26,14 +26,14 @@
     <div class="topbar">
       <div class="topbar__brand">
         <a href="/">MainsBot</a>
-        <span class="muted">Redemptions</span>
+        <span class="muted">Keywords</span>
       </div>
       <div class="topbar__links">
         <a class="btn btn--sm btn--ghost" href="/home">Home</a>
         <a class="btn btn--sm btn--ghost" href="/admin">Admin</a>
-        <a class="btn btn--sm btn--ghost" href="/admin/keywords">Keywords</a>
+        <a class="btn btn--sm" href="/admin/keywords">Keywords</a>
         <a class="btn btn--sm btn--ghost" href="/admin/quotes">Quotes</a>
-        <a class="btn btn--sm" href="/admin/redemptions">Redemptions</a>
+        <a class="btn btn--sm btn--ghost" href="/admin/redemptions">Redemptions</a>
       </div>
       <div class="topbar__right" id="adminTopbarRight">
         <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
@@ -44,12 +44,12 @@
     <div class="app">
       <div class="card">
         <div class="card__bd">
-          <div id="redemptionsRoot" class="muted">Loading redemptions...</div>
+          <div id="keywordsRoot" class="muted">Loading keywords...</div>
         </div>
       </div>
     </div>
   </div>
 
-  <script type="module" src="/admin/redemptionsApp.js"></script>
+  <script type="module" src="/admin/keywordsApp.js"></script>
 </body>
 </html>

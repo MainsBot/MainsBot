@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
+import { applyStreamerThemeFromStatus } from "/static/theme.js";
 
 const html = htm.bind(React.createElement);
 
@@ -12,6 +13,19 @@ const MODE_TO_TWITCH = {
   "!val.on": { titleKey: "val", gameName: "VALORANT" },
   "!reddit.on": { titleKey: "reddit", gameName: "Just Chatting" },
 };
+
+const REQUIRED_BOT_SCOPES = [
+  "user:read:chat",
+  "user:write:chat",
+  "moderator:manage:chat_messages",
+  "moderator:manage:chat_settings",
+];
+
+const REQUIRED_STREAMER_SCOPES = [
+  "channel:manage:broadcast",
+  "channel:read:redemptions",
+  "channel:manage:redemptions",
+];
 
 const FILTER_DEFAULTS = {
   spam: {
@@ -49,6 +63,38 @@ function escapeHtml(value) {
     if (ch === '"') return "&quot;";
     return "&#39;";
   });
+}
+
+function formatActivityTime(value) {
+  const ts = Date.parse(String(value || ""));
+  if (!Number.isFinite(ts) || ts <= 0) return String(value || "");
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return String(value || "");
+  }
+}
+
+function formatDateTime(value) {
+  const ts = Number(value) || Date.parse(String(value || ""));
+  if (!Number.isFinite(ts) || ts <= 0) return "n/a";
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return "n/a";
+  }
+}
+
+function formatTtl(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n)) return "n/a";
+  if (n <= 0) return "expired";
+  const d = Math.floor(n / 86400);
+  const h = Math.floor((n % 86400) / 3600);
+  const m = Math.floor((n % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 function toCsv(arr) {
@@ -93,6 +139,110 @@ function normalizeId(value) {
   return String(value || "").trim();
 }
 
+function normalizeModeCommand(value) {
+  let out = String(value || "").trim().toLowerCase();
+  if (!out) return "";
+  if (!out.startsWith("!")) out = `!${out}`;
+  if (!out.endsWith(".on")) out = `${out.replace(/\.off$/i, "")}.on`;
+  return out;
+}
+
+function modeKeyFromCommand(modeCommand) {
+  return normalizeModeCommand(modeCommand).replace(/^!/, "").replace(/\.on$/i, "");
+}
+
+function normalizeModes(input = {}, fallback = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const out = {};
+  const seed = new Set([
+    ...Object.keys(fallback || {}),
+    ...Object.keys(src || {}),
+  ]);
+
+  for (const rawMode of seed) {
+    const command = normalizeModeCommand(rawMode);
+    if (!command) continue;
+    const modeKey = modeKeyFromCommand(command);
+    const f = fallback?.[command] && typeof fallback[command] === "object" ? fallback[command] : {};
+    const r = src?.[rawMode] && typeof src[rawMode] === "object" ? src[rawMode] : {};
+    out[command] = {
+      command,
+      key: String(r.key || f.key || modeKey).trim() || modeKey,
+      responseCommand: String(r.responseCommand || r.command || f.responseCommand || "").trim(),
+      timerMessage: String(r.timerMessage || r.timer || f.timerMessage || "").trim(),
+      title: String(r.title || f.title || "").trim(),
+      gameName: String(r.gameName || r.game || f.gameName || "").trim(),
+      keywordKey: String(r.keywordKey || r.keyword || f.keywordKey || modeKey).trim() || modeKey,
+      recapSpamCount: Math.max(0, Math.floor(Number(r.recapSpamCount ?? f.recapSpamCount ?? 0) || 0)),
+      recapMessage: String(r.recapMessage || f.recapMessage || "").trim(),
+    };
+  }
+
+  return out;
+}
+
+function normalizeScopeList(scopes) {
+  return Array.isArray(scopes)
+    ? scopes.map((scope) => String(scope || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function getMissingScopes(haveScopes, requiredScopes) {
+  const have = new Set(normalizeScopeList(haveScopes));
+  return (Array.isArray(requiredScopes) ? requiredScopes : []).filter(
+    (scope) => !have.has(String(scope || "").trim().toLowerCase())
+  );
+}
+
+function normalizeKeywords(raw) {
+  const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const out = {};
+  for (const [k, list] of Object.entries(src)) {
+    const key = String(k || "").trim().toLowerCase();
+    if (!key) continue;
+    const phrases = Array.isArray(list)
+      ? list
+          .map((item) => String(item || "").trim().toLowerCase())
+          .filter(Boolean)
+      : [];
+    out[key] = Array.from(new Set(phrases));
+  }
+  return out;
+}
+
+function normalizeCustomCommandRows(rawRows) {
+  const rows = Array.isArray(rawRows) ? rawRows : [];
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    const command = String(row?.command || "").trim().toLowerCase();
+    const response = String(row?.response || "").trim();
+    if (!command || !command.startsWith("!")) continue;
+    if (!response) continue;
+    if (seen.has(command)) continue;
+    seen.add(command);
+    const inputPlatforms = Array.isArray(row?.platforms) ? row.platforms : [];
+    const hasTwitch = inputPlatforms.includes("twitch");
+    const hasDiscord = inputPlatforms.includes("discord");
+    out.push({
+      command,
+      response,
+      enabled: row?.enabled == null ? true : Boolean(row.enabled),
+      deleted: Boolean(row?.deleted),
+      deletedAt: row?.deletedAt ? String(row.deletedAt) : null,
+      cooldowns: {
+        twitchMs: Math.max(0, Math.floor(Number(row?.cooldowns?.twitchMs) || 0)),
+        discordMs: Math.max(0, Math.floor(Number(row?.cooldowns?.discordMs) || 0)),
+      },
+      platforms:
+        hasTwitch || hasDiscord
+          ? [hasTwitch ? "twitch" : null, hasDiscord ? "discord" : null].filter(Boolean)
+          : ["twitch", "discord"],
+    });
+  }
+  return out.sort((a, b) => a.command.localeCompare(b.command));
+}
+
 function isOAuthConnected(entry) {
   if (!entry || typeof entry !== "object") return false;
   return Boolean(entry.hasAccessToken || entry.hasRefreshToken);
@@ -108,13 +258,50 @@ function normalizeSettings(raw) {
   src.linkFilter = src.linkFilter == null ? true : Boolean(src.linkFilter);
   src.currentMode = String(src.currentMode || "!join.on").trim() || "!join.on";
   src.currentGame = String(src.currentGame || "Website").trim() || "Website";
-  src.validModes = asArray(src.validModes);
-  if (!src.validModes.length) src.validModes = Object.keys(MODE_TO_TWITCH);
 
   src.linkAllowlist = asArray(src.linkAllowlist);
   src.linkAllowlistText = String(src.linkAllowlistText || toCsv(src.linkAllowlist));
   src.titles = asStringMap(src.titles);
   src.modeGames = asStringMap(src.modeGames);
+
+  const fallbackModes = {};
+  const validModesRaw = asArray(src.validModes);
+  const seedModes = validModesRaw.length ? validModesRaw : Object.keys(MODE_TO_TWITCH);
+  for (const rawMode of seedModes) {
+    const mode = normalizeModeCommand(rawMode);
+    if (!mode) continue;
+    const modeKey = modeKeyFromCommand(mode);
+    const baseCfg = MODE_TO_TWITCH[mode] || {};
+    fallbackModes[mode] = {
+      command: mode,
+      key: modeKey,
+      responseCommand: String(src.main?.[modeKey] || ""),
+      timerMessage: String(src.timer?.[modeKey] || ""),
+      title: String(src.titles?.[modeKey] || ""),
+      gameName: String(src.modeGames?.[mode] || baseCfg?.gameName || ""),
+      keywordKey: modeKey,
+      recapSpamCount: mode === "!reddit.on" ? 3 : 0,
+      recapMessage: mode === "!reddit.on" ? "REDDIT RECAP TIME: {url}" : "",
+    };
+  }
+  src.modes = normalizeModes(src.modes, fallbackModes);
+  src.validModes = Object.keys(src.modes);
+  if (!src.validModes.length) src.validModes = Object.keys(fallbackModes);
+  if (!src.validModes.includes(src.currentMode)) {
+    src.currentMode = src.validModes[0] || "!join.on";
+  }
+
+  src.main = asStringMap(src.main);
+  src.timer = asStringMap(src.timer);
+  for (const mode of src.validModes) {
+    const modeDef = src.modes[mode];
+    if (!modeDef) continue;
+    const key = String(modeDef.key || modeKeyFromCommand(mode)).trim();
+    if (key && modeDef.responseCommand) src.main[key] = String(modeDef.responseCommand);
+    if (key && modeDef.timerMessage) src.timer[key] = String(modeDef.timerMessage);
+    if (key && modeDef.title) src.titles[key] = String(modeDef.title);
+    if (modeDef.gameName) src.modeGames[mode] = String(modeDef.gameName);
+  }
 
   const filters = src.filters && typeof src.filters === "object" ? src.filters : {};
   const spam = filters.spam && typeof filters.spam === "object" ? filters.spam : {};
@@ -197,13 +384,34 @@ function App() {
   const [runtime, setRuntime] = useState(null);
   const [auth, setAuth] = useState(null);
   const [session, setSession] = useState(null);
+  const [keywords, setKeywords] = useState({});
+  const [keywordsText, setKeywordsText] = useState("{}");
+  const [customCommandRows, setCustomCommandRows] = useState([]);
+  const [analyticsRows, setAnalyticsRows] = useState([]);
+  const [analyticsDays, setAnalyticsDays] = useState(7);
+  const [analyticsPlatform, setAnalyticsPlatform] = useState("all");
+  const [health, setHealth] = useState(null);
+  const [simCommand, setSimCommand] = useState("!newcommand");
+  const [simArgs, setSimArgs] = useState("");
+  const [simOutput, setSimOutput] = useState("");
+  const [importText, setImportText] = useState("");
+  const [activityRows, setActivityRows] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityQuery, setActivityQuery] = useState({
+    q: "",
+    action: "",
+    actor: "",
+    source: "",
+    from: "",
+    to: "",
+  });
 
   useEffect(() => {
     const desired = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
-    setView(desired === "settings" ? "settings" : "home");
+    setView(["settings", "keywords", "commands"].includes(desired) ? desired : "home");
     const onHashChange = () => {
       const next = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
-      setView(next === "settings" ? "settings" : "home");
+      setView(["settings", "keywords", "commands"].includes(next) ? next : "home");
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -212,27 +420,135 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [settingsRes, statusRes, authRes, sessionRes] = await Promise.all([
+        const [
+          settingsRes,
+          statusRes,
+          authRes,
+          sessionRes,
+          keywordsRes,
+          customCommandsRes,
+          analyticsRes,
+          healthRes,
+          activityRes,
+        ] = await Promise.all([
           fetch("/api/admin/settings", { credentials: "same-origin", cache: "no-store" }),
           fetch("/api/status", { credentials: "same-origin", cache: "no-store" }),
           fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" }),
           fetch("/api/admin/session", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/admin/keywords", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/admin/custom-commands", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/admin/analytics/commands?days=7&platform=all&limit=20", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/admin/health", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/admin/activity?limit=120", { credentials: "same-origin", cache: "no-store" }),
         ]);
         const settingsPayload = await settingsRes.json().catch(() => null);
         if (!settingsRes.ok) {
           throw new Error(settingsPayload?.error || `${settingsRes.status} ${settingsRes.statusText}`);
         }
         setSettings(normalizeSettings(settingsPayload?.settings || {}));
-        setRuntime(statusRes.ok ? await statusRes.json().catch(() => null) : null);
+        const runtimePayload = statusRes.ok ? await statusRes.json().catch(() => null) : null;
+        setRuntime(runtimePayload);
+        applyStreamerThemeFromStatus(runtimePayload);
         setAuth(authRes.ok ? await authRes.json().catch(() => null) : null);
         setSession(sessionRes.ok ? await sessionRes.json().catch(() => null) : null);
+        const keywordsPayload = keywordsRes.ok ? await keywordsRes.json().catch(() => null) : null;
+        const normalizedKeywords = normalizeKeywords(keywordsPayload?.keywords || {});
+        setKeywords(normalizedKeywords);
+        setKeywordsText(JSON.stringify(normalizedKeywords, null, 2));
+        const customCommandsPayload = customCommandsRes.ok
+          ? await customCommandsRes.json().catch(() => null)
+          : null;
+        setCustomCommandRows(normalizeCustomCommandRows(customCommandsPayload?.rows || []));
+        const analyticsPayload = analyticsRes.ok ? await analyticsRes.json().catch(() => null) : null;
+        setAnalyticsRows(Array.isArray(analyticsPayload?.rows) ? analyticsPayload.rows : []);
+        const healthPayload = healthRes.ok ? await healthRes.json().catch(() => null) : null;
+        setHealth(healthPayload || null);
+        const activityPayload = activityRes.ok ? await activityRes.json().catch(() => null) : null;
+        setActivityRows(Array.isArray(activityPayload?.rows) ? activityPayload.rows : []);
       } catch (e) {
         setStatus(`Error: ${String(e?.message || e)}`);
       } finally {
+        setActivityLoading(false);
         setLoading(false);
       }
     })();
   }, []);
+
+  async function refreshActivity(overrideQuery = null) {
+    setActivityLoading(true);
+    try {
+      const activeQuery = overrideQuery || activityQuery;
+      const params = new URLSearchParams();
+      params.set("limit", "120");
+      if (activeQuery.q) params.set("q", activeQuery.q);
+      if (activeQuery.action) params.set("action", activeQuery.action);
+      if (activeQuery.actor) params.set("actor", activeQuery.actor);
+      if (activeQuery.source) params.set("source", activeQuery.source);
+      if (activeQuery.from) params.set("from", activeQuery.from);
+      if (activeQuery.to) params.set("to", activeQuery.to);
+      const res = await fetch(`/api/admin/activity?${params.toString()}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
+      setActivityRows(Array.isArray(body?.rows) ? body.rows : []);
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    } finally {
+      setActivityLoading(false);
+    }
+  }
+
+  async function refreshAnalytics() {
+    try {
+      const res = await fetch(
+        `/api/admin/analytics/commands?days=${encodeURIComponent(String(analyticsDays || 7))}&platform=${encodeURIComponent(String(analyticsPlatform || "all"))}&limit=20`,
+        { credentials: "same-origin", cache: "no-store" }
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
+      setAnalyticsRows(Array.isArray(body?.rows) ? body.rows : []);
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
+
+  async function refreshHealth() {
+    try {
+      const res = await fetch("/api/admin/health", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
+      setHealth(body || null);
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
+
+  async function runCommandSimulation() {
+    setStatus("Simulating command...");
+    try {
+      const res = await fetch("/api/admin/command-simulate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          command: String(simCommand || ""),
+          args: String(simArgs || ""),
+          user: { login: "tester", displayName: "Tester" },
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
+      setSimOutput(String(body?.output || ""));
+      setStatus("Simulation complete.");
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
 
   const setField = (key, value) =>
     setSettings((prev) => normalizeSettings({ ...(prev || {}), [key]: value }));
@@ -252,27 +568,92 @@ function App() {
       });
     });
 
-  const setTitle = (titleKey, value) =>
+  const setModeField = (mode, key, value) =>
     setSettings((prev) => {
       const base = normalizeSettings(prev || {});
+      const modeCmd = normalizeModeCommand(mode);
+      if (!modeCmd || !base.modes?.[modeCmd]) return base;
       return normalizeSettings({
         ...base,
-        titles: {
-          ...base.titles,
-          [titleKey]: value,
+        modes: {
+          ...base.modes,
+          [modeCmd]: {
+            ...base.modes[modeCmd],
+            [key]: value,
+          },
         },
       });
     });
 
-  const setModeGame = (mode, value) =>
+  const addMode = () =>
     setSettings((prev) => {
       const base = normalizeSettings(prev || {});
+      let nextIndex = 1;
+      let modeCommand = "";
+      do {
+        modeCommand = normalizeModeCommand(`!custom${nextIndex}.on`);
+        nextIndex += 1;
+      } while (base.modes?.[modeCommand]);
+
+      const modeKey = modeKeyFromCommand(modeCommand);
       return normalizeSettings({
         ...base,
-        modeGames: {
-          ...base.modeGames,
-          [mode]: value,
+        modes: {
+          ...base.modes,
+          [modeCommand]: {
+            command: modeCommand,
+            key: modeKey,
+            responseCommand: "",
+            timerMessage: "",
+            title: "",
+            gameName: "",
+            keywordKey: modeKey,
+            recapSpamCount: 0,
+            recapMessage: "",
+          },
         },
+        currentMode: modeCommand,
+      });
+    });
+
+  const removeMode = (mode) =>
+    setSettings((prev) => {
+      const base = normalizeSettings(prev || {});
+      const modeCmd = normalizeModeCommand(mode);
+      if (!modeCmd || !base.modes?.[modeCmd]) return base;
+      const nextModes = { ...base.modes };
+      delete nextModes[modeCmd];
+      const nextValid = Object.keys(nextModes);
+      return normalizeSettings({
+        ...base,
+        modes: nextModes,
+        currentMode:
+          base.currentMode === modeCmd
+            ? nextValid[0] || "!join.on"
+            : base.currentMode,
+      });
+    });
+
+  const renameModeCommand = (mode, nextModeCommand) =>
+    setSettings((prev) => {
+      const base = normalizeSettings(prev || {});
+      const current = normalizeModeCommand(mode);
+      const next = normalizeModeCommand(nextModeCommand);
+      if (!current || !next || !base.modes?.[current]) return base;
+      if (current === next) return base;
+      const nextModes = { ...base.modes };
+      if (nextModes[next]) return base;
+      const currentDef = { ...(nextModes[current] || {}) };
+      delete nextModes[current];
+      nextModes[next] = {
+        ...currentDef,
+        command: next,
+        key: String(currentDef.key || modeKeyFromCommand(next)).trim() || modeKeyFromCommand(next),
+      };
+      return normalizeSettings({
+        ...base,
+        modes: nextModes,
+        currentMode: base.currentMode === current ? next : base.currentMode,
       });
     });
 
@@ -291,26 +672,14 @@ function App() {
     return out;
   }, [settings]);
 
-  const titleRows = useMemo(() => {
-    if (!settings) return { rows: [], extras: [] };
-    const rows = [];
-    const usedKeys = new Set();
-    for (const [mode, cfg] of Object.entries(MODE_TO_TWITCH)) {
-      const titleKey = String(cfg?.titleKey || "").trim();
-      if (!titleKey) continue;
-      usedKeys.add(titleKey);
-      rows.push({
+  const modeRows = useMemo(() => {
+    if (!settings?.modes || typeof settings.modes !== "object") return [];
+    return Object.keys(settings.modes)
+      .sort((a, b) => a.localeCompare(b))
+      .map((mode) => ({
         mode,
-        titleKey,
-        gameDefault: String(cfg?.gameName || "").trim(),
-        gameValue: String(settings.modeGames?.[mode] || cfg?.gameName || "").trim(),
-        titleValue: String(settings.titles?.[titleKey] || ""),
-      });
-    }
-    const extras = Object.keys(settings.titles || {})
-      .filter((k) => !usedKeys.has(k))
-      .sort((a, b) => a.localeCompare(b));
-    return { rows, extras };
+        def: settings.modes[mode] || {},
+      }));
   }, [settings]);
 
   async function saveSettings() {
@@ -318,23 +687,31 @@ function App() {
     setStatus("Saving...");
     try {
       const normalized = normalizeSettings(settings);
+      const cleanModes = normalizeModes(normalized.modes || {});
       const cleanTitles = {};
-      for (const [k, v] of Object.entries(normalized.titles || {})) {
-        const key = String(k || "").trim();
-        const val = String(v || "").trim();
-        if (key && val) cleanTitles[key] = val;
-      }
       const cleanModeGames = {};
-      for (const [k, v] of Object.entries(normalized.modeGames || {})) {
-        const key = String(k || "").trim();
-        const val = String(v || "").trim();
-        if (key && val) cleanModeGames[key] = val;
+      const cleanMain = {};
+      const cleanTimer = {};
+      for (const [mode, def] of Object.entries(cleanModes)) {
+        const key = String(def.key || modeKeyFromCommand(mode)).trim();
+        const title = String(def.title || "").trim();
+        const gameName = String(def.gameName || "").trim();
+        const responseCommand = String(def.responseCommand || "").trim();
+        const timerMessage = String(def.timerMessage || "").trim();
+        if (key && title) cleanTitles[key] = title;
+        if (gameName) cleanModeGames[mode] = gameName;
+        if (key && responseCommand) cleanMain[key] = responseCommand;
+        if (key && timerMessage) cleanTimer[key] = timerMessage;
       }
 
       const payload = {
         settings: {
           ...normalized,
           linkAllowlist: fromCsv(normalized.linkAllowlistText),
+          modes: cleanModes,
+          validModes: Object.keys(cleanModes),
+          main: cleanMain,
+          timer: cleanTimer,
           titles: cleanTitles,
           modeGames: cleanModeGames,
         },
@@ -353,6 +730,7 @@ function App() {
       }
       setSettings(normalizeSettings(body?.settings || {}));
       setStatus(`Saved (${String(body?.backend || "ok")}).`);
+      void refreshActivity();
     } catch (e) {
       setStatus(`Error: ${String(e?.message || e)}`);
     }
@@ -369,6 +747,7 @@ function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           mode: String(normalized.currentMode || "").trim(),
+          modes: normalized.modes || {},
           titles: normalized.titles || {},
           modeGames: normalized.modeGames || {},
         }),
@@ -378,6 +757,7 @@ function App() {
         throw new Error(body?.error || `${res.status} ${res.statusText}`);
       }
       setStatus("Applied to Twitch.");
+      void refreshActivity();
     } catch (e) {
       setStatus(`Error: ${String(e?.message || e)}`);
     }
@@ -386,6 +766,130 @@ function App() {
   async function saveAndApplyMode() {
     await saveSettings();
     await applyToTwitch();
+  }
+
+  async function saveKeywords() {
+    setStatus("Saving keywords...");
+    try {
+      const parsed = JSON.parse(String(keywordsText || "{}"));
+      const normalized = normalizeKeywords(parsed);
+      const res = await fetch("/api/admin/keywords", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ keywords: normalized }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(body?.error || `${res.status} ${res.statusText}`);
+      }
+      const saved = normalizeKeywords(body?.keywords || {});
+      setKeywords(saved);
+      setKeywordsText(JSON.stringify(saved, null, 2));
+      setStatus(`Keywords saved (${String(body?.backend || "ok")}).`);
+      void refreshActivity();
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
+
+  function updateCustomCommandRow(index, patch = {}) {
+    setCustomCommandRows((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      if (!next[index]) return next;
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  }
+
+  function addCustomCommandRow() {
+    setCustomCommandRows((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      next.push({
+        command: "!newcommand",
+        response: "",
+        platforms: ["twitch", "discord"],
+        enabled: true,
+        deleted: false,
+        deletedAt: null,
+        cooldowns: { twitchMs: 0, discordMs: 0 },
+      });
+      return next;
+    });
+  }
+
+  function removeCustomCommandRow(index) {
+    setCustomCommandRows((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      if (!next[index]) return next;
+      next[index] = {
+        ...next[index],
+        enabled: false,
+        deleted: true,
+        deletedAt: new Date().toISOString(),
+      };
+      return next;
+    });
+  }
+
+  function restoreCustomCommandRow(index) {
+    setCustomCommandRows((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      if (!next[index]) return next;
+      next[index] = {
+        ...next[index],
+        enabled: true,
+        deleted: false,
+        deletedAt: null,
+      };
+      return next;
+    });
+  }
+
+  async function saveCustomCommands() {
+    setStatus("Saving custom commands...");
+    try {
+      const rows = normalizeCustomCommandRows(customCommandRows || []);
+      const res = await fetch("/api/admin/custom-commands", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "replace", rows }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
+      setCustomCommandRows(normalizeCustomCommandRows(body?.rows || []));
+      setStatus("Custom commands saved.");
+      void refreshActivity();
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
+
+  function exportCustomCommands() {
+    try {
+      const rows = normalizeCustomCommandRows(customCommandRows || []);
+      const blob = new Blob([JSON.stringify({ rows }, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "custom-commands.json";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
+
+  function importCustomCommandsFromText() {
+    try {
+      const parsed = JSON.parse(String(importText || "{}"));
+      const rows = normalizeCustomCommandRows(parsed?.rows || parsed);
+      setCustomCommandRows(rows);
+      setStatus(`Imported ${rows.length} command rows locally. Click Save to persist.`);
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    }
   }
 
   if (loading) {
@@ -419,13 +923,34 @@ function App() {
   const canLinkStreamer = Boolean(isOwner || isStreamerAccount);
   const canLinkOtherOauth = Boolean(isOwner || isStreamerAccount);
   const canManageAuth = Boolean(canLinkBot || canLinkStreamer || canLinkOtherOauth);
+  const adminRole = String(session?.role || "viewer").trim().toLowerCase();
+  const canEditCommands = adminRole === "owner" || adminRole === "editor";
+  const canEditSettings = adminRole === "owner" || adminRole === "editor";
 
   const twitchBotConnected = isOAuthConnected(auth?.bot);
   const twitchStreamerConnected = isOAuthConnected(auth?.streamer);
+  const twitchBotMissingScopes = getMissingScopes(auth?.bot?.scopes, REQUIRED_BOT_SCOPES);
+  const twitchStreamerMissingScopes = getMissingScopes(
+    auth?.streamer?.scopes,
+    REQUIRED_STREAMER_SCOPES
+  );
   const spotifyConnected = Boolean(
     auth?.spotify?.hasRefreshToken || auth?.spotify?.hasAccessToken
   );
   const robloxConnected = isOAuthConnected(auth?.roblox?.bot);
+  const spotifyReady = Boolean(
+    auth?.spotify?.hasClientId &&
+      auth?.spotify?.hasClientSecret &&
+      (auth?.spotify?.hasRefreshToken || auth?.spotify?.hasAccessToken)
+  );
+  const robloxReady = Boolean(robloxConnected);
+  const tokenCoverageReady =
+    twitchBotConnected &&
+    twitchStreamerConnected &&
+    !twitchBotMissingScopes.length &&
+    !twitchStreamerMissingScopes.length &&
+    spotifyReady &&
+    robloxReady;
 
   return html`
     <div className="grid">
@@ -435,9 +960,11 @@ function App() {
             <div className="pill">Dashboard</div>
             <h1 style=${{ marginTop: "10px" }}>Admin</h1>
             <div className="muted" style=${{ marginTop: "6px" }}>Manage settings, filters, and OAuth links.</div>
+            <div className="meta" style=${{ marginTop: "6px" }}>Role: <code>${adminRole}</code></div>
           </div>
           <div className="row">
             ${canManageAuth ? html`<a className="btn btn--sm btn--ghost" href="/admin/auth">Auth</a>` : null}
+            <a className="btn btn--sm btn--ghost" href="/admin/keywords">Keywords</a>
             <a className="btn btn--sm btn--ghost" href="/admin/redemptions">Redemptions</a>
             <a className="btn btn--sm btn--ghost" href="/api/status" target="_blank" rel="noreferrer">Status JSON</a>
           </div>
@@ -445,13 +972,16 @@ function App() {
         <div className="row" style=${{ marginTop: "12px" }}>
           <button className=${view === "home" ? "btn btn--sm" : "btn btn--sm btn--ghost"} onClick=${() => (window.location.hash = "home")}>Overview</button>
           <button className=${view === "settings" ? "btn btn--sm" : "btn btn--sm btn--ghost"} onClick=${() => (window.location.hash = "settings")}>Settings</button>
+          <button className=${view === "commands" ? "btn btn--sm" : "btn btn--sm btn--ghost"} onClick=${() => (window.location.hash = "commands")}>Commands</button>
+          <button className=${view === "keywords" ? "btn btn--sm" : "btn btn--sm btn--ghost"} onClick=${() => (window.location.hash = "keywords")}>Keywords</button>
         </div>
       </div>
 
       ${view === "home"
         ? html`
-            <div className="grid grid--3">
-              <div className="panel">
+            <div className="grid">
+              <div className="grid grid--3">
+                <div className="panel">
                 <h2>Bot</h2>
                 <div className="row" style=${{ justifyContent: "space-between", marginTop: "8px" }}><span className="k">Online</span><span className=${runtime?.online ? "ok" : "warn"}>${runtime?.online ? "Yes" : "No"}</span></div>
                 <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Mode</span><span>${String(settings.currentMode || "n/a")}</span></div>
@@ -476,15 +1006,23 @@ function App() {
                   </div>
                 </div>
                 <div className="row" style=${{ marginTop: "10px" }}>
-                  <button className="btn btn--sm" onClick=${saveSettings}>Save Quick Changes</button>
-                  <button className="btn btn--sm btn--ghost" onClick=${saveAndApplyMode}>Save + Apply Mode</button>
+                  <button className="btn btn--sm" onClick=${saveSettings} disabled=${!canEditSettings}>Save Quick Changes</button>
+                  <button className="btn btn--sm btn--ghost" onClick=${saveAndApplyMode} disabled=${!canEditSettings}>Save + Apply Mode</button>
                 </div>
                 <div className="meta">${status || "Use quick controls, then save."}</div>
-              </div>
-              <div className="panel">
+                </div>
+                <div className="panel">
                 <h2>Twitch OAuth</h2>
                 <div className="row" style=${{ justifyContent: "space-between", marginTop: "8px" }}><span className="k">Bot</span><span className=${twitchBotConnected ? "ok" : "warn"}>${twitchBotConnected ? "Connected" : "Not Connected"}</span></div>
                 <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Streamer</span><span className=${twitchStreamerConnected ? "ok" : "warn"}>${twitchStreamerConnected ? "Connected" : "Not Connected"}</span></div>
+                <div className="meta">Bot token TTL: <code>${formatTtl(auth?.bot?.expiresInSec)}</code></div>
+                <div className="meta">Streamer token TTL: <code>${formatTtl(auth?.streamer?.expiresInSec)}</code></div>
+                ${twitchBotMissingScopes.length
+                  ? html`<div className="meta">Bot missing scopes: <code>${twitchBotMissingScopes.join(", ")}</code></div>`
+                  : null}
+                ${twitchStreamerMissingScopes.length
+                  ? html`<div className="meta">Streamer missing scopes: <code>${twitchStreamerMissingScopes.join(", ")}</code></div>`
+                  : null}
                 <div className="row" style=${{ marginTop: "10px" }}>
                   ${canLinkBot ? html`<a className="btn btn--sm" href="/auth/twitch/bot">Link Bot</a>` : null}
                   ${canLinkStreamer ? html`<a className="btn btn--sm" href="/auth/twitch/streamer">Link Streamer</a>` : null}
@@ -495,11 +1033,20 @@ function App() {
                       ${!canLinkStreamer ? "Streamer link: owner or streamer account only." : ""}
                     </div>`
                   : null}
-              </div>
-              <div className="panel">
+                </div>
+                <div className="panel">
                 <h2>Other OAuth</h2>
                 <div className="row" style=${{ justifyContent: "space-between", marginTop: "8px" }}><span className="k">Spotify</span><span className=${spotifyConnected ? "ok" : "warn"}>${spotifyConnected ? "Connected" : "Not Connected"}</span></div>
                 <div className="row" style=${{ justifyContent: "space-between" }}><span className="k">Roblox</span><span className=${robloxConnected ? "ok" : "warn"}>${robloxConnected ? "Connected" : "Not Connected"}</span></div>
+                <div className="meta">Spotify token TTL: <code>${formatTtl(auth?.spotify?.expiresInSec)}</code></div>
+                <div className="meta">Spotify linked at: <code>${formatDateTime(auth?.spotify?.linkedAtMs)}</code></div>
+                <div className="meta">
+                  Token readiness:
+                  ${" "}
+                  <span className=${tokenCoverageReady ? "ok" : "warn"}>
+                    ${tokenCoverageReady ? "Ready" : "Missing required tokens/scopes"}
+                  </span>
+                </div>
                 <div className="row" style=${{ marginTop: "10px" }}>
                   ${canLinkOtherOauth ? html`<a className="btn btn--sm" href="/auth/spotify">Link Spotify</a>` : null}
                   ${canLinkOtherOauth ? html`<a className="btn btn--sm" href="/auth/roblox">Link Roblox</a>` : null}
@@ -507,10 +1054,76 @@ function App() {
                 ${!canLinkOtherOauth
                   ? html`<div className="meta">Spotify/Roblox linking: owner or streamer account only.</div>`
                   : null}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="panel__top">
+                  <div>
+                    <h2>Activity Log</h2>
+                    <div className="meta">Recent bot and admin actions (mode, gamepings, toggles, keyword/command updates).</div>
+                  </div>
+                  <button className="btn btn--sm btn--ghost" onClick=${refreshActivity}>Refresh</button>
+                </div>
+                <div className="fieldlist" style=${{ marginTop: "10px" }}>
+                  <div className="field field--compact"><div className="field__meta"><div className="field__label">Search</div></div><input className="in in--sm" value=${activityQuery.q} onChange=${(e)=>setActivityQuery((prev)=>({ ...prev, q: String(e.target.value || "") }))} placeholder="keyword/meta/detail" /></div>
+                  <div className="field field--compact"><div className="field__meta"><div className="field__label">Action</div></div><input className="in in--sm" value=${activityQuery.action} onChange=${(e)=>setActivityQuery((prev)=>({ ...prev, action: String(e.target.value || "") }))} placeholder="admin_save_settings" /></div>
+                  <div className="field field--compact"><div className="field__meta"><div className="field__label">Actor</div></div><input className="in in--sm" value=${activityQuery.actor} onChange=${(e)=>setActivityQuery((prev)=>({ ...prev, actor: String(e.target.value || "") }))} placeholder="moderator login" /></div>
+                  <div className="field field--compact"><div className="field__meta"><div className="field__label">Source</div></div><input className="in in--sm" value=${activityQuery.source} onChange=${(e)=>setActivityQuery((prev)=>({ ...prev, source: String(e.target.value || "") }))} placeholder="web / discord / bot" /></div>
+                  <div className="field field--compact"><div className="field__meta"><div className="field__label">From</div></div><input className="in in--sm" type="datetime-local" value=${activityQuery.from} onChange=${(e)=>setActivityQuery((prev)=>({ ...prev, from: String(e.target.value || "") }))} /></div>
+                  <div className="field field--compact"><div className="field__meta"><div className="field__label">To</div></div><input className="in in--sm" type="datetime-local" value=${activityQuery.to} onChange=${(e)=>setActivityQuery((prev)=>({ ...prev, to: String(e.target.value || "") }))} /></div>
+                </div>
+                <div className="row" style=${{ marginTop: "8px" }}>
+                  <button className="btn btn--sm" onClick=${refreshActivity}>Apply Filters</button>
+                  <button
+                    className="btn btn--sm btn--ghost"
+                    onClick=${() => {
+                      const cleared = { q: "", action: "", actor: "", source: "", from: "", to: "" };
+                      setActivityQuery(cleared);
+                      void refreshActivity(cleared);
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div style=${{ marginTop: "10px" }}>
+                  ${activityLoading
+                    ? html`<div className="muted">Loading activity...</div>`
+                    : !activityRows.length
+                    ? html`<div className="muted">No recent activity yet.</div>`
+                    : html`
+                        <div className="table-wrap">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Time</th>
+                                <th>Action</th>
+                                <th>Actor</th>
+                                <th>Source</th>
+                                <th>Detail</th>
+                                <th>Meta</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              ${activityRows.map((row, idx) => html`
+                                <tr key=${`${String(row?.ts || "")}:${idx}`}>
+                                  <td>${formatActivityTime(row?.ts)}</td>
+                                  <td><code>${String(row?.action || "")}</code></td>
+                                  <td>${String(row?.actor || "")}</td>
+                                  <td>${String(row?.source || "")}</td>
+                                  <td title=${String(row?.detail || "")}>${String(row?.detail || "")}</td>
+                                  <td><code>${JSON.stringify(row?.meta || {})}</code></td>
+                                </tr>
+                              `)}
+                            </tbody>
+                          </table>
+                        </div>
+                      `}
+                </div>
               </div>
             </div>
           `
-        : html`
+        : view === "settings"
+        ? html`
             <div className="grid">
               <div className="panel">
                 <h2>Core Settings</h2>
@@ -578,37 +1191,310 @@ function App() {
               </div>
 
               <div className="panel">
-                <h2>Twitch Titles</h2>
-                <div className="meta">Edit title and game per mode. Use Apply to Twitch for immediate update.</div>
+                <div className="panel__top">
+                  <div>
+                    <h2>Mode Manager</h2>
+                    <div className="meta">Create/edit modes without touching JSON files.</div>
+                  </div>
+                  <button className="btn btn--sm btn--ghost" onClick=${addMode}>Add Mode</button>
+                </div>
                 <div className="table-wrap" style=${{ marginTop: "10px" }}>
                   <table>
-                    <thead><tr><th>Mode</th><th>Title Key</th><th>Game</th><th>Title</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>Mode</th>
+                        <th>Chat Command</th>
+                        <th>Timer Message</th>
+                        <th>Keyword Key</th>
+                        <th>Game</th>
+                        <th>Title</th>
+                        <th>Recap Spam</th>
+                        <th>Recap Message</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
                     <tbody>
-                      ${titleRows.rows.map((row) => html`
-                        <tr key=${row.mode}>
-                          <td><code>${row.mode}</code></td>
-                          <td><code>${row.titleKey}</code></td>
-                          <td><input className="in in--sm" value=${row.gameValue} onChange=${(e) => setModeGame(row.mode, e.target.value)} placeholder=${row.gameDefault} /></td>
-                          <td><textarea className="textarea textarea--sm" value=${row.titleValue} onChange=${(e) => setTitle(row.titleKey, e.target.value)} placeholder="Stream title..." /></td>
-                        </tr>
-                      `)}
-                      ${titleRows.extras.map((titleKey) => html`
-                        <tr key=${`extra:${titleKey}`}>
-                          <td className="muted">-</td>
-                          <td><code>${titleKey}</code></td>
-                          <td className="muted">-</td>
-                          <td><textarea className="textarea textarea--sm" value=${String(settings.titles?.[titleKey] || "")} onChange=${(e) => setTitle(titleKey, e.target.value)} placeholder="Stream title..." /></td>
-                        </tr>
-                      `)}
+                      ${modeRows.map((row) => {
+                        const mode = row.mode;
+                        const def = row.def || {};
+                        return html`
+                          <tr key=${mode}>
+                            <td>
+                              <input
+                                className="in in--sm"
+                                defaultValue=${mode}
+                                onBlur=${(e) => renameModeCommand(mode, e.target.value)}
+                                placeholder="!join.on"
+                              />
+                            </td>
+                            <td><input className="in in--sm" value=${String(def.responseCommand || "")} onChange=${(e) => setModeField(mode, "responseCommand", e.target.value)} placeholder="!join" /></td>
+                            <td><input className="in in--sm" value=${String(def.timerMessage || "")} onChange=${(e) => setModeField(mode, "timerMessage", e.target.value)} placeholder="type !join to join the game" /></td>
+                            <td><input className="in in--sm" value=${String(def.keywordKey || "")} onChange=${(e) => setModeField(mode, "keywordKey", e.target.value)} placeholder="join" /></td>
+                            <td><input className="in in--sm" value=${String(def.gameName || "")} onChange=${(e) => setModeField(mode, "gameName", e.target.value)} placeholder="Roblox" /></td>
+                            <td><textarea className="textarea textarea--sm" value=${String(def.title || "")} onChange=${(e) => setModeField(mode, "title", e.target.value)} placeholder="Stream title..." /></td>
+                            <td><input className="in in--sm" type="number" min="0" step="1" value=${String(def.recapSpamCount || 0)} onChange=${(e) => setModeField(mode, "recapSpamCount", e.target.value)} /></td>
+                            <td><input className="in in--sm" value=${String(def.recapMessage || "")} onChange=${(e) => setModeField(mode, "recapMessage", e.target.value)} placeholder="REDDIT RECAP TIME: {url}" /></td>
+                            <td>
+                              <button className="btn btn--sm btn--danger" onClick=${() => removeMode(mode)} disabled=${modeRows.length <= 1}>Delete</button>
+                            </td>
+                          </tr>
+                        `;
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
 
               <div className="settings-actions">
-                <button className="btn" onClick=${saveSettings}>Save Settings</button>
-                <button className="btn btn--ghost" onClick=${applyToTwitch}>Apply to Twitch</button>
+                <button className="btn" onClick=${saveSettings} disabled=${!canEditSettings}>Save Settings</button>
+                <button className="btn btn--ghost" onClick=${applyToTwitch} disabled=${!canEditSettings}>Apply to Twitch</button>
                 <span className="statusline">${status}</span>
+              </div>
+              ${!canEditSettings ? html`<div className="meta">Role is ${adminRole}. Settings editing requires editor/owner.</div>` : null}
+            </div>
+          `
+        : view === "commands"
+        ? html`
+            <div className="grid">
+              <div className="panel">
+                <div className="panel__top">
+                  <div>
+                    <h2>Custom Commands</h2>
+                    <div className="meta">Manage custom commands and choose where they are enabled.</div>
+                  </div>
+                  <button className="btn btn--sm btn--ghost" onClick=${addCustomCommandRow}>Add Command</button>
+                </div>
+                <div className="table-wrap" style=${{ marginTop: "10px" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Command</th>
+                        <th>Response</th>
+                        <th>Enabled</th>
+                        <th>Twitch</th>
+                        <th>Discord</th>
+                        <th>Tw CD (ms)</th>
+                        <th>Dc CD (ms)</th>
+                        <th>Deleted</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${customCommandRows.map((row, idx) => {
+                        const platforms = Array.isArray(row?.platforms) ? row.platforms : ["twitch", "discord"];
+                        const deleted = Boolean(row?.deleted);
+                        return html`
+                          <tr key=${`${row?.command || "row"}:${idx}`}>
+                            <td>
+                              <input
+                                className="in in--sm"
+                                value=${String(row?.command || "")}
+                                onChange=${(e) =>
+                                  updateCustomCommandRow(idx, {
+                                    command: String(e.target.value || "").trim().toLowerCase(),
+                                  })}
+                                placeholder="!command"
+                                disabled=${!canEditCommands || deleted}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="in in--sm"
+                                value=${String(row?.response || "")}
+                                onChange=${(e) =>
+                                  updateCustomCommandRow(idx, { response: String(e.target.value || "") })}
+                                placeholder="Command response..."
+                                disabled=${!canEditCommands || deleted}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked=${row?.enabled !== false}
+                                onChange=${(e) => updateCustomCommandRow(idx, { enabled: e.target.checked })}
+                                disabled=${!canEditCommands || deleted}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked=${platforms.includes("twitch")}
+                                onChange=${(e) => {
+                                  const next = new Set(platforms);
+                                  if (e.target.checked) next.add("twitch");
+                                  else next.delete("twitch");
+                                  updateCustomCommandRow(idx, { platforms: Array.from(next) });
+                                }}
+                                disabled=${!canEditCommands || deleted}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked=${platforms.includes("discord")}
+                                onChange=${(e) => {
+                                  const next = new Set(platforms);
+                                  if (e.target.checked) next.add("discord");
+                                  else next.delete("discord");
+                                  updateCustomCommandRow(idx, { platforms: Array.from(next) });
+                                }}
+                                disabled=${!canEditCommands || deleted}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="in in--sm"
+                                type="number"
+                                min="0"
+                                step="100"
+                                value=${String(row?.cooldowns?.twitchMs || 0)}
+                                onChange=${(e) =>
+                                  updateCustomCommandRow(idx, {
+                                    cooldowns: {
+                                      ...(row?.cooldowns || {}),
+                                      twitchMs: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                    },
+                                  })}
+                                disabled=${!canEditCommands || deleted}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="in in--sm"
+                                type="number"
+                                min="0"
+                                step="100"
+                                value=${String(row?.cooldowns?.discordMs || 0)}
+                                onChange=${(e) =>
+                                  updateCustomCommandRow(idx, {
+                                    cooldowns: {
+                                      ...(row?.cooldowns || {}),
+                                      discordMs: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                    },
+                                  })}
+                                disabled=${!canEditCommands || deleted}
+                              />
+                            </td>
+                            <td>${deleted ? "yes" : "no"}</td>
+                            <td>
+                              <div className="row">
+                                <button
+                                  className="btn btn--sm btn--danger"
+                                  onClick=${() => removeCustomCommandRow(idx)}
+                                  disabled=${!canEditCommands || deleted}
+                                >
+                                  Delete
+                                </button>
+                                <button
+                                  className="btn btn--sm btn--ghost"
+                                  onClick=${() => restoreCustomCommandRow(idx)}
+                                  disabled=${!canEditCommands || !deleted}
+                                >
+                                  Restore
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        `;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="settings-actions">
+                  <button className="btn" onClick=${saveCustomCommands} disabled=${!canEditCommands}>Save Custom Commands</button>
+                  <button className="btn btn--ghost" onClick=${exportCustomCommands}>Export</button>
+                  <button className="btn btn--ghost" onClick=${refreshAnalytics}>Refresh Analytics</button>
+                  <button className="btn btn--ghost" onClick=${refreshHealth}>Refresh Health</button>
+                  <span className="statusline">${status}</span>
+                </div>
+                <div className="fieldlist" style=${{ marginTop: "10px" }}>
+                  <div className="field">
+                    <div className="field__meta">
+                      <div className="field__label">Import JSON</div>
+                      <div className="field__hint">Paste exported rows JSON then click Import.</div>
+                    </div>
+                    <textarea
+                      className="textarea textarea--sm"
+                      value=${importText}
+                      onChange=${(e) => setImportText(String(e.target.value || ""))}
+                      placeholder='{"rows":[{"command":"!test","response":"ok","platforms":["twitch","discord"]}]}'
+                    />
+                    <div className="row" style=${{ marginTop: "8px" }}>
+                      <button className="btn btn--sm btn--ghost" onClick=${importCustomCommandsFromText}>Import</button>
+                    </div>
+                  </div>
+                </div>
+                ${!canEditCommands ? html`<div className="meta">Role is ${adminRole}. Command editing requires editor/owner.</div>` : null}
+              </div>
+              <div className="grid grid--3">
+                <div className="panel">
+                  <h3>Command Simulator</h3>
+                  <div className="fieldlist">
+                    <div className="field field--compact"><div className="field__meta"><div className="field__label">Command</div></div><input className="in in--sm" value=${simCommand} onChange=${(e)=>setSimCommand(e.target.value)} placeholder="!command" /></div>
+                    <div className="field field--compact"><div className="field__meta"><div className="field__label">Args</div></div><input className="in in--sm" value=${simArgs} onChange=${(e)=>setSimArgs(e.target.value)} placeholder="arg1 arg2" /></div>
+                  </div>
+                  <div className="row" style=${{ marginTop: "10px" }}>
+                    <button className="btn btn--sm" onClick=${runCommandSimulation}>Run</button>
+                  </div>
+                  <div className="meta" style=${{ marginTop: "8px" }}><code>${simOutput || "(no output yet)"}</code></div>
+                </div>
+                <div className="panel">
+                  <h3>Top Commands</h3>
+                  <div className="row">
+                    <select className="in in--sm" value=${String(analyticsDays)} onChange=${(e)=>setAnalyticsDays(Number(e.target.value)||7)}>
+                      <option value="1">24h</option>
+                      <option value="7">7d</option>
+                      <option value="30">30d</option>
+                    </select>
+                    <select className="in in--sm" value=${analyticsPlatform} onChange=${(e)=>setAnalyticsPlatform(String(e.target.value||"all"))}>
+                      <option value="all">All</option>
+                      <option value="twitch">Twitch</option>
+                      <option value="discord">Discord</option>
+                    </select>
+                    <button className="btn btn--sm btn--ghost" onClick=${refreshAnalytics}>Load</button>
+                  </div>
+                  <div className="table-wrap" style=${{ marginTop: "8px" }}>
+                    <table>
+                      <thead><tr><th>Command</th><th>Uses</th></tr></thead>
+                      <tbody>
+                        ${analyticsRows.map((row, idx) => html`<tr key=${`a:${idx}`}><td><code>${String(row?.command || "")}</code></td><td>${Number(row?.uses || 0)}</td></tr>`)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div className="panel">
+                  <h3>Health</h3>
+                  <div className="meta">Overall: <strong>${health?.ok ? "OK" : "Issues"}</strong></div>
+                  <div className="table-wrap" style=${{ marginTop: "8px" }}>
+                    <table>
+                      <thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>
+                      <tbody>
+                        ${Object.entries(health?.checks || {}).map(([k, v]) => html`<tr key=${k}><td>${k}</td><td>${v?.ok ? "ok" : "fail"}</td><td>${String(v?.detail || "")}</td></tr>`)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `
+        : html`
+            <div className="grid">
+              <div className="panel">
+                <h2>Keyword Manager</h2>
+                <div className="meta">Edit keyword categories as JSON: <code>{ "category": ["phrase"] }</code></div>
+                <div className="meta" style=${{ marginTop: "6px" }}>
+                  Categories: ${Object.keys(keywords || {}).length}
+                </div>
+                <textarea
+                  className="textarea"
+                  style=${{ minHeight: "420px", marginTop: "10px" }}
+                  value=${keywordsText}
+                  onChange=${(e) => setKeywordsText(e.target.value)}
+                />
+                <div className="settings-actions">
+                  <button className="btn" onClick=${saveKeywords}>Save Keywords</button>
+                  <span className="statusline">${status}</span>
+                </div>
               </div>
             </div>
           `}

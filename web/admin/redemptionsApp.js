@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useState } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
+import { applyStreamerThemeFromStatus } from "/static/theme.js";
 
 const html = htm.bind(React.createElement);
+
+const REQUIRED_REDEMPTION_SCOPES = [
+  "channel:read:redemptions",
+  "channel:manage:redemptions",
+];
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => {
@@ -12,6 +18,37 @@ function escapeHtml(value) {
     if (ch === '"') return "&quot;";
     return "&#39;";
   });
+}
+
+function normalizeScopeList(scopes) {
+  return Array.isArray(scopes)
+    ? scopes.map((scope) => String(scope || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function getMissingScopes(haveScopes, requiredScopes) {
+  const have = new Set(normalizeScopeList(haveScopes));
+  return (Array.isArray(requiredScopes) ? requiredScopes : []).filter(
+    (scope) => !have.has(String(scope || "").trim().toLowerCase())
+  );
+}
+
+function Icon({ path, label = "" }) {
+  return html`
+    <svg
+      className="btn__icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden=${label ? undefined : true}
+      aria-label=${label || undefined}
+    >
+      <path d=${path}></path>
+    </svg>
+  `;
 }
 
 async function initTopbarSession() {
@@ -39,6 +76,17 @@ async function initTopbarSession() {
       <a class="btn btn--sm" href="/admin/login">Login</a>
     </div>
   `;
+}
+
+async function initStreamerTheme() {
+  try {
+    const res = await fetch("/api/status", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const status = res.ok ? await res.json().catch(() => null) : null;
+    applyStreamerThemeFromStatus(status);
+  } catch {}
 }
 
 function nint(value, fallback = 0) {
@@ -77,10 +125,18 @@ function App() {
   const [redeemStatus, setRedeemStatus] = useState("UNFULFILLED");
   const [redemptions, setRedemptions] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [authStatus, setAuthStatus] = useState(null);
 
   const selectedReward = useMemo(
     () => rewards.find((r) => r.id === selectedRewardId) || null,
     [rewards, selectedRewardId]
+  );
+  const missingRedemptionScopes = getMissingScopes(
+    authStatus?.streamer?.scopes,
+    REQUIRED_REDEMPTION_SCOPES
+  );
+  const missingStreamerToken = !Boolean(
+    authStatus?.streamer?.hasAccessToken || authStatus?.streamer?.hasRefreshToken
   );
 
   async function apiGet(url) {
@@ -141,8 +197,14 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        await loadRewards({ keepSelection: false });
-        await loadLogs();
+        await Promise.all([
+          loadRewards({ keepSelection: false }),
+          loadLogs(),
+          (async () => {
+            const payload = await apiGet("/api/auth/status");
+            setAuthStatus(payload);
+          })(),
+        ]);
         setStatus("Loaded.");
       } catch (e) {
         setStatus(`Error: ${String(e?.message || e)}`);
@@ -285,11 +347,24 @@ function App() {
             </div>
           </div>
           <div className="row">
-            <a className="btn btn--sm btn--ghost" href="/admin">Back</a>
+            <a className="btn btn--sm btn--ghost" href="/admin"><${Icon} path="M15 18l-6-6 6-6" />Back</a>
             <a className="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
           </div>
         </div>
         <div className="meta">${status}</div>
+        <div className="meta">
+          Redemptions token health:
+          ${" "}
+          <span className=${missingStreamerToken || missingRedemptionScopes.length ? "warn" : "ok"}>
+            ${missingStreamerToken || missingRedemptionScopes.length ? "Missing requirements" : "Ready"}
+          </span>
+        </div>
+        ${missingStreamerToken
+          ? html`<div className="meta">Missing Twitch streamer token. Re-link <code>/auth/twitch/streamer</code>.</div>`
+          : null}
+        ${missingRedemptionScopes.length
+          ? html`<div className="meta">Missing scopes: <code>${missingRedemptionScopes.join(", ")}</code></div>`
+          : null}
       </div>
 
       <div className="grid grid--2">
@@ -308,7 +383,7 @@ function App() {
                 </option>
               `)}
             </select>
-            <button className="btn btn--sm btn--ghost" onClick=${() => loadRewards()}>Refresh</button>
+            <button className="btn btn--sm btn--ghost" onClick=${() => loadRewards()}><${Icon} path="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />Refresh</button>
             <label className="row" style=${{ gap: "6px" }}>
               <input
                 type="checkbox"
@@ -362,13 +437,13 @@ function App() {
           </div>
 
           <div className="row" style=${{ marginTop: "10px" }}>
-            <button className="btn btn--sm" onClick=${onUpdateReward} disabled=${!selectedRewardId}>Save Reward</button>
-            <button className="btn btn--sm btn--ghost" onClick=${onCreateReward}>Create New</button>
+            <button className="btn btn--sm" onClick=${onUpdateReward} disabled=${!selectedRewardId}><${Icon} path="M20 6 9 17l-5-5" />Save Reward</button>
+            <button className="btn btn--sm btn--ghost" onClick=${onCreateReward}><${Icon} path="M12 5v14M5 12h14" />Create New</button>
             <button
               className="btn btn--sm btn--danger"
               onClick=${onDeleteReward}
               disabled=${!selectedRewardId || (selectedReward && selectedReward.is_manageable === false)}
-            >Delete</button>
+            ><${Icon} path="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />Delete</button>
           </div>
         </div>
 
@@ -380,7 +455,7 @@ function App() {
               <option value="FULFILLED">FULFILLED</option>
               <option value="CANCELED">CANCELED</option>
             </select>
-            <button className="btn btn--sm btn--ghost" onClick=${() => loadRedemptions()}>Refresh</button>
+            <button className="btn btn--sm btn--ghost" onClick=${() => loadRedemptions()}><${Icon} path="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />Refresh</button>
           </div>
           ${!redemptions.length
             ? html`<div className="muted" style=${{ marginTop: "12px" }}>No redemptions in this view.</div>`
@@ -391,8 +466,8 @@ function App() {
                       <div className="quote-card__head">
                         <span className="pill">${row.status || "?"}</span>
                         <div className="row">
-                          <button className="btn btn--sm" onClick=${() => onUpdateRedemptionStatus(row.id, "FULFILLED")}>Fulfill</button>
-                          <button className="btn btn--sm btn--danger" onClick=${() => onUpdateRedemptionStatus(row.id, "CANCELED")}>Cancel</button>
+                          <button className="btn btn--sm" onClick=${() => onUpdateRedemptionStatus(row.id, "FULFILLED")}><${Icon} path="M20 6 9 17l-5-5" />Fulfill</button>
+                          <button className="btn btn--sm btn--danger" onClick=${() => onUpdateRedemptionStatus(row.id, "CANCELED")}><${Icon} path="M18 6 6 18M6 6l12 12" />Cancel</button>
                         </div>
                       </div>
                       <div><strong>${row.user_name || row.user_login || "unknown"}</strong> (${row.user_id || "-"})</div>
@@ -438,6 +513,7 @@ function App() {
 }
 
 initTopbarSession();
+initStreamerTheme();
 
 const rootEl = document.getElementById("redemptionsRoot");
 if (rootEl) {

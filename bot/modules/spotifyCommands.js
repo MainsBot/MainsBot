@@ -1,5 +1,5 @@
 import * as SPOTIFY from "../api/spotify/index.js";
-import { hasSpotifyRefreshToken } from "../api/spotify/config.js";
+import { hasSpotifyRefreshTokenAsync } from "../api/spotify/config.js";
 
 function flagFromValue(value) {
   return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
@@ -17,19 +17,19 @@ function logMissingSpotifyOnce({ channelName, cmd } = {}) {
   );
 }
 
-function hasSpotifyCreds() {
+async function hasSpotifyCreds() {
   return Boolean(
     String(process.env.SPOTIFY_CLIENT_ID || "").trim() &&
       String(process.env.SPOTIFY_CLIENT_SECRET || "").trim() &&
-      hasSpotifyRefreshToken()
+      (await hasSpotifyRefreshTokenAsync())
   );
 }
 
 export function isSpotifyModuleEnabled() {
   const raw = String(process.env.MODULE_SPOTIFY ?? "").trim();
   if (raw) return flagFromValue(raw);
-  // default: enable if creds exist
-  return hasSpotifyCreds();
+  // default: keep enabled unless explicitly disabled; auth checks happen per command.
+  return true;
 }
 
 function cleanSpotifyTrackTitle(name) {
@@ -113,7 +113,7 @@ export function registerSpotifyCommands({
 
     // If module is enabled but Spotify isn't linked, do NOT respond in chat (avoid spam).
     // Log to console at most once per interval.
-    if (isPublicSpotifyCommand && !hasSpotifyCreds()) {
+    if (isPublicSpotifyCommand && !(await hasSpotifyCreds())) {
       logMissingSpotifyOnce({ channelName, cmd: lower.split(/\s+/)[0] });
       return;
     }
@@ -167,7 +167,7 @@ export function registerSpotifyCommands({
     }
 
     if (!isPermitted) return;
-    if (!hasSpotifyCreds()) {
+    if (!(await hasSpotifyCreds())) {
       logMissingSpotifyOnce({ channelName, cmd: lower.split(/\s+/)[0] });
       return;
     }

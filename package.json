@@ -1,5 +1,6 @@
 {
   "name": "mainsbotv2",
+  "version": "2.6.8",
   "lockfileVersion": 2,
   "requires": true,
   "dependencies": {
@@ -20,9 +21,12 @@
   },
   "type": "module",
   "scripts": {
-    "start": "node main.js"
+    "start": "node main.js",
+    "start:bot": "node main.js",
+    "start:web": "node main-web.js",
+    "smoke:web": "node tools/web/smoke-admin-api.mjs"
   },
   "engines": {
-    "node": "16.x"
+    "node": "18.x"
   }
 }

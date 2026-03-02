@@ -11,6 +11,11 @@ import { minify as terserMinify } from "terser";
 import CleanCSS from "clean-css";
 
 import { flushStateNow } from "../../data/postgres/stateInterceptor.js";
+import { normalizeKeywordsObject } from "../../data/postgres/keywordsStore.js";
+import { appendActivityLogEntryState, readActivityLogState } from "../../data/postgres/activityLogStore.js";
+import { getTopCommandsState } from "../../data/postgres/commandUsageStore.js";
+import { ensureStateTable, readStateValue, writeStateValue } from "../../data/postgres/stateStore.js";
+import { resolveStateSchema, getPgPool } from "../../data/postgres/db.js";
 import { createWebAdminAuth } from "../api/twitch/webAdmin.js";
 import {
   isUserModerator,
@@ -52,6 +57,17 @@ import {
   listTrackedRobloxFriends,
   unfriendTrackedRobloxFriends,
 } from "../modules/roblox.js";
+import {
+  modeKeyFromCommand,
+  normalizeModeCommand,
+  sanitizeSettingsForStorage,
+  createAdminRenderers,
+} from "./admin/index.js";
+import { resolveInstanceName } from "../functions/instance.js";
+import { getDefaultCommandsCatalog } from "./defaultCommandsCatalog.js";
+import { renderPajbotTemplate } from "../functions/pajbotTemplate.js";
+import { getRedisClient, isRedisConfigured } from "../api/redis/client.js";
+import { getSpotifyTokenStoreBackend } from "../api/spotify/store.js";
 
 function flagFromEnv(value) {
   return /^(1|true|yes|on)$/i.test(String(value || "").trim());
@@ -362,164 +378,6 @@ export function startWebServer(deps = {}) {
     return false;
   }
 
-  function sanitizeSettingsForStorage(input = {}) {
-    const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
-    const out = { ...src };
-
-    const bool = (v, fallback = false) => (v == null ? fallback : Boolean(v));
-    const str = (v, fallback = "") => (v == null ? fallback : String(v)).trim();
-    const num = (v, fallback = 0) => {
-      const n = Number(v);
-      return Number.isFinite(n) ? n : fallback;
-    };
-    const int = (v, fallback = 0) => Math.max(0, Math.floor(num(v, fallback)));
-    const arrStr = (v) =>
-      Array.isArray(v) ? v.map((x) => String(x || "").trim()).filter(Boolean) : [];
-    const obj = (v, fallback = {}) =>
-      v && typeof v === "object" && !Array.isArray(v) ? v : fallback;
-
-    // Normalize common keys used by both the bot and admin UI.
-    out.ks = bool(out.ks, false);
-    out.timers = bool(out.timers, true);
-    out.keywords = bool(out.keywords, true);
-    out.spamFilter = bool(out.spamFilter, true);
-    out.lengthFilter = bool(out.lengthFilter, false);
-    out.linkFilter = bool(out.linkFilter, true);
-    out.linkAllowlist = arrStr(out.linkAllowlist);
-    out.currentMode = str(out.currentMode, "!join.on");
-    out.currentGame = str(out.currentGame, "Website");
-    out.currentLink = out.currentLink == null ? null : str(out.currentLink, "");
-
-    out.filterExemptions = arrStr(out.filterExemptions);
-    out.bots = arrStr(out.bots);
-    out.joinTimer = bool(out.joinTimer, true);
-    out.gamesPlayedCount = int(out.gamesPlayedCount, 5);
-
-    out.timer = obj(out.timer, {
-      join: "type !join to join the game",
-      link: "type !link to get the link to join",
-      "1v1": "type 1v1 in chat once to get a chance to 1v1 the streamer",
-      ticket: "type !ticket to join the game",
-      val: "type !val to join",
-    });
-    out.main = obj(out.main, { join: "!join", link: "!link", "1v1": "!1v1", ticket: "!ticket", val: "!val" });
-    out.nonFollowers = obj(out.nonFollowers, {
-      join: "click the follow button on twitch to get access to the join command",
-    });
-
-    out.validModes = arrStr(out.validModes);
-    out.specialModes = arrStr(out.specialModes);
-    out.customModes = arrStr(out.customModes);
-    out.ignoreModes = arrStr(out.ignoreModes);
-
-    if (!out.validModes.length) {
-      out.validModes = ["!join.on", "!link.on", "!1v1.on", "!ticket.on", "!val.on", "!reddit.on"];
-    }
-    if (!out.specialModes.length) {
-      out.specialModes = [
-        "!ks.on",
-        "!ks.off",
-        "!timer.on",
-        "!timer.off",
-        "!keywords.on",
-        "!keywords.off",
-        "!timers.off",
-        "!timers.on",
-        "!sleep.on",
-        "!sleep.off",
-      ];
-    }
-    if (!out.customModes.length) {
-      out.customModes = ["!xqcchat.on", "!xqcchat.off"];
-    }
-    if (!out.ignoreModes.length) {
-      out.ignoreModes = [
-        "!spamfilter.on",
-        "!spamfilter.off",
-        "!lengthfilter.on",
-        "!lengthfilter.off",
-        "!linkfilter.on",
-        "!linkfilter.off",
-        "!sleep.on",
-      ];
-    }
-
-    out.corrections = obj(out.corrections, {});
-    out.titles = obj(out.titles, {
-      join: "FREE ROBUX LIVE - WIN THIS GAME - !JOIN TO PLAY - !socials !discord",
-      link: "FREE ROBUX LIVE - WIN THIS GAME - !LINK TO PLAY - !socials !discord",
-      ticket: "FREE ROBUX LIVE - WIN THIS GAME - !TICKET TO PLAY - !socials !discord",
-      "1v1": "ARSENAL 1V1 - WIN = FREE ROBUX - !1V1 TO PLAY - !socials !discord",
-      val: "VALORANT - !VAL TO PLAY - !socials !discord",
-      reddit: "REDDIT RECAP - !socials !discord !reddit",
-    });
-    out.modeGames = obj(out.modeGames, {});
-    for (const [k, v] of Object.entries(out.modeGames)) {
-      const key = String(k || "").trim();
-      const val = String(v || "").trim();
-      if (!key || !val) {
-        delete out.modeGames[k];
-      } else {
-        out.modeGames[key] = val;
-      }
-    }
-
-    // Remove runtime/diagnostic keys (should not be persisted).
-    delete out.subathonDay;
-    delete out.account;
-    delete out.gameChangeTime;
-    delete out.lastGameExitTime;
-    delete out.followerOnlyMode;
-    delete out.discordRobloxLogging;
-    delete out.responseCount;
-    delete out.chatArray;
-
-    // Filter tuning (timeouts/intervals/messages).
-    out.filters = obj(out.filters, {});
-    out.filters.spam = obj(out.filters.spam, {});
-    out.filters.length = obj(out.filters.length, {});
-    out.filters.link = obj(out.filters.link, {});
-
-    out.filters.spam.windowMs = int(out.filters.spam.windowMs, 7000);
-    out.filters.spam.minMessages = int(out.filters.spam.minMessages, 5);
-    out.filters.spam.strikeResetMs = int(out.filters.spam.strikeResetMs, 10 * 60 * 1000);
-    out.filters.spam.timeoutFirstSec = int(out.filters.spam.timeoutFirstSec, 30);
-    out.filters.spam.timeoutRepeatSec = int(out.filters.spam.timeoutRepeatSec, 60);
-    out.filters.spam.reason = str(
-      out.filters.spam.reason,
-      "[AUTOMATIC] Please stop excessively spamming - MainsBot"
-    );
-    out.filters.spam.messageFirst = str(
-      out.filters.spam.messageFirst,
-      "{atUser}, please stop excessively spamming."
-    );
-    out.filters.spam.messageRepeat = str(
-      out.filters.spam.messageRepeat,
-      "{atUser} Please STOP excessively spamming."
-    );
-
-    out.filters.length.maxChars = int(out.filters.length.maxChars, 400);
-    out.filters.length.strikeResetMs = int(out.filters.length.strikeResetMs, 10 * 60 * 1000);
-    out.filters.length.timeoutFirstSec = int(out.filters.length.timeoutFirstSec, 30);
-    out.filters.length.timeoutRepeatSec = int(out.filters.length.timeoutRepeatSec, 60);
-    out.filters.length.reason = str(
-      out.filters.length.reason,
-      "[AUTOMATIC] Message exceeds max character limit - MainsBot"
-    );
-    out.filters.length.message = str(
-      out.filters.length.message,
-      "{atUser} Message exceeds max character limit."
-    );
-
-    out.filters.link.strikeResetMs = int(out.filters.link.strikeResetMs, 10 * 60 * 1000);
-    out.filters.link.timeoutFirstSec = int(out.filters.link.timeoutFirstSec, 1);
-    out.filters.link.timeoutRepeatSec = int(out.filters.link.timeoutRepeatSec, 5);
-    out.filters.link.reason = str(out.filters.link.reason, "[AUTOMATIC] No links allowed - MainsBot");
-    out.filters.link.message = str(out.filters.link.message, "{atUser} No links allowed in chat.");
-
-    return out;
-  }
-
   let WEB_BUILD = null;
   let LAST_SCSS_CSS = "";
   const cssMinifier = new CleanCSS({ level: 2 });
@@ -659,6 +517,149 @@ function getStatusSnapshot() {
   }
 }
 
+function getKeywordsSnapshotFromDeps() {
+  try {
+    if (typeof deps.getKeywordsSnapshot === "function") {
+      return normalizeKeywordsObject(deps.getKeywordsSnapshot() || {});
+    }
+  } catch {}
+  return null;
+}
+
+async function saveKeywordsSnapshotFromDeps(nextKeywords = {}) {
+  if (typeof deps.saveKeywordsSnapshot !== "function") {
+    throw new Error("Keyword persistence is not available.");
+  }
+  const saved = await deps.saveKeywordsSnapshot(normalizeKeywordsObject(nextKeywords || {}));
+  return normalizeKeywordsObject(saved || {});
+}
+
+async function getActivityLogSnapshotFromDeps(limit = 120) {
+  const safeLimit = Math.max(1, Math.min(500, Number(limit) || 120));
+
+  try {
+    if (typeof deps.getActivityLogSnapshot === "function") {
+      const rows = await deps.getActivityLogSnapshot(safeLimit);
+      return Array.isArray(rows) ? rows : [];
+    }
+  } catch {}
+
+  try {
+    const res = await readActivityLogState({ limit: safeLimit });
+    return Array.isArray(res?.rows) ? res.rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function queueActivityLog(entry = {}) {
+  Promise.resolve()
+    .then(async () => {
+      if (typeof deps.logActivity === "function") {
+        await deps.logActivity(entry);
+        return;
+      }
+      await appendActivityLogEntryState({ entry });
+    })
+    .catch(() => {});
+}
+
+function getActivityActor(adminSession = null) {
+  return String(adminSession?.login || adminSession?.userId || "admin").trim().toLowerCase() || "admin";
+}
+
+async function getCommandAnalyticsSnapshot({ days = 7, platform = "all", limit = 20 } = {}) {
+  try {
+    return await getTopCommandsState({
+      schema: CUSTOM_COMMANDS_SCHEMA,
+      instance: CUSTOM_COMMANDS_INSTANCE,
+      days,
+      platform,
+      limit,
+    });
+  } catch {
+    return { platform: String(platform || "all"), days: Number(days) || 7, rows: [] };
+  }
+}
+
+async function getHealthSnapshot() {
+  const checks = {
+    postgres: { ok: false, detail: "" },
+    redis: { ok: false, detail: "" },
+    twitch: { ok: false, detail: "" },
+    spotify: { ok: false, detail: "" },
+    roblox: { ok: false, detail: "" },
+  };
+
+  try {
+    const pool = getPgPool();
+    await pool.query("select 1 as ok");
+    checks.postgres = { ok: true, detail: "connected" };
+  } catch (e) {
+    checks.postgres = { ok: false, detail: String(e?.message || e) };
+  }
+
+  try {
+    if (!isRedisConfigured()) {
+      checks.redis = { ok: true, detail: "disabled (file fallback)" };
+    } else {
+      const client = getRedisClient();
+      await client.command(["PING"]);
+      checks.redis = { ok: true, detail: "pong" };
+    }
+  } catch (e) {
+    checks.redis = { ok: false, detail: String(e?.message || e) };
+  }
+
+  try {
+    const twitch = getPublicTokenSnapshot?.() || {};
+    const hasBot = Boolean(twitch?.bot?.hasAccessToken || twitch?.bot?.hasRefreshToken);
+    const hasStreamer = Boolean(twitch?.streamer?.hasAccessToken || twitch?.streamer?.hasRefreshToken);
+    checks.twitch = {
+      ok: hasBot && hasStreamer,
+      detail: `bot=${hasBot ? "ok" : "missing"} streamer=${hasStreamer ? "ok" : "missing"}`,
+    };
+  } catch (e) {
+    checks.twitch = { ok: false, detail: String(e?.message || e) };
+  }
+
+  try {
+    const spotify = getPublicSpotifyTokenSnapshot?.() || {};
+    const ok =
+      Boolean(spotify?.hasClientId) &&
+      Boolean(spotify?.hasClientSecret) &&
+      Boolean(spotify?.hasRefreshToken || spotify?.hasAccessToken);
+    checks.spotify = {
+      ok,
+      detail: `backend=${getSpotifyTokenStoreBackend()} linked=${ok ? "yes" : "no"}`,
+    };
+  } catch (e) {
+    checks.spotify = { ok: false, detail: String(e?.message || e) };
+  }
+
+  try {
+    const roblox = getPublicRobloxTokenSnapshot?.() || {};
+    const ok = Boolean(roblox?.bot?.hasAccessToken || roblox?.bot?.hasRefreshToken);
+    checks.roblox = { ok, detail: ok ? "linked" : "not linked" };
+  } catch (e) {
+    checks.roblox = { ok: false, detail: String(e?.message || e) };
+  }
+
+  const overallOk = Object.values(checks).every((check) => Boolean(check?.ok));
+  return { ok: overallOk, checks };
+}
+
+function diffFlatKeys(beforeObj = {}, afterObj = {}, keys = []) {
+  const out = {};
+  for (const key of keys) {
+    const before = beforeObj?.[key];
+    const after = afterObj?.[key];
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    out[key] = { before, after };
+  }
+  return out;
+}
+
 function escapeHtmlForErrorPage(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => {
     if (ch === "&") return "&amp;";
@@ -733,10 +734,316 @@ function resolveEnvPath(envName, fallbackRel) {
 }
 
 const SETTINGS_FILE_PATH = resolveEnvPath("SETTINGS_PATH", "./SETTINGS.json");
+const WORDS_FILE_PATH = resolveEnvPath("WORDS_PATH", "./WORDS.json");
 const QUOTES_FILE_PATH = resolveEnvPath("QUOTES_PATH", "./QUOTES.json");
 const REDEMPTIONS_LOG_PATH =
   abs(String(process.env.REDEMPTIONS_LOG_PATH || "").trim()) ||
   abs(DATA_DIR ? path.join(DATA_DIR, "d", "REDEMPTIONS_LOG.json") : "./data/REDEMPTIONS_LOG.json");
+const CUSTOM_COMMANDS_SCHEMA = resolveStateSchema();
+const CUSTOM_COMMANDS_INSTANCE = resolveInstanceName();
+const CUSTOM_COMMANDS_STATE_KEY = "custom_commands";
+
+function normalizeCustomCommandName(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw.startsWith("!")) return "";
+  const cmd = raw.split(/\s+/)[0] || "";
+  return cmd.replace(/[^!a-z0-9_:.]/g, "");
+}
+
+function normalizeCommandPlatforms(value) {
+  const list = Array.isArray(value) ? value : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const platform = String(item || "").trim().toLowerCase();
+    if (platform !== "twitch" && platform !== "discord") continue;
+    if (seen.has(platform)) continue;
+    seen.add(platform);
+    out.push(platform);
+  }
+  return out.length ? out : ["twitch", "discord"];
+}
+
+function normalizeCooldownMs(value, fallback = 0) {
+  const n = Math.floor(Number(value) || fallback);
+  return Math.max(0, Math.min(3600_000, n));
+}
+
+function validateSettingsForStorageOrThrow(settings = {}) {
+  const src =
+    settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+  const errors = [];
+  const currentMode = normalizeModeCommand(src.currentMode || "");
+  const modes = src.modes && typeof src.modes === "object" && !Array.isArray(src.modes) ? src.modes : {};
+  const modeKeys = Object.keys(modes);
+
+  if (modeKeys.length < 1) errors.push("At least one mode is required.");
+  if (modeKeys.length > 150) errors.push("Too many modes (max 150).");
+  if (currentMode && !modes[currentMode]) {
+    errors.push(`currentMode (${currentMode}) must exist in modes.`);
+  }
+
+  for (const modeCommand of modeKeys) {
+    const modeDef = modes[modeCommand] && typeof modes[modeCommand] === "object" ? modes[modeCommand] : {};
+    const normalizedMode = normalizeModeCommand(modeCommand);
+    if (!normalizedMode) {
+      errors.push(`Invalid mode command: ${modeCommand}`);
+      continue;
+    }
+    const modeKey = String(modeDef.key || "").trim();
+    const title = String(modeDef.title || "").trim();
+    const responseCommand = String(modeDef.responseCommand || "").trim();
+    const timerMessage = String(modeDef.timerMessage || "").trim();
+    const recapSpamCount = Math.max(0, Math.floor(Number(modeDef.recapSpamCount || 0) || 0));
+    if (!modeKey || modeKey.length > 64) {
+      errors.push(`Mode ${normalizedMode} has invalid key (1-64 chars).`);
+    }
+    if (title.length > 300) errors.push(`Mode ${normalizedMode} title is too long (max 300 chars).`);
+    if (responseCommand.length > 80) {
+      errors.push(`Mode ${normalizedMode} responseCommand is too long (max 80 chars).`);
+    }
+    if (timerMessage.length > 280) {
+      errors.push(`Mode ${normalizedMode} timerMessage is too long (max 280 chars).`);
+    }
+    if (recapSpamCount > 10) {
+      errors.push(`Mode ${normalizedMode} recapSpamCount is too high (max 10).`);
+    }
+  }
+
+  const linkAllowlist = Array.isArray(src.linkAllowlist) ? src.linkAllowlist : [];
+  if (linkAllowlist.length > 500) errors.push("linkAllowlist is too large (max 500).");
+  for (const domain of linkAllowlist) {
+    const value = String(domain || "").trim();
+    if (!value) continue;
+    if (value.length > 120) errors.push("linkAllowlist contains an entry longer than 120 chars.");
+  }
+
+  if (errors.length) {
+    throw new Error(errors.slice(0, 8).join(" "));
+  }
+}
+
+function validateKeywordsForStorageOrThrow(keywords = {}) {
+  const src =
+    keywords && typeof keywords === "object" && !Array.isArray(keywords) ? keywords : {};
+  const errors = [];
+  const categoryEntries = Object.entries(src);
+  if (categoryEntries.length > 300) errors.push("Too many keyword categories (max 300).");
+  let phraseCount = 0;
+
+  for (const [category, rows] of categoryEntries) {
+    const key = String(category || "").trim().toLowerCase();
+    if (!key || key.length > 64) {
+      errors.push(`Invalid keyword category: ${category}`);
+      continue;
+    }
+    if (!/^[a-z0-9_:-]+$/.test(key)) {
+      errors.push(`Category ${key} contains invalid characters.`);
+    }
+    const list = Array.isArray(rows) ? rows : [];
+    if (list.length > 1500) errors.push(`Category ${key} has too many phrases (max 1500).`);
+    for (const phraseRaw of list) {
+      const phrase = String(phraseRaw || "").trim();
+      if (!phrase) continue;
+      phraseCount += 1;
+      if (phrase.length > 280) errors.push(`Category ${key} has a phrase longer than 280 chars.`);
+    }
+  }
+
+  if (phraseCount > 12000) errors.push("Too many total keyword phrases (max 12000).");
+  if (errors.length) throw new Error(errors.slice(0, 8).join(" "));
+}
+
+function validateCustomCommandForStorageOrThrow(row = {}, { index = 0 } = {}) {
+  const command = normalizeCustomCommandName(row?.command);
+  const response = String(row?.response || "").trim();
+  if (!command) throw new Error(`Invalid command at row ${index + 1}.`);
+  if (!response) throw new Error(`Missing response for ${command}.`);
+  if (response.length > 500) throw new Error(`Response too long for ${command} (max 500 chars).`);
+  const cooldowns = {
+    twitchMs: normalizeCooldownMs(row?.cooldowns?.twitchMs, 0),
+    discordMs: normalizeCooldownMs(row?.cooldowns?.discordMs, 0),
+  };
+  if (cooldowns.twitchMs > 3_600_000 || cooldowns.discordMs > 3_600_000) {
+    throw new Error(`Cooldown too high for ${command}.`);
+  }
+  return {
+    command,
+    response,
+    platforms: normalizeCommandPlatforms(row?.platforms),
+    enabled: parseBooleanInput(row?.enabled, true),
+    deleted: parseBooleanInput(row?.deleted, false),
+    deletedAt: row?.deletedAt ? String(row.deletedAt) : null,
+    cooldowns,
+  };
+}
+
+function normalizeActivityFilterText(value, max = 120) {
+  return String(value || "").trim().toLowerCase().slice(0, max);
+}
+
+function parseActivityDateMs(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return ms;
+}
+
+function filterActivityRows(rows = [], filters = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const q = normalizeActivityFilterText(filters.q, 240);
+  const actor = normalizeActivityFilterText(filters.actor, 80);
+  const action = normalizeActivityFilterText(filters.action, 80);
+  const source = normalizeActivityFilterText(filters.source, 40);
+  const fromMs = Number.isFinite(filters.fromMs) ? filters.fromMs : null;
+  const toMs = Number.isFinite(filters.toMs) ? filters.toMs : null;
+
+  return list.filter((row) => {
+    const rowActor = String(row?.actor || "").trim().toLowerCase();
+    const rowAction = String(row?.action || "").trim().toLowerCase();
+    const rowSource = String(row?.source || "").trim().toLowerCase();
+    const rowDetail = String(row?.detail || "").trim().toLowerCase();
+    const rowTs = Date.parse(String(row?.ts || ""));
+    if (actor && !rowActor.includes(actor)) return false;
+    if (action && !rowAction.includes(action)) return false;
+    if (source && !rowSource.includes(source)) return false;
+    if (fromMs && (!Number.isFinite(rowTs) || rowTs < fromMs)) return false;
+    if (toMs && (!Number.isFinite(rowTs) || rowTs > toMs)) return false;
+    if (q) {
+      const metaText = JSON.stringify(row?.meta || {}).toLowerCase();
+      const haystack = `${rowAction} ${rowActor} ${rowSource} ${rowDetail} ${metaText}`;
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function normalizeCustomCommandsState(raw) {
+  const input = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const commandsInput =
+    input.commands && typeof input.commands === "object" && !Array.isArray(input.commands)
+      ? input.commands
+      : {};
+  const commands = {};
+
+  for (const [rawCmd, entryRaw] of Object.entries(commandsInput)) {
+    const command = normalizeCustomCommandName(rawCmd);
+    if (!command) continue;
+
+    if (typeof entryRaw === "string") {
+      const response = String(entryRaw || "").trim();
+      if (!response) continue;
+      commands[command] = {
+        response,
+        platforms: ["twitch", "discord"],
+        enabled: true,
+        deleted: false,
+        deletedAt: null,
+        cooldowns: { twitchMs: 0, discordMs: 0 },
+      };
+      continue;
+    }
+
+    if (!entryRaw || typeof entryRaw !== "object" || Array.isArray(entryRaw)) continue;
+    const response = String(entryRaw.response || "").trim();
+    if (!response) continue;
+    commands[command] = {
+      response,
+      platforms: normalizeCommandPlatforms(entryRaw.platforms),
+      enabled: parseBooleanInput(entryRaw.enabled, true),
+      deleted: parseBooleanInput(entryRaw.deleted, false),
+      deletedAt: entryRaw.deletedAt ? String(entryRaw.deletedAt) : null,
+      cooldowns: {
+        twitchMs: normalizeCooldownMs(entryRaw?.cooldowns?.twitchMs, 0),
+        discordMs: normalizeCooldownMs(entryRaw?.cooldowns?.discordMs, 0),
+      },
+    };
+  }
+
+  return { version: 1, commands };
+}
+
+async function loadCustomCommandsState() {
+  await ensureStateTable({ schema: CUSTOM_COMMANDS_SCHEMA });
+  const raw = await readStateValue({
+    schema: CUSTOM_COMMANDS_SCHEMA,
+    instance: CUSTOM_COMMANDS_INSTANCE,
+    key: CUSTOM_COMMANDS_STATE_KEY,
+    fallback: { version: 1, commands: {} },
+  });
+  return normalizeCustomCommandsState(raw);
+}
+
+async function saveCustomCommandsState(next) {
+  const normalized = normalizeCustomCommandsState(next);
+  await ensureStateTable({ schema: CUSTOM_COMMANDS_SCHEMA });
+  await writeStateValue({
+    schema: CUSTOM_COMMANDS_SCHEMA,
+    instance: CUSTOM_COMMANDS_INSTANCE,
+    key: CUSTOM_COMMANDS_STATE_KEY,
+    value: normalized,
+  });
+  return normalized;
+}
+
+async function buildCommandsCatalogForApi({ platform = "all" } = {}) {
+  const normalizedPlatform = String(platform || "all").trim().toLowerCase();
+  const platformFilter =
+    normalizedPlatform === "twitch" || normalizedPlatform === "discord"
+      ? normalizedPlatform
+      : "all";
+
+  const categories = getDefaultCommandsCatalog().map((cat) => ({
+    name: String(cat?.name || "Commands"),
+    commands: (Array.isArray(cat?.commands) ? cat.commands : []).map((cmd) => ({
+      cmd: String(cmd?.cmd || "").trim(),
+      desc: String(cmd?.desc || "").trim(),
+      modOnly: Boolean(cmd?.modOnly),
+      cooldown: String(cmd?.cooldown || "").trim(),
+      source: "default",
+      platforms: ["twitch"],
+    })),
+  }));
+
+  let customState = { version: 1, commands: {} };
+  try {
+    customState = await loadCustomCommandsState();
+  } catch {}
+
+  const customRows = Object.entries(customState?.commands || {})
+    .map(([command, entry]) => ({
+      cmd: String(command || "").trim(),
+      desc: String(entry?.response || "").trim(),
+      modOnly: false,
+      cooldown:
+        platformFilter === "discord"
+          ? normalizeCooldownMs(entry?.cooldowns?.discordMs, 0)
+          : platformFilter === "twitch"
+            ? normalizeCooldownMs(entry?.cooldowns?.twitchMs, 0)
+            : Math.max(
+              normalizeCooldownMs(entry?.cooldowns?.twitchMs, 0),
+              normalizeCooldownMs(entry?.cooldowns?.discordMs, 0)
+            ),
+      source: "custom",
+      platforms: normalizeCommandPlatforms(entry?.platforms),
+      enabled: parseBooleanInput(entry?.enabled, true),
+      deleted: parseBooleanInput(entry?.deleted, false),
+    }))
+    .filter((row) => row.cmd && row.desc && row.enabled && !row.deleted)
+    .filter((row) => platformFilter === "all" || row.platforms.includes(platformFilter))
+    .sort((a, b) => a.cmd.localeCompare(b.cmd));
+
+  if (customRows.length) {
+    categories.push({ name: "Custom Commands", commands: customRows });
+  }
+
+  return {
+    categories,
+    customCount: customRows.length,
+    platform: platformFilter,
+  };
+}
 
 function normalizeQuotesData(raw) {
   const base =
@@ -1099,6 +1406,21 @@ function isOwnerSession(session) {
   if (ownerUserId && sessionUserId === ownerUserId) return true;
   if (ownerLogin && sessionLogin === ownerLogin) return true;
   return false;
+}
+
+function getAdminSessionRole(session) {
+  if (!session) return "viewer";
+  if (isOwnerSession(session)) return "owner";
+  if (isAuthManagerSession(session)) return "editor";
+  if (session?.isMod) return "mod";
+  return "viewer";
+}
+
+function roleAtLeast(currentRole, minRole) {
+  const rank = { viewer: 0, mod: 1, editor: 2, owner: 3 };
+  const cur = rank[String(currentRole || "viewer")] ?? 0;
+  const min = rank[String(minRole || "viewer")] ?? 0;
+  return cur >= min;
 }
 
 function normalizeIpCandidate(rawValue) {
@@ -1787,6 +2109,7 @@ function buildOpenApiSpec({ requestOrigin = "" } = {}) {
     servers: [{ url: origin }],
     tags: [
       { name: "Admin" },
+      { name: "Keywords" },
       { name: "Auth" },
       { name: "Status" },
       { name: "Spotify" },
@@ -1914,6 +2237,114 @@ function buildOpenApiSpec({ requestOrigin = "" } = {}) {
           responses: {
             200: { description: "Saved" },
             400: { description: "Invalid payload" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/admin/keywords": {
+        get: {
+          tags: ["Keywords"],
+          summary: "Get keyword categories/phrases",
+          responses: {
+            200: { description: "Keyword object" },
+            401: { description: "Unauthorized" },
+          },
+        },
+        post: {
+          tags: ["Keywords"],
+          summary: "Replace keyword categories/phrases",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    keywords: { type: "object", additionalProperties: { type: "array", items: { type: "string" } } },
+                  },
+                  required: ["keywords"],
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Saved" },
+            400: { description: "Invalid payload" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/admin/activity": {
+        get: {
+          tags: ["Admin"],
+          summary: "Get recent admin/bot activity log",
+          parameters: [
+            {
+              in: "query",
+              name: "limit",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 500, default: 120 },
+            },
+            { in: "query", name: "q", required: false, schema: { type: "string" } },
+            { in: "query", name: "action", required: false, schema: { type: "string" } },
+            { in: "query", name: "actor", required: false, schema: { type: "string" } },
+            { in: "query", name: "source", required: false, schema: { type: "string" } },
+            {
+              in: "query",
+              name: "from",
+              required: false,
+              schema: { type: "string", format: "date-time" },
+            },
+            {
+              in: "query",
+              name: "to",
+              required: false,
+              schema: { type: "string", format: "date-time" },
+            },
+          ],
+          responses: {
+            200: { description: "Activity rows" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/health": {
+        get: {
+          tags: ["Public"],
+          summary: "Public service health checks",
+          responses: {
+            200: { description: "Healthy" },
+            503: { description: "One or more checks failed" },
+          },
+        },
+      },
+      "/api/admin/analytics/commands": {
+        get: {
+          tags: ["Admin"],
+          summary: "Get top commands analytics by platform/time range",
+          responses: {
+            200: { description: "Analytics rows" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/admin/health": {
+        get: {
+          tags: ["Admin"],
+          summary: "Get backend/service health checks",
+          responses: {
+            200: { description: "Health payload" },
+            401: { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/admin/command-simulate": {
+        post: {
+          tags: ["Admin"],
+          summary: "Simulate a custom command output",
+          responses: {
+            200: { description: "Simulation result" },
+            400: { description: "Validation error" },
             401: { description: "Unauthorized" },
           },
         },
@@ -2244,6 +2675,42 @@ function buildOpenApiSpec({ requestOrigin = "" } = {}) {
           summary: "Get public auth/token status snapshot",
           responses: {
             200: { description: "Status payload" },
+          },
+        },
+      },
+      "/api/commands": {
+        get: {
+          tags: ["Status"],
+          summary: "Get merged command catalog (default + custom)",
+          parameters: [
+            {
+              in: "query",
+              name: "platform",
+              required: false,
+              schema: { type: "string", enum: ["all", "twitch", "discord"], default: "all" },
+            },
+          ],
+          responses: {
+            200: { description: "Commands payload" },
+          },
+        },
+      },
+      "/api/admin/custom-commands": {
+        get: {
+          tags: ["Admin"],
+          summary: "Get custom commands from postgres state",
+          responses: {
+            200: { description: "Custom commands payload" },
+            401: { description: "Unauthorized" },
+          },
+        },
+        post: {
+          tags: ["Admin"],
+          summary: "Create/update/delete/replace custom commands",
+          responses: {
+            200: { description: "Saved" },
+            400: { description: "Validation error" },
+            401: { description: "Unauthorized" },
           },
         },
       },
@@ -2604,71 +3071,17 @@ function renderReactAdminHtml({ who = "" } = {}) {
 </html>`;
 }
 
-function renderReactAppHtml({ who = "" } = {}) {
-  try {
-    const adminHtmlPath = path.join(WEB_DIR, "admin", "index.html");
-    return fs.readFileSync(adminHtmlPath, "utf8");
-  } catch {
-    return renderShell({
-      title: "Admin",
-      who: String(who || ""),
-      active: "admin",
-      body: '<div class="card"><div class="card__bd"><h1>Admin UI missing</h1><div class="muted">Could not load <code>web/admin/index.html</code>.</div></div></div>',
-    });
-  }
-}
-
-function renderQuotesAppHtml({ who = "" } = {}) {
-  try {
-    const quotesHtmlPath = path.join(WEB_DIR, "admin", "quotes.html");
-    return fs.readFileSync(quotesHtmlPath, "utf8");
-  } catch {
-    return renderShell({
-      title: "Quotes",
-      who: String(who || ""),
-      active: "admin",
-      body: '<div class="card"><div class="card__bd"><h1>Quotes UI missing</h1><div class="muted">Could not load <code>web/admin/quotes.html</code>.</div></div></div>',
-    });
-  }
-}
-
-function renderRedemptionsAppHtml({ who = "" } = {}) {
-  try {
-    const appHtmlPath = path.join(WEB_DIR, "admin", "redemptions.html");
-    return fs.readFileSync(appHtmlPath, "utf8");
-  } catch {
-    return renderShell({
-      title: "Redemptions",
-      who: String(who || ""),
-      active: "redemptions",
-      body: '<div class="card"><div class="card__bd"><h1>Redemptions UI missing</h1><div class="muted">Could not load <code>web/admin/redemptions.html</code>.</div></div></div>',
-    });
-  }
-}
-
-function renderAdminLoginHtml({
-  nextPath = "/admin",
-  canWebTwitchLogin = true,
-} = {}) {
-  try {
-    const loginHtmlPath = path.join(WEB_DIR, "admin", "login.html");
-    const safeNext = escapeHtml(String(nextPath || "/admin"));
-    const twitchHref = `/admin/login?twitch=1&next=${encodeURIComponent(String(nextPath || "/admin"))}`;
-
-    return fs
-      .readFileSync(loginHtmlPath, "utf8")
-      .replaceAll("__NEXT_PATH__", safeNext)
-      .replaceAll("__TWITCH_HREF__", escapeHtml(twitchHref))
-      .replaceAll("__LOGIN_GRID_CLASS__", canWebTwitchLogin ? "" : "login-grid--single")
-      .replaceAll("__TWITCH_CLASS__", canWebTwitchLogin ? "" : "is-hidden");
-  } catch {
-    return renderShell({
-      title: "Admin Login",
-      active: "admin",
-      body: `<div class="card"><div class="card__bd"><h1>Admin login UI missing</h1><div class="muted">Could not load <code>web/admin/login.html</code>.</div></div></div>`,
-    });
-  }
-}
+const {
+  renderReactAppHtml,
+  renderQuotesAppHtml,
+  renderRedemptionsAppHtml,
+  renderKeywordsAppHtml,
+  renderAdminLoginHtml,
+} = createAdminRenderers({
+  webDir: WEB_DIR,
+  renderShell,
+  escapeHtml,
+});
 
 function renderAuthLandingHtml({ settings, snapshot }) {
   const redirectUri = escapeHtml(settings?.redirectUri || "not_set");
@@ -3055,7 +3468,7 @@ const webServer = http.createServer(async (req, res) => {
         tokenStorePath: robloxAuthSettings.tokenStorePath,
       });
     const spotifyAuthSettings = buildSpotifyAuthSettingsForRequest(req);
-    const spotifyAuthSnapshot = () => getPublicSpotifyTokenSnapshot();
+    const spotifyAuthSnapshot = async () => getPublicSpotifyTokenSnapshot();
 
   // IMPORTANT: do not derive cookie security from requestOrigin, since requestOrigin can be forced via WEB_ORIGIN.
   // Use the actual incoming request scheme (or x-forwarded-proto) so local http logins don't drop the cookie.
@@ -3235,6 +3648,7 @@ const webServer = http.createServer(async (req, res) => {
   }
 
   if (routePath === "/admin/session" || routePath === "/api/admin/session") {
+    const role = adminAllowed ? getAdminSessionRole(adminSession) : "viewer";
     return sendJsonResponse(
       res,
       200,
@@ -3244,6 +3658,7 @@ const webServer = http.createServer(async (req, res) => {
         login: adminAllowed ? String(adminSession?.login || "") : null,
         userId: adminAllowed ? String(adminSession?.userId || "") : null,
         mode: adminAllowed ? String(adminSession?.mode || "") : null,
+        role,
       },
       { "cache-control": "no-store" }
     );
@@ -3358,7 +3773,7 @@ const webServer = http.createServer(async (req, res) => {
         who: String(adminSession?.login || ""),
         twitchSnapshot: authSnapshot(),
         robloxSnapshot: robloxAuthSnapshot(),
-        spotifySnapshot: spotifyAuthSnapshot(),
+        spotifySnapshot: await spotifyAuthSnapshot(),
       }),
       { "cache-control": "no-store" }
     );
@@ -3750,6 +4165,7 @@ const webServer = http.createServer(async (req, res) => {
         { "cache-control": "no-store" }
       );
     }
+    const adminRole = getAdminSessionRole(adminSession);
 
     if (method === "GET") {
       let settingsObj = {};
@@ -3773,6 +4189,14 @@ const webServer = http.createServer(async (req, res) => {
     }
 
     if (method === "POST") {
+      if (!roleAtLeast(adminRole, "editor")) {
+        return sendJsonResponse(
+          res,
+          403,
+          { ok: false, error: "Insufficient permissions." },
+          { "cache-control": "no-store" }
+        );
+      }
       try {
         const body = await readJsonBody(req, { limitBytes: 1024 * 1024 });
         let next = body?.settings;
@@ -3791,10 +4215,12 @@ const webServer = http.createServer(async (req, res) => {
         const nextForSanitize = Object.assign({}, next);
         delete nextForSanitize.currentGame;
         const sanitized = sanitizeSettingsForStorage(nextForSanitize);
+        validateSettingsForStorageOrThrow(sanitized);
 
+        let existingParsed = null;
         try {
           const existingRaw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
-          const existingParsed = safeJsonParse(existingRaw, null);
+          existingParsed = safeJsonParse(existingRaw, null);
           if (existingParsed && typeof existingParsed === "object" && !Array.isArray(existingParsed)) {
             const existingGame = String(existingParsed.currentGame || "").trim();
             if (existingGame) sanitized.currentGame = existingGame;
@@ -3804,6 +4230,26 @@ const webServer = http.createServer(async (req, res) => {
         fs.mkdirSync(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
         fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(sanitized, null, 2), "utf8");
         await flushStateNow();
+        queueActivityLog({
+          action: "admin_save_settings",
+          source: "web",
+          actor: getActivityActor(adminSession),
+          detail: "Saved settings from Admin UI",
+          meta: {
+            mode: String(sanitized?.currentMode || "").trim(),
+            game: String(sanitized?.currentGame || "").trim(),
+            ks: Boolean(sanitized?.ks),
+            timers: Boolean(sanitized?.timers),
+            keywords: Boolean(sanitized?.keywords),
+            changes: diffFlatKeys(existingParsed || {}, sanitized || {}, [
+              "ks",
+              "timers",
+              "keywords",
+              "currentMode",
+              "currentGame",
+            ]),
+          },
+        });
 
         const backendRaw = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
         const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
@@ -3831,6 +4277,522 @@ const webServer = http.createServer(async (req, res) => {
     );
   }
 
+  if (routePath === "/admin/keywords") {
+    if (!adminAllowed) {
+      return sendRedirect(res, "/admin/login");
+    }
+    return sendHtmlResponse(
+      res,
+      200,
+      renderKeywordsAppHtml({ who: String(adminSession?.login || "") }),
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/api/admin/keywords") {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (method === "GET") {
+      try {
+        const fromDeps = getKeywordsSnapshotFromDeps();
+        if (fromDeps) {
+          return sendJsonResponse(
+            res,
+            200,
+            {
+              ok: true,
+              keywords: fromDeps,
+              backend: "postgres",
+            },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        let keywords = {};
+        try {
+          const raw = fs.readFileSync(WORDS_FILE_PATH, "utf8");
+          keywords = normalizeKeywordsObject(safeJsonParse(raw, {}));
+        } catch {}
+
+        return sendJsonResponse(
+          res,
+          200,
+          {
+            ok: true,
+            keywords,
+            backend: "file",
+          },
+          { "cache-control": "no-store" }
+        );
+      } catch (e) {
+        return sendJsonResponse(
+          res,
+          500,
+          { ok: false, error: String(e?.message || e) },
+          { "cache-control": "no-store" }
+        );
+      }
+    }
+
+    if (method === "POST") {
+      try {
+        const body = await readJsonBody(req, { limitBytes: 1024 * 1024 });
+        const rawKeywords = body?.keywords ?? body?.words ?? null;
+        if (!rawKeywords || typeof rawKeywords !== "object" || Array.isArray(rawKeywords)) {
+          return sendJsonResponse(
+            res,
+            400,
+            { ok: false, error: "keywords must be a JSON object." },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        const normalized = normalizeKeywordsObject(rawKeywords);
+        validateKeywordsForStorageOrThrow(normalized);
+        const fromDeps = getKeywordsSnapshotFromDeps();
+
+        if (fromDeps) {
+          const saved = await saveKeywordsSnapshotFromDeps(normalized);
+          queueActivityLog({
+            action: "admin_save_keywords",
+            source: "web",
+            actor: getActivityActor(adminSession),
+            detail: "Updated keyword categories",
+            meta: { categories: Object.keys(saved || {}).length },
+          });
+          return sendJsonResponse(
+            res,
+            200,
+            { ok: true, keywords: saved, backend: "postgres" },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        fs.mkdirSync(path.dirname(WORDS_FILE_PATH), { recursive: true });
+        fs.writeFileSync(WORDS_FILE_PATH, JSON.stringify(normalized, null, 2), "utf8");
+        queueActivityLog({
+          action: "admin_save_keywords",
+          source: "web",
+          actor: getActivityActor(adminSession),
+          detail: "Updated keyword categories",
+          meta: { categories: Object.keys(normalized || {}).length },
+        });
+
+        return sendJsonResponse(
+          res,
+          200,
+          { ok: true, keywords: normalized, backend: "file" },
+          { "cache-control": "no-store" }
+        );
+      } catch (e) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: String(e?.message || e) },
+          { "cache-control": "no-store" }
+        );
+      }
+    }
+
+    return sendJsonResponse(
+      res,
+      405,
+      { ok: false, error: "Method not allowed." },
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/api/admin/custom-commands") {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+    const adminRole = getAdminSessionRole(adminSession);
+
+    if (method === "GET") {
+      try {
+        const state = await loadCustomCommandsState();
+        const rows = Object.entries(state?.commands || {})
+          .map(([command, entry]) => ({
+            command,
+            response: String(entry?.response || ""),
+            platforms: normalizeCommandPlatforms(entry?.platforms),
+            enabled: parseBooleanInput(entry?.enabled, true),
+            deleted: parseBooleanInput(entry?.deleted, false),
+            deletedAt: entry?.deletedAt ? String(entry.deletedAt) : null,
+            cooldowns: {
+              twitchMs: normalizeCooldownMs(entry?.cooldowns?.twitchMs, 0),
+              discordMs: normalizeCooldownMs(entry?.cooldowns?.discordMs, 0),
+            },
+          }))
+          .sort((a, b) => a.command.localeCompare(b.command));
+        return sendJsonResponse(
+          res,
+          200,
+          { ok: true, rows },
+          { "cache-control": "no-store" }
+        );
+      } catch (e) {
+        return sendJsonResponse(
+          res,
+          500,
+          { ok: false, error: String(e?.message || e) },
+          { "cache-control": "no-store" }
+        );
+      }
+    }
+
+    if (method === "POST") {
+      if (!roleAtLeast(adminRole, "editor")) {
+        return sendJsonResponse(
+          res,
+          403,
+          { ok: false, error: "Insufficient permissions." },
+          { "cache-control": "no-store" }
+        );
+      }
+      try {
+        const body = await readJsonBody(req, { limitBytes: 1024 * 1024 });
+        const action = String(body?.action || "replace").trim().toLowerCase();
+        let state = await loadCustomCommandsState();
+
+        if (action === "set") {
+          const nextRow = validateCustomCommandForStorageOrThrow(body || {}, { index: 0 });
+          const command = nextRow.command;
+          const response = nextRow.response;
+          const platforms = nextRow.platforms;
+          const enabled = nextRow.enabled;
+          const cooldowns = nextRow.cooldowns;
+          state.commands[command] = {
+            response,
+            platforms,
+            enabled,
+            deleted: false,
+            deletedAt: null,
+            cooldowns,
+          };
+          state = await saveCustomCommandsState(state);
+          queueActivityLog({
+            action: "admin_set_custom_command",
+            source: "web",
+            actor: getActivityActor(adminSession),
+            detail: command,
+            meta: { command, platforms, enabled, cooldowns },
+          });
+        } else if (action === "delete") {
+          const command = normalizeCustomCommandName(body?.command);
+          if (!command) {
+            return sendJsonResponse(
+              res,
+              400,
+              { ok: false, error: "command is required." },
+              { "cache-control": "no-store" }
+            );
+          }
+          if (state.commands[command]) {
+            state.commands[command] = {
+              ...state.commands[command],
+              deleted: true,
+              deletedAt: new Date().toISOString(),
+              enabled: false,
+            };
+          }
+          state = await saveCustomCommandsState(state);
+          queueActivityLog({
+            action: "admin_delete_custom_command",
+            source: "web",
+            actor: getActivityActor(adminSession),
+            detail: command,
+            meta: { command },
+          });
+        } else if (action === "restore") {
+          const command = normalizeCustomCommandName(body?.command);
+          if (!command || !state.commands[command]) {
+            return sendJsonResponse(
+              res,
+              400,
+              { ok: false, error: "command is required." },
+              { "cache-control": "no-store" }
+            );
+          }
+          state.commands[command] = {
+            ...state.commands[command],
+            deleted: false,
+            deletedAt: null,
+            enabled: true,
+          };
+          state = await saveCustomCommandsState(state);
+          queueActivityLog({
+            action: "admin_restore_custom_command",
+            source: "web",
+            actor: getActivityActor(adminSession),
+            detail: command,
+            meta: { command },
+          });
+        } else {
+          const rows = Array.isArray(body?.rows) ? body.rows : [];
+          if (rows.length > 5000) {
+            return sendJsonResponse(
+              res,
+              400,
+              { ok: false, error: "Too many command rows (max 5000)." },
+              { "cache-control": "no-store" }
+            );
+          }
+          const nextCommands = {};
+          for (let i = 0; i < rows.length; i += 1) {
+            const nextRow = validateCustomCommandForStorageOrThrow(rows[i], { index: i });
+            nextCommands[nextRow.command] = {
+              response: nextRow.response,
+              platforms: nextRow.platforms,
+              enabled: nextRow.enabled,
+              deleted: nextRow.deleted,
+              deletedAt: nextRow.deletedAt,
+              cooldowns: nextRow.cooldowns,
+            };
+          }
+          state = await saveCustomCommandsState({ version: 1, commands: nextCommands });
+          queueActivityLog({
+            action: "admin_replace_custom_commands",
+            source: "web",
+            actor: getActivityActor(adminSession),
+            detail: "Replaced custom commands set",
+            meta: { count: Object.keys(nextCommands).length },
+          });
+        }
+
+        const outRows = Object.entries(state?.commands || {})
+          .map(([command, entry]) => ({
+            command,
+            response: String(entry?.response || ""),
+            platforms: normalizeCommandPlatforms(entry?.platforms),
+            enabled: parseBooleanInput(entry?.enabled, true),
+            deleted: parseBooleanInput(entry?.deleted, false),
+            deletedAt: entry?.deletedAt ? String(entry.deletedAt) : null,
+            cooldowns: {
+              twitchMs: normalizeCooldownMs(entry?.cooldowns?.twitchMs, 0),
+              discordMs: normalizeCooldownMs(entry?.cooldowns?.discordMs, 0),
+            },
+          }))
+          .sort((a, b) => a.command.localeCompare(b.command));
+        return sendJsonResponse(
+          res,
+          200,
+          { ok: true, rows: outRows },
+          { "cache-control": "no-store" }
+        );
+      } catch (e) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: String(e?.message || e) },
+          { "cache-control": "no-store" }
+        );
+      }
+    }
+
+    return sendJsonResponse(
+      res,
+      405,
+      { ok: false, error: "Method not allowed." },
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/api/admin/activity") {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    if (method !== "GET") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    const limit = Math.max(1, Math.min(500, Number(parsedUrl.searchParams.get("limit") || 120) || 120));
+    const filters = {
+      q: parsedUrl.searchParams.get("q") || "",
+      actor: parsedUrl.searchParams.get("actor") || "",
+      action: parsedUrl.searchParams.get("action") || "",
+      source: parsedUrl.searchParams.get("source") || "",
+      fromMs: parseActivityDateMs(parsedUrl.searchParams.get("from")),
+      toMs: parseActivityDateMs(parsedUrl.searchParams.get("to")),
+    };
+    const fetchLimit =
+      filters.q || filters.actor || filters.action || filters.source || filters.fromMs || filters.toMs
+        ? Math.min(500, Math.max(limit * 5, 180))
+        : limit;
+    const rows = await getActivityLogSnapshotFromDeps(fetchLimit);
+    const filteredRows = filterActivityRows(rows, filters).slice(0, limit);
+    return sendJsonResponse(
+      res,
+      200,
+      {
+        ok: true,
+        rows: filteredRows,
+        filters: {
+          q: normalizeActivityFilterText(filters.q, 240),
+          actor: normalizeActivityFilterText(filters.actor, 80),
+          action: normalizeActivityFilterText(filters.action, 80),
+          source: normalizeActivityFilterText(filters.source, 40),
+          from: filters.fromMs ? new Date(filters.fromMs).toISOString() : null,
+          to: filters.toMs ? new Date(filters.toMs).toISOString() : null,
+          limit,
+        },
+      },
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/api/admin/analytics/commands") {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+    if (method !== "GET") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+    const days = Math.max(1, Math.min(45, Number(parsedUrl.searchParams.get("days") || 7) || 7));
+    const limit = Math.max(1, Math.min(100, Number(parsedUrl.searchParams.get("limit") || 20) || 20));
+    const platform = String(parsedUrl.searchParams.get("platform") || "all").trim().toLowerCase();
+    const payload = await getCommandAnalyticsSnapshot({ days, limit, platform });
+    return sendJsonResponse(
+      res,
+      200,
+      { ok: true, ...payload },
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/api/admin/health") {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+    if (method !== "GET") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+    const payload = await getHealthSnapshot();
+    return sendJsonResponse(
+      res,
+      200,
+      { ok: true, ...payload },
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/api/admin/command-simulate") {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+    if (method !== "POST") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    try {
+      const body = await readJsonBody(req, { limitBytes: 128 * 1024 });
+      const command = normalizeCustomCommandName(body?.command);
+      const args = Array.isArray(body?.args)
+        ? body.args.map((v) => String(v || "").trim()).filter(Boolean)
+        : String(body?.args || "").split(/\s+/).map((v) => String(v || "").trim()).filter(Boolean);
+      const login = String(body?.user?.login || body?.login || "tester").trim().toLowerCase() || "tester";
+      const displayName = String(body?.user?.displayName || body?.displayName || login).trim() || login;
+
+      if (!command) {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: "command is required." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const state = await loadCustomCommandsState();
+      const entry = state?.commands?.[command];
+      if (!entry || parseBooleanInput(entry?.deleted, false) || !parseBooleanInput(entry?.enabled, true)) {
+        return sendJsonResponse(
+          res,
+          404,
+          { ok: false, error: "Custom command not found or disabled." },
+          { "cache-control": "no-store" }
+        );
+      }
+
+      const template = String(entry?.response || "").trim();
+      const out = renderPajbotTemplate(template, {
+        command,
+        args,
+        user: { login, displayName },
+        counts: {},
+        commandNumUses: 1,
+        countStore: { get: () => 0, update: () => 0 },
+        now: new Date(),
+      });
+
+      return sendJsonResponse(
+        res,
+        200,
+        { ok: true, command, output: String(out || "") },
+        { "cache-control": "no-store" }
+      );
+    } catch (e) {
+      return sendJsonResponse(
+        res,
+        400,
+        { ok: false, error: String(e?.message || e) },
+        { "cache-control": "no-store" }
+      );
+    }
+  }
+
   if (routePath === "/admin/settings") {
     if (!adminAllowed) {
       if (method === "POST") {
@@ -3843,12 +4805,21 @@ const webServer = http.createServer(async (req, res) => {
       }
       return sendRedirect(res, "/admin/login");
     }
+    const adminRole = getAdminSessionRole(adminSession);
 
     if (method === "GET") {
       return sendRedirect(res, "/admin#settings");
     }
 
     if (method === "POST") {
+      if (!roleAtLeast(adminRole, "editor")) {
+        return sendJsonResponse(
+          res,
+          403,
+          { ok: false, error: "Insufficient permissions." },
+          { "cache-control": "no-store" }
+        );
+      }
       try {
         const body = await readJsonBody(req, { limitBytes: 1024 * 1024 });
 
@@ -3870,9 +4841,10 @@ const webServer = http.createServer(async (req, res) => {
         delete nextForSanitize.currentGame;
         const sanitized = sanitizeSettingsForStorage(nextForSanitize);
 
+        let existingParsed = null;
         try {
           const existingRaw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
-          const existingParsed = safeJsonParse(existingRaw, null);
+          existingParsed = safeJsonParse(existingRaw, null);
           if (existingParsed && typeof existingParsed === "object" && !Array.isArray(existingParsed)) {
             const existingGame = String(existingParsed.currentGame || "").trim();
             if (existingGame) sanitized.currentGame = existingGame;
@@ -3882,6 +4854,26 @@ const webServer = http.createServer(async (req, res) => {
         fs.mkdirSync(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
         fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(sanitized, null, 2), "utf8");
         await flushStateNow();
+        queueActivityLog({
+          action: "admin_save_settings",
+          source: "web",
+          actor: getActivityActor(adminSession),
+          detail: "Saved settings from /admin/settings",
+          meta: {
+            mode: String(sanitized?.currentMode || "").trim(),
+            game: String(sanitized?.currentGame || "").trim(),
+            ks: Boolean(sanitized?.ks),
+            timers: Boolean(sanitized?.timers),
+            keywords: Boolean(sanitized?.keywords),
+            changes: diffFlatKeys(existingParsed || {}, sanitized || {}, [
+              "ks",
+              "timers",
+              "keywords",
+              "currentMode",
+              "currentGame",
+            ]),
+          },
+        });
 
         const backendRaw = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
         const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
@@ -3913,12 +4905,21 @@ const webServer = http.createServer(async (req, res) => {
         { "cache-control": "no-store" }
       );
     }
+    const adminRole = getAdminSessionRole(adminSession);
 
     if (method !== "POST") {
       return sendJsonResponse(
         res,
         405,
         { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+    if (!roleAtLeast(adminRole, "editor")) {
+      return sendJsonResponse(
+        res,
+        403,
+        { ok: false, error: "Insufficient permissions." },
         { "cache-control": "no-store" }
       );
     }
@@ -3934,31 +4935,16 @@ const webServer = http.createServer(async (req, res) => {
         body?.modeGames && typeof body.modeGames === "object" && !Array.isArray(body.modeGames)
           ? body.modeGames
           : null;
+      const modesPayload =
+        body?.modes && typeof body.modes === "object" && !Array.isArray(body.modes)
+          ? body.modes
+          : null;
 
       if (!mode) {
         return sendJsonResponse(
           res,
           400,
           { ok: false, error: "Missing mode." },
-          { "cache-control": "no-store" }
-        );
-      }
-
-      const MODE_TO_TWITCH = {
-        "!join.on": { titleKey: "join", gameName: "Roblox" },
-        "!link.on": { titleKey: "link", gameName: "Roblox" },
-        "!1v1.on": { titleKey: "1v1", gameName: "Roblox" },
-        "!ticket.on": { titleKey: "ticket", gameName: "Roblox" },
-        "!val.on": { titleKey: "val", gameName: "VALORANT" },
-        "!reddit.on": { titleKey: "reddit", gameName: "Just Chatting" },
-      };
-
-      const cfg = MODE_TO_TWITCH[mode];
-      if (!cfg) {
-        return sendJsonResponse(
-          res,
-          400,
-          { ok: false, error: `Unsupported mode: ${mode}` },
           { "cache-control": "no-store" }
         );
       }
@@ -3972,19 +4958,29 @@ const webServer = http.createServer(async (req, res) => {
         }
       } catch {}
 
-      const mergedTitles = {
-        ...(settingsObj?.titles && typeof settingsObj.titles === "object"
-          ? settingsObj.titles
-          : {}),
-        ...(titles || {}),
-      };
+      settingsObj = sanitizeSettingsForStorage({
+        ...settingsObj,
+        ...(modesPayload ? { modes: modesPayload } : {}),
+      });
+      const normalizedMode = normalizeModeCommand(mode);
+      const modeCfg = settingsObj?.modes?.[normalizedMode];
+      if (!modeCfg || typeof modeCfg !== "object") {
+        return sendJsonResponse(
+          res,
+          400,
+          { ok: false, error: `Unsupported mode: ${normalizedMode}` },
+          { "cache-control": "no-store" }
+        );
+      }
 
-      const title = String(mergedTitles?.[cfg.titleKey] || "").trim();
+      const modeKey = String(modeCfg.key || modeKeyFromCommand(normalizedMode)).trim();
+      const overrideTitle = titles && modeKey ? String(titles[modeKey] || "").trim() : "";
+      const title = overrideTitle || String(modeCfg.title || "").trim();
       if (!title) {
         return sendJsonResponse(
           res,
           400,
-          { ok: false, error: `No title set for titles.${cfg.titleKey}` },
+          { ok: false, error: `No title set for mode ${normalizedMode}` },
           { "cache-control": "no-store" }
         );
       }
@@ -4013,9 +5009,8 @@ const webServer = http.createServer(async (req, res) => {
       }
 
       const gameNameOverride = String(
-        (modeGames && modeGames[mode]) ||
-          (settingsObj?.modeGames && settingsObj.modeGames[mode]) ||
-          cfg.gameName ||
+        (modeGames && modeGames[normalizedMode]) ||
+          modeCfg.gameName ||
           ""
       ).trim();
 
@@ -4033,6 +5028,17 @@ const webServer = http.createServer(async (req, res) => {
         clientId: auth.clientId,
         title,
         gameId: gameId || undefined,
+      });
+      queueActivityLog({
+        action: "admin_apply_mode",
+        source: "web",
+        actor: getActivityActor(adminSession),
+        detail: normalizedMode,
+        meta: {
+          mode: normalizedMode,
+          title,
+          gameName: gameNameOverride || "",
+        },
       });
 
       return sendJsonResponse(res, 200, { ok: true }, { "cache-control": "no-store" });
@@ -4085,7 +5091,7 @@ const webServer = http.createServer(async (req, res) => {
       );
     }
 
-    const spotifySnapshot = getPublicSpotifyTokenSnapshot();
+    const spotifySnapshot = await getPublicSpotifyTokenSnapshot();
     if (!spotifySnapshot?.hasClientId || !spotifySnapshot?.hasClientSecret) {
       return sendJsonResponse(
         res,
@@ -4542,7 +5548,7 @@ const webServer = http.createServer(async (req, res) => {
   if (routePath === "/auth/status" || routePath === "/api/auth/status") {
     const twitch = authSnapshot();
     const roblox = robloxAuthSnapshot();
-    const spotify = spotifyAuthSnapshot();
+    const spotify = await spotifyAuthSnapshot();
     const ownerLogin = String(WEB_OWNER_LOGIN || "").trim().toLowerCase();
     const ownerUserId = String(WEB_OWNER_USER_ID || "").trim();
 
@@ -4646,7 +5652,7 @@ const webServer = http.createServer(async (req, res) => {
             ok: true,
             redirectUri: String(spotifyAuthSettings?.redirectUri || ""),
             authorizeUrl,
-            snapshot: spotifyAuthSnapshot(),
+            snapshot: await spotifyAuthSnapshot(),
           },
           { "cache-control": "no-store" }
         );
@@ -4693,7 +5699,7 @@ const webServer = http.createServer(async (req, res) => {
   // Legacy endpoints kept for old links.
   if (routePath === "/auth/spotify/connect") return sendRedirect(res, "/auth/spotify");
   if (routePath === "/auth/spotify/status") {
-    return sendJsonResponse(res, 200, spotifyAuthSnapshot(), { "cache-control": "no-store" });
+    return sendJsonResponse(res, 200, await spotifyAuthSnapshot(), { "cache-control": "no-store" });
   }
   if (routePath === "/auth/roblox/bot") return sendRedirect(res, "/auth/roblox");
 
@@ -5055,7 +6061,47 @@ const webServer = http.createServer(async (req, res) => {
     return res.end(JSON.stringify(getStatusSnapshot()));
   }
 
-  if (routePath === "/home" || routePath === "/index.html") {
+  if (routePath === "/health") {
+    if (method !== "GET") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+    const payload = await getHealthSnapshot();
+    return sendJsonResponse(
+      res,
+      payload?.ok ? 200 : 503,
+      { ok: Boolean(payload?.ok), ...(payload || { checks: {} }) },
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/api/commands") {
+    if (method !== "GET") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    const platform = String(parsedUrl.searchParams.get("platform") || "all")
+      .trim()
+      .toLowerCase();
+    const payload = await buildCommandsCatalogForApi({ platform });
+    return sendJsonResponse(
+      res,
+      200,
+      { ok: true, ...payload },
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (routePath === "/commands" || routePath === "/index.html") {
     if (WEB_BUILD?.html) {
       return sendHtmlResponse(res, 200, WEB_BUILD.html);
     }
@@ -5069,6 +6115,36 @@ const webServer = http.createServer(async (req, res) => {
         500,
         "Server Error",
         `Failed to load home page: ${String(e?.message || e)}`
+      );
+    }
+  }
+
+  if (routePath === "/home") {
+    const homePath = path.join(WEB_DIR, "home.html");
+    try {
+      const html = fs.readFileSync(homePath, "utf8");
+      return sendHtmlResponse(res, 200, html);
+    } catch (e) {
+      return sendErrorPage(
+        res,
+        500,
+        "Server Error",
+        `Failed to load home page: ${String(e?.message || e)}`
+      );
+    }
+  }
+
+  if (routePath === "/live") {
+    const livePath = path.join(WEB_DIR, "live.html");
+    try {
+      const html = fs.readFileSync(livePath, "utf8");
+      return sendHtmlResponse(res, 200, html);
+    } catch (e) {
+      return sendErrorPage(
+        res,
+        500,
+        "Server Error",
+        `Failed to load live page: ${String(e?.message || e)}`
       );
     }
   }

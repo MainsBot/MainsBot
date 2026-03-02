@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Home | MainsBot</title>
+  <title>Commands | MainsBot</title>
   <meta name="description" content="MainsBot commands, live status, and admin controls." />
   <meta name="theme-color" content="#ffbd59" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="MainsBot" />
-  <meta property="og:title" content="MainsBot" />
+  <meta property="og:title" content="Commands | MainsBot" />
   <meta property="og:description" content="MainsBot commands, live status, and admin controls." />
   <meta property="og:image" content="/favicon.svg" />
   <meta name="twitter:card" content="summary" />
@@ -26,11 +26,14 @@
   <div class="page">
     <div class="topbar">
       <div class="topbar__brand">
-        <a href="/">MainsBot</a>
-        <span class="muted">Home</span>
+        <a href="/home">MainsBot</a>
+        <span class="muted">Commands</span>
       </div>
       <div class="topbar__links">
-        <a class="btn btn--sm" href="/">Home</a>
+        <a class="btn btn--sm btn--ghost" href="/home">Home</a>
+        <a class="btn btn--sm" href="/commands">Commands</a>
+        <a class="btn btn--sm btn--ghost" href="/live">Live</a>
+        <button class="btn btn--sm btn--ghost theme-toggle" id="themeToggle" type="button">Light</button>
         <span id="topbarAdminLink"></span>
       </div>
       <div class="topbar__right"></div>

@@ -16,6 +16,14 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { flushStateNow } from "../data/postgres/stateInterceptor.js";
+import { normalizeKeywordsObject, readKeywordsState, writeKeywordsState } from "../data/postgres/keywordsStore.js";
+import { readActivityLogState, appendActivityLogEntryState } from "../data/postgres/activityLogStore.js";
+import { bumpCommandUsageState } from "../data/postgres/commandUsageStore.js";
+import { resolveStateSchema } from "../data/postgres/db.js";
+import { ensureStateTable, readStateValue, writeStateValue } from "../data/postgres/stateStore.js";
+import { normalizeKeywordText, messageContainsKeywordPhrase } from "./keywords/match.js";
+import { createKeywordResponseResolver } from "./keywords/resolver.js";
+import { createKeywordStorage } from "./keywords/storage.js";
 
 //functions
 import * as ROBLOX_FUNCTIONS from "./api/roblox/index.js";
@@ -47,14 +55,18 @@ import {
   handleKeywordsToggle,
   handleTimersToggle,
 } from "./modules/toggles.js";
-import { isAubreyTabModuleEnabled, registerAubreyTabModule } from "./modules/aubreytab.js";
+import { isTabModuleEnabled, registerTabModule } from "./modules/tab.js";
 import { handleFirstMessageWelcome } from "./modules/welcome.js";
 import { tryHandleQuotesModCommand, tryHandleQuotesUserCommand } from "./modules/quotes.js";
 import { tryHandleGlobalCommands } from "./modules/globalCommands.js";
 import { startTimers } from "./functions/timers.js";
 import { createCommandCounter } from "./functions/commandCounts.js";
 import { createNamedCountStore } from "./functions/namedCounts.js";
+import { resolveInstanceName } from "./functions/instance.js";
 import { getBuildInfo } from "./functions/buildInfo.js";
+import { createSharedCommandCooldown } from "./functions/sharedCommandCooldown.js";
+import { createChatLogger } from "./functions/chatLogger.js";
+import { startSettingsWatcher } from "./functions/settingsWatcher.js";
 import { startWebServer } from "./web/server.js";
 import { isCustomCommandsModuleEnabled, registerCustomCommandsModule } from "./modules/customCommands.js";
 import {
@@ -305,18 +317,110 @@ const CLIENT_ID = String(
 
 const COMMAND_GLOBAL_COOLDOWN_MS = 10_000;
 const COMMAND_USER_COOLDOWN_MS = 30_000;
-let commandGlobalCooldownUntil = 0;
-const commandCooldownByUser = new Map();
 const missingKeywordResponseWarned = new Set();
-const keywordResponseIndex = new Map();
+const keywordResponseResolver = createKeywordResponseResolver(RESPONSES?.responses || {});
 
-const INSTANCE_NAME =
-  String(process.env.INSTANCE_NAME || "default").trim() || "default";
+const INSTANCE_NAME = resolveInstanceName();
+const STATE_SCHEMA = resolveStateSchema();
 const BOT_STARTUP_MESSAGE = String(process.env.BOT_STARTUP_MESSAGE || "").trim();
 const BOT_SHUTDOWN_MESSAGE = String(process.env.BOT_SHUTDOWN_MESSAGE || "").trim();
 
 const COMMAND_COUNTER = createCommandCounter({ instance: INSTANCE_NAME });
 const NAMED_COUNTERS = createNamedCountStore({ instance: INSTANCE_NAME });
+
+async function logActivity({
+  action = "event",
+  source = "bot",
+  actor = "system",
+  detail = "",
+  meta = {},
+} = {}) {
+  try {
+    await appendActivityLogEntryState({
+      schema: STATE_SCHEMA,
+      instance: INSTANCE_NAME,
+      entry: {
+        ts: new Date().toISOString(),
+        action,
+        source,
+        actor,
+        detail,
+        meta,
+      },
+    });
+  } catch {}
+}
+
+async function runStartupMigrationGuards() {
+  try {
+    await ensureStateTable({ schema: STATE_SCHEMA });
+    const custom = await readStateValue({
+      schema: STATE_SCHEMA,
+      instance: INSTANCE_NAME,
+      key: "custom_commands",
+      fallback: { version: 1, commands: {} },
+    });
+    const input =
+      custom && typeof custom === "object" && !Array.isArray(custom) ? custom : { version: 1, commands: {} };
+    const commandsIn =
+      input.commands && typeof input.commands === "object" && !Array.isArray(input.commands)
+        ? input.commands
+        : {};
+    let changed = false;
+    const commandsOut = {};
+    for (const [k, v] of Object.entries(commandsIn)) {
+      const cmd = String(k || "").trim().toLowerCase();
+      if (!cmd.startsWith("!")) continue;
+      if (typeof v === "string") {
+        commandsOut[cmd] = {
+          response: String(v || "").trim(),
+          platforms: ["twitch", "discord"],
+          enabled: true,
+          deleted: false,
+          deletedAt: null,
+          cooldowns: { twitchMs: 0, discordMs: 0 },
+        };
+        changed = true;
+        continue;
+      }
+      const response = String(v?.response || "").trim();
+      if (!response) continue;
+      const platforms = Array.isArray(v?.platforms)
+        ? v.platforms.map((p) => String(p || "").trim().toLowerCase()).filter((p) => p === "twitch" || p === "discord")
+        : [];
+      const normalized = {
+        response,
+        platforms: platforms.length ? Array.from(new Set(platforms)) : ["twitch", "discord"],
+        enabled: v?.enabled == null ? true : Boolean(v.enabled),
+        deleted: Boolean(v?.deleted),
+        deletedAt: v?.deletedAt ? String(v.deletedAt) : null,
+        cooldowns: {
+          twitchMs: Math.max(0, Math.floor(Number(v?.cooldowns?.twitchMs) || 0)),
+          discordMs: Math.max(0, Math.floor(Number(v?.cooldowns?.discordMs) || 0)),
+        },
+      };
+      commandsOut[cmd] = normalized;
+      if (
+        JSON.stringify(normalized) !== JSON.stringify(v) ||
+        cmd !== k
+      ) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      await writeStateValue({
+        schema: STATE_SCHEMA,
+        instance: INSTANCE_NAME,
+        key: "custom_commands",
+        value: { version: 1, commands: commandsOut },
+      });
+      console.log(`[migrations] custom_commands normalized (${Object.keys(commandsOut).length} commands)`);
+    }
+  } catch (e) {
+    console.warn("[migrations] startup guard failed:", String(e?.message || e));
+  }
+}
+void runStartupMigrationGuards();
 
 const PLAYTIME_PATH = String(
   process.env.PLAYTIME_PATH || "./playtime.json"
@@ -345,6 +449,62 @@ const WORDS_PATH = path.resolve(
   ).trim()
 );
 const DEFAULT_VALID_MODES = ["!join.on", "!link.on", "!1v1.on", "!ticket.on", "!val.on", "!reddit.on"];
+const DEFAULT_MODE_DEFINITIONS = {
+  "!join.on": {
+    responseCommand: "!join",
+    timerMessage: "type !join to join the game",
+    title: "FREE ROBUX LIVE - WIN THIS GAME - !JOIN TO PLAY - !socials !discord",
+    gameName: "Roblox",
+    keywordKey: "join",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!link.on": {
+    responseCommand: "!link",
+    timerMessage: "type !link to get the link to join",
+    title: "FREE ROBUX LIVE - WIN THIS GAME - !LINK TO PLAY - !socials !discord",
+    gameName: "Roblox",
+    keywordKey: "link",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!1v1.on": {
+    responseCommand: "!1v1",
+    timerMessage: "type 1v1 in chat once to get a chance to 1v1 the streamer",
+    title: "ARSENAL 1V1 - WIN = FREE ROBUX - !1V1 TO PLAY - !socials !discord",
+    gameName: "Roblox",
+    keywordKey: "1v1",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!ticket.on": {
+    responseCommand: "!ticket",
+    timerMessage: "type !ticket to join the game",
+    title: "FREE ROBUX LIVE - WIN THIS GAME - !TICKET TO PLAY - !socials !discord",
+    gameName: "Roblox",
+    keywordKey: "ticket",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!val.on": {
+    responseCommand: "!val",
+    timerMessage: "type !val to join",
+    title: "VALORANT - !VAL TO PLAY - !socials !discord",
+    gameName: "VALORANT",
+    keywordKey: "val",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!reddit.on": {
+    responseCommand: "!reddit",
+    timerMessage: "",
+    title: "REDDIT RECAP - !socials !discord !reddit",
+    gameName: "Just Chatting",
+    keywordKey: "reddit",
+    recapSpamCount: 3,
+    recapMessage: "REDDIT RECAP TIME: {url}",
+  },
+};
 const DEFAULT_SPECIAL_MODES = [
   "!ks.on",
   "!ks.off",
@@ -368,8 +528,7 @@ const DEFAULT_IGNORE_MODES = [
   "!sleep.on",
 ];
 
-const ver = '2.4'
-const BUILD_INFO = getBuildInfo({ appVersion: ver });
+const BUILD_INFO = getBuildInfo();
 
 function formatLifecycleMessage(template = "", { signal = "" } = {}) {
   const src = String(template || "").trim();
@@ -399,231 +558,27 @@ function isPrivilegedChatUser(userstate = {}) {
   return getChatPerms(userstate, { channelLogin: CHANNEL_NAME }).isPermitted;
 }
 
-function isSharedCommandCooldownActive(userstate = {}) {
-  if (isPrivilegedChatUser(userstate)) return false;
-
-  const now = Date.now();
-  if (now < commandGlobalCooldownUntil) return true;
-
-  const userKey = String(userstate?.username || "").toLowerCase();
-  if (userKey) {
-    const userCooldownUntil = Number(commandCooldownByUser.get(userKey) || 0);
-    if (now < userCooldownUntil) return true;
-  }
-
-  commandGlobalCooldownUntil = now + COMMAND_GLOBAL_COOLDOWN_MS;
-  if (userKey) {
-    commandCooldownByUser.set(userKey, now + COMMAND_USER_COOLDOWN_MS);
-  }
-
-  return false;
-}
-
-function normalizeKeywordText(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[`'’]+/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function messageContainsKeywordPhrase(message, phrase, normalizedMessage = "") {
-  const rawMessage = String(message || "").toLowerCase();
-  const rawPhrase = String(phrase || "").toLowerCase().trim();
-  if (!rawPhrase) return false;
-  if (rawMessage.includes(rawPhrase)) return true;
-
-  const normalizedPhrase = normalizeKeywordText(rawPhrase);
-  if (!normalizedPhrase) return false;
-  const normalized = normalizedMessage || normalizeKeywordText(rawMessage);
-  return normalized.includes(normalizedPhrase);
-}
-
-function normalizeKeywordCategoryName(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .trim();
-}
-
-function rebuildKeywordResponseIndex() {
-  keywordResponseIndex.clear();
-  const table = RESPONSES?.responses;
-  if (!table || typeof table !== "object") return;
-  for (const key of Object.keys(table)) {
-    if (typeof table[key] !== "function") continue;
-    keywordResponseIndex.set(key, key);
-    keywordResponseIndex.set(String(key).toLowerCase(), key);
-    keywordResponseIndex.set(normalizeKeywordCategoryName(key), key);
-  }
-}
-
-function resolveKeywordResponseHandler(wordSet) {
-  const raw = String(wordSet || "");
-  if (!raw) return null;
-  const direct = keywordResponseIndex.get(raw);
-  if (direct) return { key: direct, fn: RESPONSES.responses[direct] };
-  const lower = keywordResponseIndex.get(raw.toLowerCase());
-  if (lower) return { key: lower, fn: RESPONSES.responses[lower] };
-  const normalized = keywordResponseIndex.get(normalizeKeywordCategoryName(raw));
-  if (normalized) return { key: normalized, fn: RESPONSES.responses[normalized] };
-  return null;
-}
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, "..");
 
-const LOG_PATH = path.join(ROOT_DIR, "chat.log");
-const CHAT_LOG_ROTATE_TIMEZONE = "America/New_York";
-const CHAT_LOG_ROTATE_LOOKAHEAD_MS = 36 * 60 * 60 * 1000;
-const COMMAND_LOG_WINDOW_MS = 15000;
-const lastCommandByChannel = new Map();
-let chatLogRotateTimer = null;
+const sharedCommandCooldown = createSharedCommandCooldown({
+  globalMs: COMMAND_GLOBAL_COOLDOWN_MS,
+  userMs: COMMAND_USER_COOLDOWN_MS,
+  isPrivilegedFn: isPrivilegedChatUser,
+});
 
-function sanitizeLogText(value) {
-  return String(value ?? "").replace(/[\r\n]+/g, " ").trim();
+function isSharedCommandCooldownActive(userstate = {}) {
+  return sharedCommandCooldown.isActive(userstate);
 }
 
-function normalizeCommandChannelKey(channel) {
-  return String(channel || "")
-    .trim()
-    .replace(/^#/, "")
-    .toLowerCase();
-}
-
-function recordCommandUsage(channel, userstate, commandText) {
-  const key = normalizeCommandChannelKey(channel);
-  const rawText = sanitizeLogText(commandText);
-  if (!key || !rawText.startsWith("!")) return;
-
-  const command = rawText.split(/\s+/)[0].toLowerCase();
-  const user =
-    String(userstate?.["display-name"] || userstate?.["username"] || "unknown")
-      .trim() || "unknown";
-
-  lastCommandByChannel.set(key, {
-    user,
-    command,
-    at: Date.now(),
-  });
-
-  try {
-    COMMAND_COUNTER?.record?.(command);
-  } catch {}
-
-  console.log(`[TWITCH][CMD] ${user} used ${command} in #${key}`);
-}
-
-function logRecentCommandResponse(channel, responseText, transport = "irc") {
-  const key = normalizeCommandChannelKey(channel);
-  if (!key) return;
-
-  const ctx = lastCommandByChannel.get(key);
-  if (!ctx) return;
-
-  const ageMs = Date.now() - Number(ctx.at || 0);
-  lastCommandByChannel.delete(key);
-  if (!Number.isFinite(ageMs) || ageMs > COMMAND_LOG_WINDOW_MS) return;
-
-  const clean = sanitizeLogText(responseText);
-  if (!clean) return;
-
-  console.log(
-    `[TWITCH][${String(transport || "irc").toUpperCase()}] ${ctx.user} used ${ctx.command} RESPONSE: ${clean}`
-  );
-}
-
-function appendLog(type, message) {
-  const ts = new Date().toISOString();
-  const line = `[${ts}] [${type}] ${sanitizeLogText(message)}`;
-  fs.appendFile(LOG_PATH, line + "\n", () => {});
-}
-
-function getDateKeyInTimeZone(ms, timeZone = CHAT_LOG_ROTATE_TIMEZONE) {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(new Date(ms));
-
-    const year = parts.find((p) => p.type === "year")?.value;
-    const month = parts.find((p) => p.type === "month")?.value;
-    const day = parts.find((p) => p.type === "day")?.value;
-
-    if (year && month && day) return `${year}-${month}-${day}`;
-  } catch (e) {
-    console.warn("[LOG] timezone date key failed:", String(e?.message || e));
-  }
-
-  const d = new Date(ms);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function getMsUntilNextMidnightInTimeZone(timeZone = CHAT_LOG_ROTATE_TIMEZONE) {
-  const now = Date.now();
-  const currentKey = getDateKeyInTimeZone(now, timeZone);
-
-  let low = 1000;
-  let high = CHAT_LOG_ROTATE_LOOKAHEAD_MS;
-
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    const keyAtMid = getDateKeyInTimeZone(now + mid, timeZone);
-    if (keyAtMid === currentKey) {
-      low = mid + 1;
-    } else {
-      high = mid;
-    }
-  }
-
-  return low;
-}
-
-function rotateChatLog() {
-  try {
-    if (fs.existsSync(LOG_PATH)) {
-      fs.unlinkSync(LOG_PATH);
-    }
-    fs.writeFileSync(LOG_PATH, "", "utf8");
-    appendLog("LOG", `Rotated chat.log at ${CHAT_LOG_ROTATE_TIMEZONE} midnight`);
-    console.log(`[LOG] Rotated chat.log at ${new Date().toISOString()}`);
-  } catch (e) {
-    console.error("[LOG] Failed to rotate chat.log:", String(e?.message || e));
-  }
-}
-
-function scheduleChatLogRotation() {
-  if (chatLogRotateTimer) {
-    clearTimeout(chatLogRotateTimer);
-  }
-
-  const delayMs = getMsUntilNextMidnightInTimeZone(CHAT_LOG_ROTATE_TIMEZONE);
-  const runAt = new Date(Date.now() + delayMs).toISOString();
-  console.log(
-    `[LOG] Next chat.log rotation at ${runAt} (${CHAT_LOG_ROTATE_TIMEZONE} midnight)`
-  );
-
-  chatLogRotateTimer = setTimeout(() => {
-    rotateChatLog();
-    scheduleChatLogRotation();
-  }, delayMs);
-
-  if (typeof chatLogRotateTimer?.unref === "function") {
-    chatLogRotateTimer.unref();
-  }
-}
-
-if (!fs.existsSync(LOG_PATH)) {
-  fs.writeFileSync(LOG_PATH, "", "utf8");
-}
-scheduleChatLogRotation();
+const { appendLog, recordCommandUsage, logRecentCommandResponse } = createChatLogger({
+  rootDir: ROOT_DIR,
+  commandCounter: COMMAND_COUNTER,
+  timeZone: "America/New_York",
+  rotateLookaheadMs: 36 * 60 * 60 * 1000,
+  commandWindowMs: 15_000,
+});
 
 function withSettingsDefaults(input = {}) {
   const base =
@@ -632,7 +587,72 @@ function withSettingsDefaults(input = {}) {
   const arr = (value) =>
     Array.isArray(value) ? value.map((v) => String(v || "").trim()).filter(Boolean) : [];
 
-  base.validModes = arr(base.validModes);
+  const normalizeModeCommand = (value) => {
+    let out = String(value || "").trim().toLowerCase();
+    if (!out) return "";
+    if (!out.startsWith("!")) out = `!${out}`;
+    if (!out.endsWith(".on")) out = `${out.replace(/\.off$/i, "")}.on`;
+    return out;
+  };
+  const modeKeyFromCommand = (command) =>
+    normalizeModeCommand(command).replace(/^!/, "").replace(/\.on$/i, "");
+  const safeString = (value) => String(value || "").trim();
+  const safeInt = (value, fallback = 0) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return Math.max(0, Math.floor(fallback));
+    return Math.max(0, Math.floor(n));
+  };
+
+  const modesInput =
+    base.modes && typeof base.modes === "object" && !Array.isArray(base.modes) ? base.modes : {};
+  const modeCommandsSeed = new Set([
+    ...Object.keys(DEFAULT_MODE_DEFINITIONS),
+    ...arr(base.validModes).map((m) => normalizeModeCommand(m)).filter(Boolean),
+    ...Object.keys(modesInput).map((m) => normalizeModeCommand(m)).filter(Boolean),
+  ]);
+
+  const normalizedModes = {};
+  for (const modeCommand of modeCommandsSeed) {
+    const cmd = normalizeModeCommand(modeCommand);
+    if (!cmd) continue;
+    const key = modeKeyFromCommand(cmd);
+    const defaults = DEFAULT_MODE_DEFINITIONS[cmd] || {};
+    const raw =
+      (modesInput[modeCommand] && typeof modesInput[modeCommand] === "object"
+        ? modesInput[modeCommand]
+        : null) ||
+      (modesInput[cmd] && typeof modesInput[cmd] === "object" ? modesInput[cmd] : null) ||
+      {};
+
+    const responseCommand =
+      safeString(raw.responseCommand || raw.command || base?.main?.[key] || defaults.responseCommand) || "";
+    const timerMessage =
+      safeString(raw.timerMessage || raw.timer || base?.timer?.[key] || defaults.timerMessage) || "";
+    const title = safeString(raw.title || base?.titles?.[key] || defaults.title) || "";
+    const gameName =
+      safeString(raw.gameName || raw.game || base?.modeGames?.[cmd] || defaults.gameName) || "";
+    const keywordKey = safeString(raw.keywordKey || raw.keyword || key) || key;
+    const recapSpamCount = safeInt(
+      raw.recapSpamCount != null ? raw.recapSpamCount : defaults.recapSpamCount,
+      0
+    );
+    const recapMessage = safeString(raw.recapMessage || defaults.recapMessage || "");
+
+    normalizedModes[cmd] = {
+      command: cmd,
+      key,
+      responseCommand,
+      timerMessage,
+      title,
+      gameName,
+      keywordKey,
+      recapSpamCount,
+      recapMessage,
+    };
+  }
+
+  base.modes = normalizedModes;
+  base.validModes = Object.keys(normalizedModes);
   if (!base.validModes.length) base.validModes = [...DEFAULT_VALID_MODES];
 
   base.specialModes = arr(base.specialModes);
@@ -643,6 +663,40 @@ function withSettingsDefaults(input = {}) {
 
   base.ignoreModes = arr(base.ignoreModes);
   if (!base.ignoreModes.length) base.ignoreModes = [...DEFAULT_IGNORE_MODES];
+
+  const derivedTimer = {};
+  const derivedMain = {};
+  const derivedTitles = {};
+  const derivedModeGames = {};
+
+  for (const modeCommand of Object.keys(normalizedModes)) {
+    const modeDef = normalizedModes[modeCommand];
+    const key = modeDef.key;
+    if (key && modeDef.timerMessage) derivedTimer[key] = modeDef.timerMessage;
+    if (key && modeDef.responseCommand) derivedMain[key] = modeDef.responseCommand;
+    if (key && modeDef.title) derivedTitles[key] = modeDef.title;
+    if (modeDef.gameName) derivedModeGames[modeCommand] = modeDef.gameName;
+  }
+
+  base.timer =
+    base.timer && typeof base.timer === "object" && !Array.isArray(base.timer)
+      ? { ...base.timer, ...derivedTimer }
+      : derivedTimer;
+  base.main =
+    base.main && typeof base.main === "object" && !Array.isArray(base.main)
+      ? { ...base.main, ...derivedMain }
+      : derivedMain;
+  base.titles =
+    base.titles && typeof base.titles === "object" && !Array.isArray(base.titles)
+      ? { ...base.titles, ...derivedTitles }
+      : derivedTitles;
+  base.modeGames =
+    base.modeGames && typeof base.modeGames === "object" && !Array.isArray(base.modeGames)
+      ? { ...base.modeGames, ...derivedModeGames }
+      : derivedModeGames;
+  if (!base.validModes.includes(String(base.currentMode || "").trim())) {
+    base.currentMode = base.validModes[0] || "!join.on";
+  }
 
   return base;
 }
@@ -656,40 +710,21 @@ function readSettingsFromDisk() {
   }
 }
 
-function readWordsFromDisk() {
-  const candidates = [
-    WORDS_PATH,
-    path.join(path.dirname(WORDS_PATH), "WORDS.json"),
-    path.join(path.dirname(WORDS_PATH), "words.json"),
-    DEFAULT_GLOBAL_WORDS_PATH,
-    LEGACY_ARCHIVE_WORDS_PATH,
-  ];
-  const seen = new Set();
-
-  for (const candidate of candidates) {
-    const candidatePath = path.resolve(String(candidate || "").trim());
-    if (!candidatePath || seen.has(candidatePath)) continue;
-    seen.add(candidatePath);
-    if (!fs.existsSync(candidatePath)) continue;
-    try {
-      const parsed = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
-      const words =
-        parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-      if (Object.keys(words).length > 0) {
-        return { words, sourcePath: candidatePath };
-      }
-    } catch {}
-  }
-
-  return { words: {}, sourcePath: WORDS_PATH };
-}
-
 let SETTINGS = readSettingsFromDisk();
 let STREAMS = JSON.parse(fs.readFileSync(STREAMS_PATH));
-const wordsLoad = readWordsFromDisk();
+const KEYWORDS_STORAGE = createKeywordStorage({
+  wordsPath: WORDS_PATH,
+  defaultGlobalWordsPath: DEFAULT_GLOBAL_WORDS_PATH,
+  legacyArchiveWordsPath: LEGACY_ARCHIVE_WORDS_PATH,
+  normalizeKeywordsObject,
+  readKeywordsState,
+  writeKeywordsState,
+});
+const wordsLoad = await KEYWORDS_STORAGE.loadKeywordsWithPostgresFallback();
 let WORDS = wordsLoad.words;
-rebuildKeywordResponseIndex();
-console.log(`[KEYWORDS] loaded ${Object.keys(WORDS || {}).length} categories from ${wordsLoad.sourcePath}`);
+console.log(
+  `[KEYWORDS] loaded ${Object.keys(WORDS || {}).length} categories (${wordsLoad.source}) from ${wordsLoad.sourcePath}`
+);
 if (Object.keys(WORDS || {}).length === 0) {
   console.warn(
     `[KEYWORDS] no keyword categories loaded. Check WORDS_PATH / GLOBAL_WORDS_PATH and ensure WORDS.json exists at: ${wordsLoad.sourcePath}`
@@ -709,6 +744,12 @@ try {
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2), "utf8");
 } catch {}
 
+async function persistKeywords(nextWords = {}, { writeFileFallback = true } = {}) {
+  const normalized = await KEYWORDS_STORAGE.persistKeywords(nextWords, { writeFileFallback });
+  WORDS = normalized;
+  return WORDS;
+}
+
 function loadSettings() {
   return withSettingsDefaults(SETTINGS);
 }
@@ -721,7 +762,6 @@ function saveSettings(next) {
   } catch {}
 }
 
-let lastSettingsSnapshot = null;
 let EXTERNAL_STATUS = {
   twitchLive: null,
   twitchUptime: null,
@@ -759,21 +799,12 @@ function logSettingsChanges(prev, next) {
   }
 }
 
-function startSettingsWatch() {
-  lastSettingsSnapshot = readSettingsSnapshot();
-  fs.watchFile(SETTINGS_PATH, { interval: 2000 }, () => {
-    const next = readSettingsSnapshot();
-    if (!next) return;
-    if (!lastSettingsSnapshot) {
-      lastSettingsSnapshot = next;
-      return;
-    }
-    logSettingsChanges(lastSettingsSnapshot, next);
-    lastSettingsSnapshot = next;
-  });
-}
-
-startSettingsWatch();
+startSettingsWatcher({
+  filePath: SETTINGS_PATH,
+  readSnapshot: readSettingsSnapshot,
+  onChange: logSettingsChanges,
+  intervalMs: 2000,
+});
 
 async function refreshExternalStatus() {
   const next = {
@@ -1074,15 +1105,6 @@ async function tryHandleDiscordOnlyCommand(text, ctx = {}) {
     return true;
   }
 
-  if (command === "!soon") {
-    const target = arg1 || senderLogin;
-    await replyToDiscordCommand(
-      discordMessage,
-      `${target} A term used by Tibb12 when he does not have a clue when something is going to occur or when he wants to piss off the fans. (EX: "We will play Arsenal SOON, but not yet.")`
-    );
-    return true;
-  }
-
   if (command === "!cum") {
     const target = arg1 || senderLogin;
     await replyToDiscordCommand(
@@ -1345,6 +1367,7 @@ try {
       discordMessenger,
       discordChannelId: DISCORD_ANNOUNCE_CHANNEL_ID,
       EmbedBuilder,
+      onActivity: (event) => void logActivity(event),
     });
     console.log("[modules] gameping=on");
   } else {
@@ -1383,8 +1406,8 @@ try {
 }
 
 try {
-  if (isAubreyTabModuleEnabled()) {
-    registerAubreyTabModule({
+  if (isTabModuleEnabled()) {
+    registerTabModule({
       client,
       channelName: CHANNEL_NAME,
       getChatPerms,
@@ -1405,6 +1428,7 @@ try {
       getChatPerms,
       commandCounter: COMMAND_COUNTER,
       countStore: NAMED_COUNTERS,
+      onActivity: (event) => void logActivity(event),
       logger: console,
     });
     console.log("[modules] custom_commands=on");
@@ -1451,10 +1475,16 @@ client.connect();
 
 client.on("message", (channel, userstate, message, self) => {
   if (self) return;
-  if (userstate?.__discordRelay) return;
+  const fromDiscordRelay = Boolean(userstate?.__discordRelay);
   const msg = String(message || "").trim();
   if (!msg.startsWith("!")) return;
   recordCommandUsage(channel, userstate, msg);
+  void bumpCommandUsageState({
+    schema: STATE_SCHEMA,
+    instance: INSTANCE_NAME,
+    platform: fromDiscordRelay ? "discord" : "twitch",
+    command: msg,
+  }).catch(() => {});
 });
 
 // Twitch chat -> Discord logging should be independent of the main command handler, so it still
@@ -1602,7 +1632,7 @@ async function logHandler(
 }
 
 
-// Aubrey tab moved to bot/modules/aubreytab.js
+// Tab module moved to bot/modules/tab.js
 
 async function customModFunctions(client, message, twitchUsername, userstate) {
   var messageArray = ([] = message.toLowerCase().split(" "));
@@ -1699,16 +1729,7 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
       return reply("Usage: !addkey [category] phrase");
     }
 
-    let wordsData = {};
-    try {
-      const rawWords = JSON.parse(fs.readFileSync(WORDS_PATH, "utf8"));
-      if (!rawWords || typeof rawWords !== "object" || Array.isArray(rawWords)) {
-        return reply("WORDS.json is not in a valid object format.");
-      }
-      wordsData = rawWords;
-    } catch {
-      return reply("Couldn't read WORDS.json right now.");
-    }
+    const wordsData = normalizeKeywordsObject(WORDS || {});
 
     if (!Object.prototype.hasOwnProperty.call(wordsData, category)) {
       return reply(`Unknown keyword category: ${category}`);
@@ -1732,9 +1753,7 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
     }
 
     wordsData[category].push(normalizedPhrase);
-
-    fs.writeFileSync(WORDS_PATH, JSON.stringify(wordsData, null, 2));
-    WORDS = wordsData;
+    await persistKeywords(wordsData);
 
     return reply(`Added phrase to ${category}: ${normalizedPhrase}`);
   }
@@ -2074,25 +2093,55 @@ async function customUserFunctions(client, message, twitchUsername, userid, user
     }
 }
 
-const MODE_TO_TWITCH = {
-  "!join.on":   { titleKey: "join",   gameName: "Roblox" },
-  "!link.on":   { titleKey: "link",   gameName: "Roblox" },
-  "!1v1.on":    { titleKey: "1v1",    gameName: "Roblox" },
-  "!ticket.on": { titleKey: "ticket", gameName: "Roblox" },
-  "!val.on":    { titleKey: "val",    gameName: "VALORANT" },
-  "!reddit.on": { titleKey: "reddit", gameName: "Just Chatting" },
-};
+function normalizeModeCommand(value) {
+  let out = String(value || "").trim().toLowerCase();
+  if (!out) return "";
+  if (!out.startsWith("!")) out = `!${out}`;
+  if (!out.endsWith(".on")) out = `${out.replace(/\.off$/i, "")}.on`;
+  return out;
+}
+
+function modeKeyFromCommand(modeCommand) {
+  return normalizeModeCommand(modeCommand).replace(/^!/, "").replace(/\.on$/i, "");
+}
+
+function getModeConfig(settings = {}, modeCommand = "") {
+  const command = normalizeModeCommand(modeCommand);
+  if (!command) return null;
+  const key = modeKeyFromCommand(command);
+  const modeMap =
+    settings?.modes && typeof settings.modes === "object" && !Array.isArray(settings.modes)
+      ? settings.modes
+      : {};
+  const raw =
+    (modeMap[command] && typeof modeMap[command] === "object" ? modeMap[command] : null) || {};
+
+  return {
+    command,
+    key,
+    responseCommand: String(
+      raw.responseCommand || raw.command || settings?.main?.[key] || ""
+    ).trim(),
+    timerMessage: String(raw.timerMessage || raw.timer || settings?.timer?.[key] || "").trim(),
+    title: String(raw.title || settings?.titles?.[key] || "").trim(),
+    gameName: String(raw.gameName || raw.game || settings?.modeGames?.[command] || "").trim(),
+    recapSpamCount: Math.max(0, Math.floor(Number(raw.recapSpamCount || 0) || 0)),
+    recapMessage: String(raw.recapMessage || "").trim(),
+  };
+}
 
 async function applyModeToTwitch({ client, mode, userstate }) {
-  const cfg = MODE_TO_TWITCH[mode];
-  if (!cfg) return false;
+  const normalizedMode = normalizeModeCommand(mode);
+  if (!normalizedMode) return false;
 
   // reload settings so we always use freshest titles
-  const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+  const s = withSettingsDefaults(JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8")));
+  const modeCfg = getModeConfig(s, normalizedMode);
+  if (!modeCfg) return false;
 
-  const title = s?.titles?.[cfg.titleKey];
+  const title = modeCfg.title;
   if (!title) {
-    console.warn(`[applyModeToTwitch] No title set for "${cfg.titleKey}" in settings.titles`);
+    console.warn(`[applyModeToTwitch] No title set for "${modeCfg.key}" in settings.modes`);
     return false;
   }
 
@@ -2102,15 +2151,14 @@ async function applyModeToTwitch({ client, mode, userstate }) {
       throw new Error("Missing streamer OAuth token/client id (link streamer in /auth).");
     }
 
-    const overrideGame =
-      s?.modeGames && typeof s.modeGames === "object" ? String(s.modeGames[mode] || "").trim() : "";
-    const gameName = overrideGame || cfg.gameName;
-
-    const gameId = await TWITCH_FUNCTIONS.getGameIdByName({
-      token: auth.accessToken,
-      clientId: auth.clientId,
-      name: gameName,
-    });
+    const gameName = String(modeCfg.gameName || "").trim();
+    const gameId = gameName
+      ? await TWITCH_FUNCTIONS.getGameIdByName({
+          token: auth.accessToken,
+          clientId: auth.clientId,
+          name: gameName,
+        })
+      : null;
 
     await TWITCH_FUNCTIONS.updateChannelInfo({
       broadcasterId: CHANNEL_ID,
@@ -2130,30 +2178,31 @@ async function applyModeToTwitch({ client, mode, userstate }) {
 async function updateMode(client, message, twitchUsername, userstate) {
   const messageArray = message.toLowerCase().trim().split(/\s+/);
   const cmd = messageArray[0];
-  const modeLabel = String(cmd).replace(/^!/, "").replace(/\.on$/, "");
+  const normalizedCmd = normalizeModeCommand(cmd);
+  const modeLabel = String(normalizedCmd).replace(/^!/, "").replace(/\.on$/, "");
 
   if (!cmd.startsWith("!")) return;
   if (!cmd.endsWith(".on")) return;
 
   // reload fresh settings
-  SETTINGS = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+  SETTINGS = withSettingsDefaults(JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8")));
 
-  const isValidMode = SETTINGS.validModes.includes(cmd);
-  const isIgnoreMode = SETTINGS.ignoreModes.includes(cmd);
-  const isSpecialMode = SETTINGS.specialModes.includes(cmd);
-  const isCustomMode = SETTINGS.customModes.includes(cmd);
+  const isValidMode = SETTINGS.validModes.includes(normalizedCmd);
+  const isIgnoreMode = SETTINGS.ignoreModes.includes(normalizedCmd);
+  const isSpecialMode = SETTINGS.specialModes.includes(normalizedCmd);
+  const isCustomMode = SETTINGS.customModes.includes(normalizedCmd);
 
   if (isIgnoreMode || isSpecialMode || isCustomMode) return;
 
   if (!isValidMode) {
     return client.raw(
       `@client-nonce=${userstate["client-nonce"]};reply-parent-msg-id=${userstate["id"]} ` +
-      `PRIVMSG #${CHANNEL_NAME} :${bot}${cmd} is not a valid mode. ` +
+      `PRIVMSG #${CHANNEL_NAME} :${bot}${normalizedCmd} is not a valid mode. ` +
       `Valid Modes: ${SETTINGS.validModes.join(", ")}`
     );
   }
 
-  if (SETTINGS.currentMode === cmd) {
+  if (SETTINGS.currentMode === normalizedCmd) {
     client.raw(
       `@client-nonce=${userstate["client-nonce"]};reply-parent-msg-id=${userstate["id"]} ` +
       `PRIVMSG #${CHANNEL_NAME} :${bot}${modeLabel} mode is already on.`
@@ -2167,7 +2216,8 @@ async function updateMode(client, message, twitchUsername, userstate) {
     client.say(CHANNEL_NAME, `!cmd delete !link`);
   }
 
-  SETTINGS.currentMode = cmd;
+  const prevMode = String(SETTINGS.currentMode || "").trim();
+  SETTINGS.currentMode = normalizedCmd;
 
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2));
 
@@ -2176,24 +2226,43 @@ async function updateMode(client, message, twitchUsername, userstate) {
     `PRIVMSG #${CHANNEL_NAME} :${bot}@${CHANNEL_NAME}, ${twitchUsername} has turned ${modeLabel} mode on.`
   );
 
+  void logActivity({
+    action: "set_mode",
+    source: "chat",
+    actor: String(twitchUsername || "").trim().toLowerCase() || "unknown",
+    detail: normalizedCmd,
+    meta: { from: prevMode || null, to: normalizedCmd },
+  });
+
   await applyModeToTwitch({
     client,
-    mode: cmd,
+    mode: normalizedCmd,
     userstate,
   });
 
-  if (cmd === "!reddit.on") {
+  const activeMode = getModeConfig(SETTINGS, normalizedCmd);
+  if (activeMode && activeMode.recapSpamCount > 0) {
     const fallbackUrl = CHANNEL_NAME
       ? `https://reddit.com/r/${String(CHANNEL_NAME).replace(/^#/, "").trim()}`
       : "";
     const recapUrl = REDDIT_RECAP_URL || fallbackUrl;
-    const recapMsg = recapUrl ? `REDDIT RECAP TIME: ${recapUrl}` : "REDDIT RECAP TIME:";
-    for (let i = 0; i < 3; i++) {
+    const baseRecapMessage = String(activeMode.recapMessage || "").trim();
+    const recapMsg =
+      baseRecapMessage
+        ? baseRecapMessage
+            .replaceAll("{url}", recapUrl || "")
+            .replaceAll("{mode}", modeLabel)
+            .trim()
+        : recapUrl
+        ? `REDDIT RECAP TIME: ${recapUrl}`
+        : "REDDIT RECAP TIME:";
+    const spamCount = Math.max(1, Math.floor(Number(activeMode.recapSpamCount || 0)));
+    for (let i = 0; i < spamCount; i++) {
       client.say(CHANNEL_NAME, recapMsg);
     }
   }
 
-  SETTINGS = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+  SETTINGS = withSettingsDefaults(JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8")));
 }
 
 
@@ -2231,7 +2300,7 @@ async function joinHandler(
         continue;
       }
 
-      const resolvedKeyword = resolveKeywordResponseHandler(wordSet);
+      const resolvedKeyword = keywordResponseResolver.resolve(wordSet);
       const keywordHandler = resolvedKeyword?.fn;
       const keywordKey = resolvedKeyword?.key || String(wordSet || "").trim();
       if (typeof keywordHandler !== "function") {
@@ -2563,6 +2632,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       channelName: CHANNEL_NAME,
       userstate,
       settings: SETTINGS,
+      onActivity: (event) => void logActivity(event),
     });
     handleKeywordsToggle({
       client,
@@ -2570,6 +2640,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       channelName: CHANNEL_NAME,
       userstate,
       settings: SETTINGS,
+      onActivity: (event) => void logActivity(event),
     });
     handleTimersToggle({
       client,
@@ -2578,6 +2649,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
       botPrefix: bot,
       userstate,
       settings: SETTINGS,
+      onActivity: (event) => void logActivity(event),
     });
     // accountHandler(client, lowerMessage, twitchUsername, userstate);
     updateMode(client, message, twitchUsername, userstate);
@@ -3035,19 +3107,60 @@ function getStatusSnapshot() {
       gamesPlayedChatMs: GAMES_PLAYED_CHAT_COOLDOWN_MS,
       friendCommandMs: getRobloxFriendCooldownMs(),
       keywordReplyMs: Math.max(0, Number(COOLDOWN) || 0),
-      activeCommandGlobalRemainingMs: Math.max(
-        0,
-        Number(commandGlobalCooldownUntil || 0) - now
-      ),
+      activeCommandGlobalRemainingMs: sharedCommandCooldown.getGlobalRemainingMs(now),
       activeGamesPlayedRemainingMs: getRobloxGamesPlayedCooldownRemainingMs(now),
       activeFriendRemainingMs: getRobloxFriendCooldownRemainingMs(now),
     },
   };
 }
 
+function getKeywordsSnapshot() {
+  return normalizeKeywordsObject(WORDS || {});
+}
+
+async function saveKeywordsSnapshot(nextKeywords = {}) {
+  const normalized = normalizeKeywordsObject(nextKeywords || {});
+  await persistKeywords(normalized);
+  return normalized;
+}
+
+async function getActivityLogSnapshot(limit = 120) {
+  try {
+    const result = await readActivityLogState({
+      schema: STATE_SCHEMA,
+      instance: INSTANCE_NAME,
+      limit,
+    });
+    return Array.isArray(result?.rows) ? result.rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function isWebModuleEnabled() {
+  const raw = String(process.env.MODULE_WEB ?? "").trim().toLowerCase();
+  if (!raw) return false;
+  return /^(1|true|yes|on)$/i.test(raw);
+}
+
 // ---------- WEB SERVER ----------
 // (moved to bot/web/server.js)
-const WEB = startWebServer({ getStatusSnapshot, logDiscordModAction });
+const WEB = isWebModuleEnabled()
+  ? startWebServer({
+      getStatusSnapshot,
+      logDiscordModAction,
+      getKeywordsSnapshot,
+      saveKeywordsSnapshot,
+      getActivityLogSnapshot,
+      logActivity,
+    })
+  : null;
+
+if (WEB) {
+  console.log("[modules] web=on (embedded)");
+} else {
+  console.log("[modules] web=off (use mainsbot-web@.service for web UI)");
+}
 
 async function gracefulShutdown(signal = "shutdown") {
   try {
@@ -3095,5 +3208,3 @@ process.on("uncaughtException", e =>
 process.on("unhandledRejection", e =>
   setStatus({ lastError: String(e?.message || e) })
 );
-
-

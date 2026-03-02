@@ -6,8 +6,8 @@ function mustEnv(name) {
   return v;
 }
 
-export function getSpotifyRefreshConfig() {
-  const stored = getSpotifyStoredRefreshToken();
+export async function getSpotifyRefreshConfig() {
+  const stored = await getSpotifyStoredRefreshToken();
   const refreshToken =
     stored || String(process.env.SPOTIFY_REFRESH_TOKEN || "").trim() || "";
   if (!refreshToken) {
@@ -22,8 +22,7 @@ export function getSpotifyRefreshConfig() {
   };
 }
 
-export function hasSpotifyRefreshToken() {
-  return Boolean(
-    getSpotifyStoredRefreshToken() || String(process.env.SPOTIFY_REFRESH_TOKEN || "").trim()
-  );
+export async function hasSpotifyRefreshTokenAsync() {
+  const stored = await getSpotifyStoredRefreshToken();
+  return Boolean(stored || String(process.env.SPOTIFY_REFRESH_TOKEN || "").trim());
 }

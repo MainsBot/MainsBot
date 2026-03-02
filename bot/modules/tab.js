@@ -1,5 +1,6 @@
 import { resolveStateSchema } from "../../data/postgres/db.js";
 import { ensureStateTable, readStateValue, writeStateValue } from "../../data/postgres/stateStore.js";
+import { resolveInstanceName } from "../functions/instance.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GRACE_DAYS = 7;
@@ -88,27 +89,27 @@ function applyInterestToEntry(entry, nowMs) {
   return tab;
 }
 
-export function isAubreyTabModuleEnabled() {
-  const raw = String(process.env.MODULE_AUBREYTAB ?? "").trim();
+export function isTabModuleEnabled() {
+  const raw = String(process.env.MODULE_TAB ?? process.env.MODULE_AUBREYTAB ?? "").trim();
   if (!raw) return true;
   return /^(1|true|yes|on)$/i.test(raw);
 }
 
-export function registerAubreyTabModule({
+export function registerTabModule({
   client,
   channelName,
   getChatPerms,
   logger = console,
 } = {}) {
   if (!client || typeof client.on !== "function") {
-    throw new Error("registerAubreyTabModule: missing tmi client");
+    throw new Error("registerTabModule: missing tmi client");
   }
   if (typeof getChatPerms !== "function") {
-    throw new Error("registerAubreyTabModule: missing getChatPerms");
+    throw new Error("registerTabModule: missing getChatPerms");
   }
 
   const defaultChannel = String(channelName || "").replace(/^#/, "").trim();
-  const instance = String(process.env.INSTANCE_NAME || "default").trim() || "default";
+  const instance = resolveInstanceName();
   const schema = resolveStateSchema();
   const stateKey = "tabs";
   const legacyStateKey = "aubrey_tabs";
@@ -269,3 +270,7 @@ export function registerAubreyTabModule({
 
   return {};
 }
+
+// Backward-compatible aliases.
+export const isAubreyTabModuleEnabled = isTabModuleEnabled;
+export const registerAubreyTabModule = registerTabModule;

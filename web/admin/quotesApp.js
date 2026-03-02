@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
+import { applyStreamerThemeFromStatus } from "/static/theme.js";
 
 const html = htm.bind(React.createElement);
 
@@ -64,6 +65,17 @@ async function initTopbarSession() {
       <a class="btn btn--sm" href="/admin/login">Login</a>
     </div>
   `;
+}
+
+async function initStreamerTheme() {
+  try {
+    const res = await fetch("/api/status", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const status = res.ok ? await res.json().catch(() => null) : null;
+    applyStreamerThemeFromStatus(status);
+  } catch {}
 }
 
 function App() {
@@ -297,9 +309,9 @@ function App() {
 }
 
 initTopbarSession();
+initStreamerTheme();
 
 const rootEl = document.getElementById("quotesRoot");
 if (rootEl) {
   createRoot(rootEl).render(html`<${App} />`);
 }
-

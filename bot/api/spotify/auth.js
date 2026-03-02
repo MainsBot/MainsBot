@@ -99,17 +99,18 @@ export async function exchangeSpotifyCode({ code, settings, tokenStorePath } = {
 
   // NOTE: Spotify may omit refresh_token if user already authorized the app and you didn't force show_dialog.
   // We always set show_dialog=true in authorize URL to encourage getting a refresh_token.
-  const prev = readSpotifyTokenStore(tokenStorePath);
+  const prev = await readSpotifyTokenStore(tokenStorePath);
   const next = {
     ...prev,
     access_token: accessToken,
     refresh_token: refreshToken || String(prev?.refresh_token || "").trim() || "",
     expires_at_ms: Date.now() + expiresInSec * 1000,
     linked_at_ms: Date.now(),
+    scope: String(data?.scope || prev?.scope || "").trim(),
   };
 
   const storePath = tokenStorePath || resolveSpotifyTokenStorePath();
-  writeSpotifyTokenStore(next, storePath);
+  await writeSpotifyTokenStore(next, storePath);
 
   return {
     ok: true,
@@ -118,13 +119,23 @@ export async function exchangeSpotifyCode({ code, settings, tokenStorePath } = {
   };
 }
 
-export function getPublicSpotifyTokenSnapshot() {
-  const store = readSpotifyTokenStore();
+export async function getPublicSpotifyTokenSnapshot() {
+  const store = await readSpotifyTokenStore();
+  const expiresAtMs = Number(store?.expires_at_ms || 0) || null;
+  const now = Date.now();
+  const expiresInSec = expiresAtMs ? Math.floor((expiresAtMs - now) / 1000) : null;
   return {
     tokenStorePath: resolveSpotifyTokenStorePath(),
     hasClientId: Boolean(String(process.env.SPOTIFY_CLIENT_ID || "").trim()),
     hasClientSecret: Boolean(String(process.env.SPOTIFY_CLIENT_SECRET || "").trim()),
+    hasAccessToken: Boolean(String(store?.access_token || "").trim()),
     hasRefreshToken: Boolean(String(store?.refresh_token || "").trim()),
+    scopes: String(store?.scope || "")
+      .split(/[,\s]+/)
+      .map((scope) => String(scope || "").trim())
+      .filter(Boolean),
+    expiresAtMs,
+    expiresInSec,
     linkedAtMs: Number(store?.linked_at_ms || 0) || null,
   };
 }

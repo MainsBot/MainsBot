@@ -1,5 +1,6 @@
 import { resolveStateSchema } from "../../data/postgres/db.js";
 import { ensureStateTable, readStateValue, writeStateValue } from "../../data/postgres/stateStore.js";
+import { resolveInstanceName } from "./instance.js";
 
 function normalizeCommand(value) {
   const raw = String(value || "").trim().toLowerCase();
@@ -25,7 +26,7 @@ export function createCommandCounter({
   flushIntervalMs = 60000,
   logger = console,
 } = {}) {
-  const inst = String(instance || "").trim() || String(process.env.INSTANCE_NAME || "default").trim() || "default";
+  const inst = resolveInstanceName({ instanceName: instance });
   const sch = String(schema || "").trim() || resolveStateSchema();
 
   if (!hasDatabaseUrl()) {
@@ -141,4 +142,3 @@ export function createCommandCounter({
 
   return { record, flushNow, getSnapshot };
 }
-

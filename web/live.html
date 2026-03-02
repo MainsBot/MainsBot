@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Live | MainsBot</title>
+  <meta name="description" content="Live runtime snapshot for MainsBot." />
+  <meta name="theme-color" content="#ffbd59" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.svg" />
+  <link rel="alternate icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/favicon.svg" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div class="topbar__brand">
+        <a href="/home">MainsBot</a>
+        <span class="muted">Live</span>
+      </div>
+      <div class="topbar__links">
+        <a class="btn btn--sm btn--ghost" href="/home">Home</a>
+        <a class="btn btn--sm btn--ghost" href="/commands">Commands</a>
+        <a class="btn btn--sm" href="/live">Live</a>
+        <button class="btn btn--sm btn--ghost theme-toggle" id="themeToggle" type="button">Light</button>
+        <span id="topbarAdminLink"></span>
+      </div>
+      <div class="topbar__right"></div>
+    </div>
+
+    <div class="app">
+      <header class="hero-card">
+        <div>
+          <div class="pill">Runtime</div>
+          <h1 class="hero-title">Live Snapshot</h1>
+          <p class="hero-sub">Realtime values from <code>/api/status</code>, refreshed automatically.</p>
+        </div>
+      </header>
+
+      <section class="home-stats">
+        <div class="home-stat"><span class="muted">Twitch</span><strong id="homeTwitch">-</strong></div>
+        <div class="home-stat"><span class="muted">Roblox</span><strong id="homeRoblox">-</strong></div>
+        <div class="home-stat"><span class="muted">Spotify</span><strong id="homeSpotify">-</strong></div>
+        <div class="home-stat"><span class="muted">Uptime</span><strong id="homeUptime">-</strong></div>
+        <div class="home-stat"><span class="muted">Mode</span><strong id="homeMode">-</strong></div>
+        <div class="home-stat"><span class="muted">Keywords</span><strong id="homeKeywords">-</strong></div>
+      </section>
+
+      <section class="status-json-wrap">
+        <h2>Status JSON</h2>
+        <pre id="liveStatusJson">Loading...</pre>
+      </section>
+
+      <footer class="footer" id="homeFooter">MainsBot</footer>
+    </div>
+  </div>
+
+  <script type="module" src="/static/public.js"></script>
+</body>
+</html>

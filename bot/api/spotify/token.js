@@ -21,7 +21,7 @@ export async function getSpotifyAccessToken() {
   if (cachedAccessToken && now < cachedUntilMs) return cachedAccessToken;
 
   // If we have a persisted access token and it's still valid, use it.
-  const store = readSpotifyTokenStore();
+  const store = await readSpotifyTokenStore();
   const storedAccess = String(store?.access_token || "").trim();
   const storedUntil = Number(store?.expires_at_ms || 0);
   if (storedAccess && storedUntil && now < storedUntil - 30_000) {
@@ -30,7 +30,7 @@ export async function getSpotifyAccessToken() {
     return cachedAccessToken;
   }
 
-  const { clientId, clientSecret, refreshToken } = getSpotifyRefreshConfig();
+  const { clientId, clientSecret, refreshToken } = await getSpotifyRefreshConfig();
 
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -65,10 +65,12 @@ export async function getSpotifyAccessToken() {
 
   // Persist latest token snapshot for status/debug.
   try {
-    writeSpotifyTokenStore({
+    await writeSpotifyTokenStore({
       ...store,
       access_token: cachedAccessToken,
       expires_at_ms: Date.now() + expiresSec * 1000,
+      scope: String(data?.scope || store?.scope || "").trim(),
+      refreshed_at_ms: Date.now(),
     });
   } catch {}
   return cachedAccessToken;

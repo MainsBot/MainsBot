@@ -1,5 +1,5 @@
 [Unit]
-Description=MainsBot instance %i
+Description=MainsBot web instance %i
 After=network-online.target
 Wants=network-online.target
 
@@ -7,12 +7,11 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/MainsBot
 Environment=NODE_ENV=production
-Environment=MODULE_WEB=0
-ExecStart=/usr/bin/node /opt/MainsBot/main.js --config /opt/MainsBot/config/%i.ini
+ExecStart=/usr/bin/node /opt/MainsBot/main-web.js --config /opt/MainsBot/config/%i.ini
 Restart=always
 RestartSec=3
 
-# If web is split into mainsbot-web@.service, this unit is bot-only.
+# If you use unix sockets, systemd can manage the runtime dir:
 RuntimeDirectory=mainsbot
 
 [Install]

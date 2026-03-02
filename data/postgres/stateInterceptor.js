@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 
 import { closePgPool, getPgPool, normalizePgIdentifier, resolveStateSchema } from "./db.js";
+import { resolveInstanceName } from "../../bot/functions/instance.js";
 
 const LEGACY_FILENAMES_BY_KEY = {
   settings: ["./SETTINGS.json", "SETTINGS.json"],
@@ -11,7 +12,7 @@ const LEGACY_FILENAMES_BY_KEY = {
   predictiondata: ["./PREDICTIONDATA.json", "PREDICTIONDATA.json"],
   polldata: ["./POLLDATA.json", "POLLDATA.json"],
   tounfriend: ["./TOUNFRIEND.json", "TOUNFRIEND.json"],
-  aubrey_tab: ["./aubrey_tab.json", "./secrets/aubrey_tab.json", "aubrey_tab.json"],
+  tab: ["./tab.json", "./secrets/tab.json", "./aubrey_tab.json", "./secrets/aubrey_tab.json", "tab.json", "aubrey_tab.json"],
 };
 
 const ENV_PATH_BY_KEY = {
@@ -22,7 +23,7 @@ const ENV_PATH_BY_KEY = {
   predictiondata: "PREDICTIONDATA_PATH",
   polldata: "POLLDATA_PATH",
   tounfriend: "TO_UNFRIEND_PATH",
-  aubrey_tab: "AUBREY_TAB_PATH",
+  tab: "TAB_PATH",
 };
 
 function readBackend() {
@@ -30,7 +31,7 @@ function readBackend() {
 }
 
 function readInstanceName() {
-  return String(process.env.INSTANCE_NAME || "default").trim() || "default";
+  return resolveInstanceName();
 }
 
 function abs(p) {
@@ -189,7 +190,7 @@ function buildEmptyPlaytime() {
   };
 }
 
-function buildEmptyAubreyTab() {
+function buildEmptyTab() {
   const now = Date.now();
   return { balance: 0, lastTouchedMs: now, lastInterestAppliedMs: now };
 }
@@ -214,7 +215,7 @@ function defaultValueForKey(key) {
   if (key === "playtime") return buildEmptyPlaytime();
   if (key === "predictiondata") return [];
 
-  if (key === "aubrey_tab") return buildEmptyAubreyTab();
+  if (key === "tab") return buildEmptyTab();
 
   return {};
 }
@@ -324,6 +325,13 @@ async function loadCacheFromDb({ schema, instance } = {}) {
   for (const row of res.rows || []) {
     const key = String(row.key || "").trim();
     if (!key) continue;
+    if (key === "aubrey_tab") {
+      if (!cache.has("tab")) {
+        cache.set("tab", row.value);
+        dirtyKeys.add("tab");
+      }
+      continue;
+    }
     cache.set(key, row.value);
   }
 }
