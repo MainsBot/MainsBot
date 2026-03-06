@@ -5,8 +5,8 @@ import pg from "pg";
 import {
   TWITCH_ROLES,
   getRoleAccessToken,
-  getTokenStorePath,
   readTokenStore,
+  primeTokenStoreCache,
 } from "./auth.js";
 
 const { Pool } = pg;
@@ -18,7 +18,8 @@ function normalizeTwitchToken(value) {
     .replace(/^bearer\s+/i, "");
 }
 
-const TWITCH_TOKEN_STORE = readTokenStore(getTokenStorePath());
+await primeTokenStoreCache();
+const TWITCH_TOKEN_STORE = readTokenStore();
 const TWITCH_BOT_STORE = TWITCH_TOKEN_STORE?.bot || {};
 const TWITCH_STREAMER_STORE = TWITCH_TOKEN_STORE?.streamer || {};
 
@@ -155,6 +156,11 @@ function hasAllScopes(scopes, required) {
   return (required || []).every((s) => have.has(String(s || "").trim().toLowerCase()));
 }
 
+function authHasRequiredScopes(auth, requiredScopes = []) {
+  if (!Array.isArray(requiredScopes) || !requiredScopes.length) return true;
+  return hasAllScopes(auth?.scopes || [], requiredScopes);
+}
+
 function getStaticAppAccessToken() {
   return normalizeTwitchToken(process.env.APP_ACCESS_TOKEN || APP_ACCESS_TOKEN || "");
 }
@@ -269,7 +275,7 @@ export function parseRawPrivmsg(rawLine) {
 
 export function getHelixChatConfig(overrides = {}) {
   // Read token store per call so OAuth callback updates are picked up without restart.
-  const runtimeStore = readTokenStore(getTokenStorePath());
+  const runtimeStore = readTokenStore();
   const runtimeBotStore =
     runtimeStore?.bot && typeof runtimeStore.bot === "object"
       ? runtimeStore.bot
@@ -368,10 +374,10 @@ function validateHelixChatConfig(config) {
       missing.push("CLIENT_SECRET/TWITCH_CLIENT_SECRET or APP_ACCESS_TOKEN");
     }
     if (!config.token && !hasStaticAppToken && !config.clientSecret) {
-      missing.push("TWITCH_CHAT_TOKEN or secrets/twitch_tokens.json");
+      missing.push("TWITCH_CHAT_TOKEN or Redis OAuth token store");
     }
   } else if (!config.token) {
-    missing.push("TWITCH_CHAT_TOKEN or secrets/twitch_tokens.json");
+    missing.push("TWITCH_CHAT_TOKEN or Redis OAuth token store");
   }
   if (!config.senderId) missing.push("TWITCH_CHAT_SENDER_ID/BOT_ID");
   if (!config.broadcasterId) missing.push("TWITCH_CHAT_BROADCASTER_ID/CHANNEL_ID");
@@ -694,7 +700,11 @@ async function fetchHelixJson({ url, method = "GET", clientId, accessToken, body
   return json;
 }
 
-async function resolveHelixModeratorAuth({ preferred = "auto", minTtlSec = 120 } = {}) {
+async function resolveHelixModeratorAuth({
+  preferred = "auto",
+  minTtlSec = 120,
+  requiredScopes = [],
+} = {}) {
   const pref = String(preferred || "auto").trim().toLowerCase();
   const order =
     pref === "bot"
@@ -705,7 +715,14 @@ async function resolveHelixModeratorAuth({ preferred = "auto", minTtlSec = 120 }
 
   for (const role of order) {
     const auth = await getRoleAccessToken({ role, minTtlSec }).catch(() => null);
-    if (auth?.accessToken && auth?.clientId && auth?.userId) return auth;
+    if (
+      auth?.accessToken &&
+      auth?.clientId &&
+      auth?.userId &&
+      authHasRequiredScopes(auth, requiredScopes)
+    ) {
+      return auth;
+    }
   }
 
   return null;
@@ -725,7 +742,10 @@ export async function isUserModerator({ broadcasterId, userId, preferredRole = "
   const targetUserId = String(userId || "").trim();
   if (!targetBroadcasterId || !targetUserId) return false;
 
-  const auth = await resolveHelixModeratorAuth({ preferred: preferredRole });
+  const auth = await resolveHelixModeratorAuth({
+    preferred: preferredRole,
+    requiredScopes: ["moderator:read:moderators"],
+  });
   if (!auth?.accessToken || !auth?.clientId) return false;
 
   const url = new URL("https://api.twitch.tv/helix/moderation/moderators");
@@ -750,7 +770,10 @@ export async function listChannelModerators({
   const targetBroadcasterId = String(broadcasterId || "").trim();
   if (!targetBroadcasterId) return [];
 
-  const auth = await resolveHelixModeratorAuth({ preferred: preferredRole });
+  const auth = await resolveHelixModeratorAuth({
+    preferred: preferredRole,
+    requiredScopes: ["moderator:read:moderators"],
+  });
   if (!auth?.accessToken || !auth?.clientId) return [];
 
   const maxItems = Math.max(1, Math.min(2000, Number(limit) || 500));
@@ -804,7 +827,11 @@ async function getHelixUserIdByLogin({ login, auth, preferredRole } = {}) {
   }
 
   const resolvedAuth =
-    auth || (await resolveHelixModeratorAuth({ preferred: preferredRole }));
+    auth ||
+    (await resolveHelixModeratorAuth({
+      preferred: preferredRole,
+      requiredScopes: [],
+    }));
   if (!resolvedAuth) {
     throw new Error("Missing Twitch OAuth token (bot/streamer) for Helix request");
   }
@@ -823,7 +850,10 @@ async function getHelixUserIdByLogin({ login, auth, preferredRole } = {}) {
 }
 
 export async function updateChatSettings(patch = {}, { preferredRole = "auto" } = {}) {
-  const auth = await resolveHelixModeratorAuth({ preferred: preferredRole });
+  const auth = await resolveHelixModeratorAuth({
+    preferred: preferredRole,
+    requiredScopes: ["moderator:manage:chat_settings"],
+  });
   if (!auth) {
     throw new Error(
       "Missing Twitch OAuth token (need bot+moderator or streamer token)"
@@ -903,7 +933,10 @@ export async function sendHelixAnnouncement(
   const text = String(message || "").replace(/[\r\n]+/g, " ").trim();
   if (!text) return null;
 
-  const auth = await resolveHelixModeratorAuth({ preferred: preferredRole });
+  const auth = await resolveHelixModeratorAuth({
+    preferred: preferredRole,
+    requiredScopes: ["moderator:manage:announcements"],
+  });
   if (!auth) {
     throw new Error(
       "Missing Twitch OAuth token (need bot+moderator or streamer token)"
@@ -955,7 +988,10 @@ export async function timeoutUserByLogin(
   reason = "",
   { preferredRole = "auto" } = {}
 ) {
-  const auth = await resolveHelixModeratorAuth({ preferred: preferredRole });
+  const auth = await resolveHelixModeratorAuth({
+    preferred: preferredRole,
+    requiredScopes: ["moderator:manage:banned_users"],
+  });
   if (!auth) {
     throw new Error(
       "Missing Twitch OAuth token (need bot+moderator or streamer token)"

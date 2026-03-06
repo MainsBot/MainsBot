@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Prediction Overlay</title>
+    <style>
+      :root {
+        --bg: rgba(9, 13, 20, 0.65);
+        --text: #f7fbff;
+        --muted: #c1cfde;
+        --line: rgba(255, 255, 255, 0.22);
+      }
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+        color: var(--text);
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      }
+      .wrap {
+        box-sizing: border-box;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 14px 18px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--bg);
+        backdrop-filter: blur(5px);
+        padding: 14px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .title {
+        font-size: 24px;
+        font-weight: 800;
+        line-height: 1.2;
+      }
+      .meta {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .rows {
+        margin-top: 12px;
+        display: grid;
+        gap: 10px;
+      }
+      .row {
+        display: grid;
+        gap: 6px;
+      }
+      .row__head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 16px;
+      }
+      .bar {
+        position: relative;
+        height: 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.09);
+        overflow: hidden;
+      }
+      .bar > span {
+        display: block;
+        height: 100%;
+        width: 0%;
+        transition: width 360ms ease;
+      }
+      .empty {
+        font-size: 22px;
+        font-weight: 800;
+        text-align: center;
+        padding: 22px 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card" id="root">
+        <div class="empty">No active prediction</div>
+      </div>
+    </div>
+    <script>
+      const root = document.getElementById("root");
+
+      function colorForOutcome(color) {
+        const c = String(color || "").toUpperCase();
+        if (c === "BLUE") return "#2f84ff";
+        if (c === "PINK") return "#ff4cc9";
+        if (c === "PURPLE") return "#7c63ff";
+        if (c === "ORANGE") return "#ff9f43";
+        if (c === "GREEN") return "#3ddc84";
+        return "#5ca3ff";
+      }
+
+      function fmtPoints(n) {
+        const v = Number(n || 0);
+        if (!Number.isFinite(v)) return "0";
+        return v.toLocaleString("en-US");
+      }
+
+      function render(payload) {
+        const prediction = payload && payload.prediction ? payload.prediction : null;
+        if (!payload || !prediction || !Array.isArray(prediction.outcomes) || !prediction.outcomes.length) {
+          root.innerHTML = '<div class="empty">No active prediction</div>';
+          return;
+        }
+
+        const outcomesHtml = prediction.outcomes
+          .map((o) => {
+            const pct = Math.max(0, Math.min(100, Number(o.pct || 0)));
+            const barColor = colorForOutcome(o.color);
+            const winner = prediction.winningOutcomeId && prediction.winningOutcomeId === o.id ? " (Winner)" : "";
+            return `
+              <div class="row">
+                <div class="row__head">
+                  <div>${o.title}${winner}</div>
+                  <div>${pct.toFixed(1)}% · ${fmtPoints(o.points)} pts · ${fmtPoints(o.users)} users</div>
+                </div>
+                <div class="bar"><span style="width:${pct}%;background:${barColor};"></span></div>
+              </div>
+            `;
+          })
+          .join("");
+
+        root.innerHTML = `
+          <div class="header">
+            <div class="title">${prediction.title}</div>
+            <div class="meta">${String(prediction.status || "UNKNOWN")} · Total ${fmtPoints(prediction.totalPoints)} pts</div>
+          </div>
+          <div class="rows">${outcomesHtml}</div>
+        `;
+      }
+
+      async function refresh() {
+        try {
+          const res = await fetch("/api/overlay/prediction", { cache: "no-store" });
+          const data = await res.json();
+          render(data);
+        } catch {}
+      }
+
+      let pollTimer = null;
+      let ws = null;
+      let wsRetryTimer = null;
+
+      function startPolling() {
+        if (pollTimer) return;
+        refresh();
+        pollTimer = setInterval(refresh, 3500);
+      }
+
+      function stopPolling() {
+        if (!pollTimer) return;
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+
+      function scheduleWsReconnect() {
+        if (wsRetryTimer) return;
+        wsRetryTimer = setTimeout(() => {
+          wsRetryTimer = null;
+          connectWs();
+        }, 2200);
+      }
+
+      function connectWs() {
+        try {
+          const proto = location.protocol === "https:" ? "wss" : "ws";
+          ws = new WebSocket(`${proto}://${location.host}/overlay/ws`);
+          ws.onopen = () => {
+            stopPolling();
+          };
+          ws.onmessage = (event) => {
+            try {
+              const data = JSON.parse(String(event?.data || "{}"));
+              render(data);
+            } catch {}
+          };
+          ws.onerror = () => {
+            try {
+              ws?.close?.();
+            } catch {}
+          };
+          ws.onclose = () => {
+            startPolling();
+            scheduleWsReconnect();
+          };
+        } catch {
+          startPolling();
+          scheduleWsReconnect();
+        }
+      }
+
+      startPolling();
+      connectWs();
+    </script>
+  </body>
+</html>

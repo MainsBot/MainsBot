@@ -54,6 +54,7 @@ export function startTwitchPubsub({
   channelName,
   settingsPath = String(process.env.SETTINGS_PATH || "./SETTINGS.json").trim(),
   streamsPath = String(process.env.STREAMS_PATH || "./STREAMS.json").trim(),
+  onChannelPointEvent = null,
   liveUpHandler,
   liveDownHandler,
   logger = console,
@@ -104,6 +105,159 @@ let reconnectTimer = null;
 let reconnectAttempt = 0;
 let pollFallbackTimer = null;
 let lastProcessedPollSignature = "";
+let lastProcessedPredictionResolutionId = "";
+const subTierCache = new Map();
+
+function asNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function extractPredictionUserTopLosses(event = {}) {
+  const outcomes = Array.isArray(event?.outcomes) ? event.outcomes : [];
+  const winningOutcomeId = String(event?.winning_outcome_id || "").trim();
+  if (!winningOutcomeId || !outcomes.length) return [];
+
+  const lossByUser = new Map();
+  for (const outcome of outcomes) {
+    const outcomeId = String(outcome?.id || "").trim();
+    if (!outcomeId || outcomeId === winningOutcomeId) continue;
+
+    const topPredictors = Array.isArray(outcome?.top_predictors)
+      ? outcome.top_predictors
+      : [];
+    for (const predictor of topPredictors) {
+      const userId = String(predictor?.user_id || "").trim();
+      const login = String(predictor?.user_login || "").trim().toLowerCase();
+      const displayName = String(predictor?.user_name || "").trim();
+      const pointsUsed = Math.max(
+        0,
+        Math.floor(asNumber(predictor?.channel_points_used, 0))
+      );
+      if ((!userId && !login) || pointsUsed <= 0) continue;
+
+      const key = userId || login;
+      const prev = lossByUser.get(key);
+      if (!prev || pointsUsed > prev.pointsLost) {
+        lossByUser.set(key, {
+          userId,
+          login,
+          displayName,
+          pointsLost: pointsUsed,
+        });
+      }
+    }
+  }
+
+  return Array.from(lossByUser.values()).sort(
+    (a, b) => Number(b.pointsLost || 0) - Number(a.pointsLost || 0)
+  );
+}
+
+async function getSubTierFromTwitch(userId = "") {
+  const id = String(userId || "").trim();
+  if (!id) return 0;
+  const now = Date.now();
+  const cached = subTierCache.get(id);
+  if (cached && now - Number(cached.ts || 0) < 6 * 60 * 60 * 1000) {
+    return Number(cached.tier || 0);
+  }
+  try {
+    const data = await TWITCH_FUNCTIONS.getSubStatus(id);
+    const tier = Number(data?.data?.[0]?.tier ?? 0);
+    subTierCache.set(id, { tier, ts: now });
+    return tier;
+  } catch {
+    subTierCache.set(id, { tier: 0, ts: now });
+    return 0;
+  }
+}
+
+function getFarmingRateForTier(tier = 0) {
+  const baseRate = 5.33333333;
+  if (Number(tier) === 1000) return baseRate * 1.2;
+  if (Number(tier) === 2000) return baseRate * 1.4;
+  if (Number(tier) === 3000) return baseRate * 2;
+  return baseRate;
+}
+
+function queueChannelPointEvents(events = []) {
+  if (typeof onChannelPointEvent !== "function") return;
+  const rows = Array.isArray(events) ? events : [events];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    Promise.resolve()
+      .then(() => onChannelPointEvent(row))
+      .catch((e) => {
+        logger.warn?.(
+          `[pubsub][points] failed to persist event: ${String(e?.message || e)}`
+        );
+      });
+  }
+}
+
+async function processPredictionResolvedEvent(event = {}, source = "pubsub") {
+  const predictionId = String(event?.id || "").trim();
+  const status = normalizeEventType(event?.status || "");
+  if (status !== "RESOLVED") return false;
+  if (!predictionId) return false;
+  if (predictionId === lastProcessedPredictionResolutionId) return false;
+
+  const losses = extractPredictionUserTopLosses(event);
+  if (!losses.length) {
+    logger.log?.(
+      `[pubsub][prediction] resolved without top predictor loss rows source=${source} id=${predictionId}`
+    );
+    lastProcessedPredictionResolutionId = predictionId;
+    return false;
+  }
+
+  const maxUsers = Math.max(
+    1,
+    Math.min(5, Number(process.env.PREDICTION_RIPBOZO_MAX_USERS || 3) || 3)
+  );
+  const selected = losses.slice(0, maxUsers);
+  const analyticsEvents = [];
+
+  for (const row of selected) {
+    const pointsLost = Math.max(0, Math.floor(asNumber(row.pointsLost, 0)));
+    if (pointsLost <= 0) continue;
+
+    const tier = await getSubTierFromTwitch(row.userId);
+    const farmingRate = getFarmingRateForTier(tier);
+    const yearsFromPoints = pointsLost / farmingRate / (60 * 24 * 365);
+    const cpToHours = ROBLOX_FUNCTIONS.timeToAgo(yearsFromPoints);
+    const login = String(row.login || row.displayName || "user").trim();
+    client.say(
+      CHANNEL_NAME,
+      `RIPBOZO @${login} lost ${pointsLost} channel points, thats ${cpToHours.timeString} of farming.`
+    );
+  }
+
+  for (const row of losses) {
+    const pointsLost = Math.max(0, Math.floor(asNumber(row.pointsLost, 0)));
+    if (pointsLost <= 0) continue;
+    analyticsEvents.push({
+      ts: new Date().toISOString(),
+      source: "pubsub",
+      type: "prediction_loss",
+      userId: String(row.userId || "").trim(),
+      login: String(row.login || "").trim().toLowerCase(),
+      displayName: String(row.displayName || "").trim(),
+      pointsSpent: pointsLost,
+      pointsLost,
+      subTier: 0,
+      meta: { predictionId, channelId: CHANNEL_ID },
+    });
+  }
+  queueChannelPointEvents(analyticsEvents);
+
+  lastProcessedPredictionResolutionId = predictionId;
+  logger.log?.(
+    `[pubsub][prediction] RIPBOZO sent (${selected.length} users) source=${source} id=${predictionId}`
+  );
+  return true;
+}
 
 function readJsonFile(filePath, fallback) {
   try {
@@ -142,53 +296,7 @@ async function processPollTerminalPayload(pollData, pollType = "", source = "pub
     `[pubsub][poll] processing terminal poll type=${type || "(unknown)"} source=${source} id=${String(r.id || "unknown")}`
   );
 
-  if (type === "POLL_ARCHIVE" || type === "ARCHIVED") {
-    const nodes = r.userNodes;
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i];
-      const username = node?.user?.login;
-      const cp = Number(node?.tokens?.communityPoints || 0);
-      if (!username || !Number.isFinite(cp) || cp <= 1000) continue;
-
-      const getSubStatus = await TWITCH_FUNCTIONS.getSubStatus(node?.user?.id).catch(
-        () => null
-      );
-      const tier = Number(getSubStatus?.data?.[0]?.tier ?? 0);
-
-      const standardRate = 5.33333333;
-      const t1Rate = 5.3333333 * 1.2;
-      const t2Rate = 5.3333333 * 1.4;
-      const t3Rate = 5.3333333 * 2;
-
-      let rate = standardRate;
-      let sub = "you dont have a sub";
-      if (tier == 1000) {
-        rate = t1Rate;
-        sub = "you're a tier 1 sub";
-      } else if (tier == 2000) {
-        rate = t2Rate;
-        sub = "you're a tier 2 sub";
-      } else if (tier == 3000) {
-        rate = t3Rate;
-        sub = "you're a tier 3 sub";
-      }
-
-      const yearsFromPoints = cp / rate / (60 * 24 * 365);
-      const cpToHours = ROBLOX_FUNCTIONS.timeToAgo(yearsFromPoints);
-      client.say(
-        CHANNEL_NAME,
-        `@${username}, lost ${cp} channel points, since ${sub} thats ${cpToHours.timeString} of farming RIPBOZO`
-      );
-    }
-    return true;
-  }
-
-  if (
-    type !== "POLL_TERMINATE" &&
-    type !== "TERMINATED" &&
-    type !== "POLL_COMPLETE" &&
-    type !== "COMPLETED"
-  ) {
+  if (!isPollTerminalStatus(type)) {
     return false;
   }
 
@@ -206,84 +314,110 @@ async function processPollTerminalPayload(pollData, pollType = "", source = "pub
   }
   if (!winnerId) return false;
 
-  const choiceTitleById = {};
-  for (const choice of choices) {
-    const cid = String(choice?.id || "");
-    if (!cid || cid === winnerId) continue;
-    choiceTitleById[cid] = String(choice?.title || cid);
-  }
+  const maxUsers = Math.max(
+    1,
+    Math.min(10, Number(process.env.POLL_RIPBOZO_MAX_USERS || 5) || 5)
+  );
+  const minLoss = Math.max(
+    1,
+    Math.floor(Number(process.env.POLL_RIPBOZO_MIN_POINTS || 1) || 1)
+  );
 
-  const userLosses = {};
-  const packs = {};
-  for (const choiceId of Object.keys(choiceTitleById)) {
-    packs[choiceId] = {};
-  }
+  const losingUsers = [];
+  const analyticsRows = [];
 
   for (const node of userNodes) {
     const userId = String(node?.user?.id || "");
-    if (!userId) continue;
-    const username = String(node?.user?.login || "");
-    const displayName = String(node?.user?.displayName || "");
+    const username = String(node?.user?.login || "").trim().toLowerCase();
+    const displayName = String(node?.user?.displayName || "").trim();
+    if (!userId && !username) continue;
 
-    const choiceTotals = {};
+    let totalLoss = 0;
+    let totalSpent = 0;
     for (const userChoice of Array.isArray(node?.choices) ? node.choices : []) {
       const choiceId = String(userChoice?.pollChoice?.id || "");
       if (!choiceId) continue;
-      const amount = Number(userChoice?.tokens?.communityPoints ?? 0);
-      choiceTotals[choiceId] = Number(choiceTotals[choiceId] || 0) + amount;
+      if (choiceId === winnerId) continue;
+      const amount = Math.max(
+        0,
+        Math.floor(Number(userChoice?.tokens?.communityPoints ?? 0) || 0)
+      );
+      totalLoss += amount;
+      totalSpent += amount;
     }
-
-    const allLosses = {};
-    let winnerLoss = 0;
-    for (const [choiceId, amount] of Object.entries(choiceTotals)) {
-      if (choiceId === winnerId) {
-        winnerLoss = Number(amount || 0);
-      } else {
-        allLosses[choiceId] = Number(amount || 0);
-      }
+    for (const userChoice of Array.isArray(node?.choices) ? node.choices : []) {
+      const choiceId = String(userChoice?.pollChoice?.id || "");
+      if (!choiceId || choiceId !== winnerId) continue;
+      const amount = Math.max(
+        0,
+        Math.floor(Number(userChoice?.tokens?.communityPoints ?? 0) || 0)
+      );
+      totalSpent += amount;
     }
-
-    userLosses[userId] = {
+    if (totalSpent > 0) {
+      analyticsRows.push({
+        userId,
+        username,
+        displayName,
+        pointsSpent: totalSpent,
+        pointsLost: totalLoss,
+      });
+    }
+    if (totalLoss < minLoss) continue;
+    losingUsers.push({
+      userId,
       username,
       displayName,
-      winnerLoss,
-      allLosses,
-    };
-
-    for (const [choiceId, loss] of Object.entries(allLosses)) {
-      if (!packs[choiceId]) continue;
-      packs[choiceId][userId] = Number(loss || 0);
-    }
+      pointsLost: totalLoss,
+    });
   }
 
-  const messages = {};
-  for (const [packId, members] of Object.entries(packs)) {
-    let packLeader = "";
-    let highestLoss = 0;
-    let totalPackLoss = 0;
+  if (!losingUsers.length) return false;
 
-    for (const [memberId, loss] of Object.entries(members)) {
-      const amount = Number(loss || 0);
-      totalPackLoss += amount;
-      if (amount > highestLoss) {
-        highestLoss = amount;
-        packLeader = memberId;
-      }
-    }
-    if (!packLeader) continue;
-
-    const leaderData = userLosses[packLeader];
-    if (!leaderData) continue;
-    const winnerLoss = Number(leaderData.winnerLoss || 0);
-
-    if (totalPackLoss > 1000 && highestLoss > 500 && totalPackLoss > winnerLoss * 2) {
-      messages[packId] = `RIPBOZO ${choiceTitleById[packId]} pack -${totalPackLoss} channel points, pack leader ${leaderData.username} lost ${highestLoss} channel points.`;
-    }
+  losingUsers.sort((a, b) => Number(b.pointsLost || 0) - Number(a.pointsLost || 0));
+  const selected = losingUsers.slice(0, maxUsers);
+  for (const row of selected) {
+    const pointsLost = Math.max(0, Math.floor(asNumber(row.pointsLost, 0)));
+    if (pointsLost <= 0) continue;
+    const tier = await getSubTierFromTwitch(row.userId);
+    const farmingRate = getFarmingRateForTier(tier);
+    const yearsFromPoints = pointsLost / farmingRate / (60 * 24 * 365);
+    const cpToHours = ROBLOX_FUNCTIONS.timeToAgo(yearsFromPoints);
+    const who = String(row.username || row.displayName || "user").trim();
+    client.say(
+      CHANNEL_NAME,
+      `RIPBOZO @${who} lost ${pointsLost} channel points, thats ${cpToHours.timeString} of farming.`
+    );
   }
 
-  for (const msg of Object.values(messages)) {
-    client.say(CHANNEL_NAME, String(msg));
-  }
+  const analyticsEvents = await Promise.all(
+    analyticsRows.map(async (row) => {
+      const tier = await getSubTierFromTwitch(row.userId);
+      return {
+        ts: new Date().toISOString(),
+        source: "pubsub",
+        type: "poll_spend",
+        userId: String(row.userId || "").trim(),
+        login: String(row.username || "").trim().toLowerCase(),
+        displayName: String(row.displayName || "").trim(),
+        pointsSpent: Math.max(0, Math.floor(asNumber(row.pointsSpent, 0))),
+        pointsLost: Math.max(0, Math.floor(asNumber(row.pointsLost, 0))),
+        subTier: Number.isFinite(tier) ? Number(tier) : 0,
+        meta: {
+          pollId: String(r.id || "").trim() || null,
+          pollTitle: String(r.title || "").trim() || null,
+          channelId: CHANNEL_ID,
+        },
+      };
+    })
+  );
+  queueChannelPointEvents(analyticsEvents);
+
+  logger.log?.(
+    `[pubsub][poll] RIPBOZO sent (${selected.length} users) source=${source} id=${String(
+      r.id || "unknown"
+    )}`
+  );
   return true;
 }
 
@@ -616,10 +750,26 @@ var StartListener = function () {
           const status = event.status;
 
           if (status == "RESOLVED") {
-            const predictionData =
-              await TWITCH_FUNCTIONS.getLatestPredictionData();
+            const handled = await processPredictionResolvedEvent(
+              event,
+              "pubsub_event_payload"
+            );
 
-            console.log(predictionData);
+            if (!handled) {
+              const predictionData =
+                await TWITCH_FUNCTIONS.getLatestPredictionData().catch(() => null);
+              const latestEvent =
+                predictionData?.data?.community?.channel?.prediction?.event ||
+                predictionData?.data?.community?.channel?.prediction?.activeEvent ||
+                predictionData?.data?.prediction?.event ||
+                null;
+              if (latestEvent && typeof latestEvent === "object") {
+                await processPredictionResolvedEvent(
+                  latestEvent,
+                  "pubsub_prediction_context"
+                );
+              }
+            }
           }
         }
       } else if (pubTopic == `community-points-channel-v1.${CHANNEL_ID}`) {
@@ -643,6 +793,30 @@ var StartListener = function () {
               redemption?.user?.displayName ||
               twitchUsername
           ).trim();
+          const rewardCost = Math.max(
+            0,
+            Math.floor(Number(redemption?.reward?.cost || 0) || 0)
+          );
+
+          if (rewardCost > 0) {
+            const tier = await getSubTierFromTwitch(twitchUserId);
+            queueChannelPointEvents({
+              ts: new Date().toISOString(),
+              source: "pubsub",
+              type: "reward_redeem",
+              userId: twitchUserId,
+              login: twitchUsername,
+              displayName: twitchDisplayName,
+              pointsSpent: rewardCost,
+              pointsLost: 0,
+              subTier: Number.isFinite(tier) ? Number(tier) : 0,
+              meta: {
+                rewardId: String(redemptionId || "").trim() || null,
+                rewardTitle: String(redemption?.reward?.title || "").trim() || null,
+                channelId: CHANNEL_ID,
+              },
+            });
+          }
 
           if (redemptionId == vipEntry) {
             SETTINGS = readJsonFile(SETTINGS_PATH, SETTINGS || {});

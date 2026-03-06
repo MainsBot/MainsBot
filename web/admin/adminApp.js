@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "https://esm.sh/react@18.3.1";
+import React, { useEffect, useMemo, useRef, useState } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
 import { applyStreamerThemeFromStatus } from "/static/theme.js";
@@ -7,11 +7,9 @@ const html = htm.bind(React.createElement);
 
 const MODE_TO_TWITCH = {
   "!join.on": { titleKey: "join", gameName: "Roblox" },
+  "!ticket.on": { titleKey: "ticket", gameName: "Roblox" },
   "!link.on": { titleKey: "link", gameName: "Roblox" },
   "!1v1.on": { titleKey: "1v1", gameName: "Roblox" },
-  "!ticket.on": { titleKey: "ticket", gameName: "Roblox" },
-  "!val.on": { titleKey: "val", gameName: "VALORANT" },
-  "!reddit.on": { titleKey: "reddit", gameName: "Just Chatting" },
 };
 
 const REQUIRED_BOT_SCOPES = [
@@ -95,6 +93,14 @@ function formatTtl(seconds) {
   if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+function formatFarmHours(minutes) {
+  const mins = Number(minutes);
+  if (!Number.isFinite(mins) || mins <= 0) return "0h";
+  const hours = mins / 60;
+  if (hours >= 24) return `${(hours / 24).toFixed(1)}d`;
+  return `${hours.toFixed(1)}h`;
 }
 
 function toCsv(arr) {
@@ -397,6 +403,10 @@ function App() {
   const [importText, setImportText] = useState("");
   const [activityRows, setActivityRows] = useState([]);
   const [activityLoading, setActivityLoading] = useState(true);
+  const [pointsData, setPointsData] = useState({ days: 30, users: [], userCount: 0 });
+  const [pointsLoading, setPointsLoading] = useState(false);
+  const [pointsDays, setPointsDays] = useState(30);
+  const keywordImportFileRef = useRef(null);
   const [activityQuery, setActivityQuery] = useState({
     q: "",
     action: "",
@@ -408,10 +418,10 @@ function App() {
 
   useEffect(() => {
     const desired = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
-    setView(["settings", "keywords", "commands"].includes(desired) ? desired : "home");
+    setView(["settings", "keywords", "commands", "points"].includes(desired) ? desired : "home");
     const onHashChange = () => {
       const next = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
-      setView(["settings", "keywords", "commands"].includes(next) ? next : "home");
+      setView(["settings", "keywords", "commands", "points"].includes(next) ? next : "home");
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -525,6 +535,30 @@ function App() {
       setHealth(body || null);
     } catch (e) {
       setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
+
+  async function loadChannelPoints({ days = pointsDays, limitUsers = 300 } = {}) {
+    setPointsLoading(true);
+    try {
+      const safeDays = Math.max(1, Math.min(365, Number(days) || 30));
+      const res = await fetch(
+        `/api/admin/channel-points?days=${encodeURIComponent(String(safeDays))}&limitUsers=${encodeURIComponent(
+          String(limitUsers)
+        )}`,
+        { credentials: "same-origin", cache: "no-store" }
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
+      setPointsData({
+        days: Number(body?.days || safeDays),
+        users: Array.isArray(body?.users) ? body.users : [],
+        userCount: Number(body?.userCount || 0),
+      });
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    } finally {
+      setPointsLoading(false);
     }
   }
 
@@ -793,6 +827,26 @@ function App() {
     }
   }
 
+  async function importKeywordsFromFile(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    try {
+      setStatus(`Importing ${String(file.name || "keywords.json")}...`);
+      const text = await file.text();
+      const parsed = JSON.parse(String(text || "{}"));
+      const normalized = normalizeKeywords(parsed);
+      setKeywords(normalized);
+      setKeywordsText(JSON.stringify(normalized, null, 2));
+      setStatus(
+        `Imported ${Object.keys(normalized).length} categories. Click Save Keywords to persist.`
+      );
+    } catch (e) {
+      setStatus(`Error: Invalid JSON file (${String(e?.message || e)})`);
+    } finally {
+      if (event?.target) event.target.value = "";
+    }
+  }
+
   function updateCustomCommandRow(index, patch = {}) {
     setCustomCommandRows((prev) => {
       const next = Array.isArray(prev) ? [...prev] : [];
@@ -926,6 +980,13 @@ function App() {
   const adminRole = String(session?.role || "viewer").trim().toLowerCase();
   const canEditCommands = adminRole === "owner" || adminRole === "editor";
   const canEditSettings = adminRole === "owner" || adminRole === "editor";
+  const canViewPointsDashboard = adminRole === "owner";
+
+  useEffect(() => {
+    if (!canViewPointsDashboard) return;
+    if (view !== "points") return;
+    void loadChannelPoints({ days: pointsDays, limitUsers: 300 });
+  }, [view, canViewPointsDashboard, pointsDays]);
 
   const twitchBotConnected = isOAuthConnected(auth?.bot);
   const twitchStreamerConnected = isOAuthConnected(auth?.streamer);
@@ -974,6 +1035,9 @@ function App() {
           <button className=${view === "settings" ? "btn btn--sm" : "btn btn--sm btn--ghost"} onClick=${() => (window.location.hash = "settings")}>Settings</button>
           <button className=${view === "commands" ? "btn btn--sm" : "btn btn--sm btn--ghost"} onClick=${() => (window.location.hash = "commands")}>Commands</button>
           <button className=${view === "keywords" ? "btn btn--sm" : "btn btn--sm btn--ghost"} onClick=${() => (window.location.hash = "keywords")}>Keywords</button>
+          ${canViewPointsDashboard
+            ? html`<button className=${view === "points" ? "btn btn--sm" : "btn btn--sm btn--ghost"} onClick=${() => (window.location.hash = "points")}>Channel Points</button>`
+            : null}
         </div>
       </div>
 
@@ -1194,7 +1258,7 @@ function App() {
                 <div className="panel__top">
                   <div>
                     <h2>Mode Manager</h2>
-                    <div className="meta">Create/edit modes without touching JSON files.</div>
+                    <div className="meta">Create/edit modes without touching JSON files. Titles support <code>{"{game}"}</code>.</div>
                   </div>
                   <button className="btn btn--sm btn--ghost" onClick=${addMode}>Add Mode</button>
                 </div>
@@ -1477,6 +1541,81 @@ function App() {
               </div>
             </div>
           `
+        : view === "points"
+        ? html`
+            <div className="grid">
+              ${!canViewPointsDashboard
+                ? html`
+                    <div className="panel">
+                      <h2>Channel Points Dashboard</h2>
+                      <div className="meta">Owner-only section.</div>
+                    </div>
+                  `
+                : null}
+              ${canViewPointsDashboard
+                ? html`
+              <div className="panel">
+                <div className="panel__top">
+                  <div>
+                    <h2>Channel Points Dashboard</h2>
+                    <div className="meta">Owner-only analytics from poll/prediction/reward spend events.</div>
+                  </div>
+                  <div className="row">
+                    <select
+                      className="in in--sm"
+                      value=${String(pointsDays)}
+                      onChange=${(e) => setPointsDays(Number(e.target.value) || 30)}
+                    >
+                      <option value="7">7 days</option>
+                      <option value="30">30 days</option>
+                      <option value="90">90 days</option>
+                      <option value="180">180 days</option>
+                    </select>
+                    <button className="btn btn--sm btn--ghost" onClick=${() => loadChannelPoints({ days: pointsDays, limitUsers: 300 })}>
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+                <div className="meta" style=${{ marginTop: "8px" }}>
+                  Users: ${Number(pointsData?.userCount || 0)} | Window: ${Number(pointsData?.days || pointsDays)} days
+                </div>
+                <div className="table-wrap" style=${{ marginTop: "10px" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>User</th>
+                        <th>Spent</th>
+                        <th>Lost</th>
+                        <th>Events</th>
+                        <th>Tier</th>
+                        <th>Est. Farm</th>
+                        <th>Last Seen</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${pointsLoading
+                        ? html`<tr><td colSpan="7">Loading channel points...</td></tr>`
+                        : !(Array.isArray(pointsData?.users) && pointsData.users.length)
+                        ? html`<tr><td colSpan="7">No data yet.</td></tr>`
+                        : pointsData.users.map((row, idx) => html`
+                            <tr key=${`cp:${idx}:${String(row?.userId || row?.login || "")}`}>
+                              <td>${String(row?.displayName || row?.login || row?.userId || "unknown")}</td>
+                              <td>${Number(row?.pointsSpent || 0).toLocaleString()}</td>
+                              <td>${Number(row?.pointsLost || 0).toLocaleString()}</td>
+                              <td>${Number(row?.events || 0)}</td>
+                              <td>${row?.subTier ? String(row.subTier) : "-"}</td>
+                              <td>${formatFarmHours(row?.estimatedFarmMinutes || 0)}</td>
+                              <td>${formatActivityTime(row?.lastSeenTs)}</td>
+                            </tr>
+                          `)}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+                  `
+                : null}
+            </div>
+          `
         : html`
             <div className="grid">
               <div className="panel">
@@ -1491,7 +1630,17 @@ function App() {
                   value=${keywordsText}
                   onChange=${(e) => setKeywordsText(e.target.value)}
                 />
+                <input
+                  ref=${keywordImportFileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  style=${{ display: "none" }}
+                  onChange=${importKeywordsFromFile}
+                />
                 <div className="settings-actions">
+                  <button className="btn btn--ghost" onClick=${() => keywordImportFileRef.current?.click?.()}>
+                    Import JSON File
+                  </button>
                   <button className="btn" onClick=${saveKeywords}>Save Keywords</button>
                   <span className="statusline">${status}</span>
                 </div>

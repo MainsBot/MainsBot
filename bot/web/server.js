@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import fetch from "node-fetch";
+import { WebSocketServer } from "ws";
 
 import * as sass from "sass";
 import { minify as terserMinify } from "terser";
@@ -36,12 +37,14 @@ import {
   exchangeCodeForRole,
   getRoleAccessToken,
   getPublicTokenSnapshot,
+  primeTokenStoreCache,
 } from "../api/twitch/auth.js";
 import {
   buildRobloxAuthSettings,
   buildRobloxAuthorizeUrl,
   exchangeRobloxCode,
   getPublicRobloxTokenSnapshot,
+  primeRobloxTokenStoreCache,
 } from "../api/roblox/auth.js";
 import * as ROBLOX from "../api/roblox/index.js";
 import {
@@ -67,7 +70,7 @@ import { resolveInstanceName } from "../functions/instance.js";
 import { getDefaultCommandsCatalog } from "./defaultCommandsCatalog.js";
 import { renderPajbotTemplate } from "../functions/pajbotTemplate.js";
 import { getRedisClient, isRedisConfigured } from "../api/redis/client.js";
-import { getSpotifyTokenStoreBackend } from "../api/spotify/store.js";
+import { getSpotifyTokenStoreBackend, primeSpotifyTokenStoreCache } from "../api/spotify/store.js";
 
 function flagFromEnv(value) {
   return /^(1|true|yes|on)$/i.test(String(value || "").trim());
@@ -84,7 +87,17 @@ export function startWebServer(deps = {}) {
 
   const WEB_PORT = Number(process.env.WEB_PORT || 8787);
   const WEB_HOST = String(process.env.WEB_HOST || "127.0.0.1").trim() || "127.0.0.1";
-  const WEB_SOCKET_PATH = String(process.env.WEB_SOCKET_PATH || "").trim();
+  const ENV_WEB_SOCKET_PATH = String(process.env.WEB_SOCKET_PATH || "").trim();
+  const ENV_WEB_OVERLAY_SOCKET_PATH = String(process.env.WEB_OVERLAY_SOCKET_PATH || "").trim();
+  const NODE_ENV = String(process.env.NODE_ENV || "").trim().toLowerCase();
+  const WEB_LOCAL_TESTING = flagFromEnv(
+    process.env.WEB_LOCAL_TESTING || process.env.LOCAL_TESTING || ""
+  );
+  const isLocalTesting =
+    WEB_LOCAL_TESTING ||
+    NODE_ENV === "development" ||
+    NODE_ENV === "dev" ||
+    NODE_ENV === "test";
   const WEB_PUBLIC_URL = String(process.env.WEB_PUBLIC_URL || "").trim();
   const DATA_DIR = String(process.env.DATA_DIR || "").trim();
   const WEB_MODS_CACHE_PATH = path.resolve(
@@ -133,6 +146,19 @@ export function startWebServer(deps = {}) {
     .trim()
     .toLowerCase();
 
+  const DEFAULT_WEB_SOCKET_PATH =
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\mainsbot-${CUSTOM_COMMANDS_INSTANCE}-web`
+      : `/tmp/mainsbot-${CUSTOM_COMMANDS_INSTANCE}-web.sock`;
+  const DEFAULT_WEB_OVERLAY_SOCKET_PATH =
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\mainsbot-${CUSTOM_COMMANDS_INSTANCE}-overlay`
+      : `/tmp/mainsbot-${CUSTOM_COMMANDS_INSTANCE}-overlay.sock`;
+  const WEB_SOCKET_PATH =
+    ENV_WEB_SOCKET_PATH || (!isLocalTesting ? DEFAULT_WEB_SOCKET_PATH : "");
+  const WEB_OVERLAY_SOCKET_PATH =
+    ENV_WEB_OVERLAY_SOCKET_PATH || (!isLocalTesting ? DEFAULT_WEB_OVERLAY_SOCKET_PATH : "");
+
   const WEB_ADMIN_AUTH = createWebAdminAuth({
     cookieSecret: WEB_COOKIE_SECRET,
     ownerUserId: WEB_OWNER_USER_ID,
@@ -142,6 +168,9 @@ export function startWebServer(deps = {}) {
     clientSecret: String(process.env.CLIENT_SECRET || "").trim(),
     forceVerify: WEB_LOGIN_FORCE_VERIFY,
   });
+  void primeTokenStoreCache().catch(() => {});
+  void primeRobloxTokenStoreCache().catch(() => {});
+  void primeSpotifyTokenStoreCache().catch(() => {});
 
   function normalizeLogin(value) {
     return String(value || "").trim().toLowerCase();
@@ -582,6 +611,36 @@ async function getCommandAnalyticsSnapshot({ days = 7, platform = "all", limit =
   }
 }
 
+async function getChannelPointsAnalyticsSnapshotFromDeps({ days = 30, limitUsers = 200 } = {}) {
+  try {
+    if (typeof deps.getChannelPointsAnalyticsSnapshot === "function") {
+      const payload = await deps.getChannelPointsAnalyticsSnapshot({ days, limitUsers });
+      if (payload && typeof payload === "object") return payload;
+    }
+  } catch {}
+  return {
+    days: Math.max(1, Math.floor(Number(days) || 30)),
+    limitUsers: Math.max(1, Math.floor(Number(limitUsers) || 200)),
+    userCount: 0,
+    users: [],
+  };
+}
+
+async function getPredictionOverlaySnapshotFromDeps() {
+  try {
+    if (typeof deps.getPredictionOverlaySnapshot === "function") {
+      const payload = await deps.getPredictionOverlaySnapshot();
+      if (payload && typeof payload === "object") return payload;
+    }
+  } catch {}
+  return {
+    ok: true,
+    active: false,
+    fetchedAt: new Date().toISOString(),
+    prediction: null,
+  };
+}
+
 async function getHealthSnapshot() {
   const checks = {
     postgres: { ok: false, detail: "" },
@@ -600,13 +659,10 @@ async function getHealthSnapshot() {
   }
 
   try {
-    if (!isRedisConfigured()) {
-      checks.redis = { ok: true, detail: "disabled (file fallback)" };
-    } else {
-      const client = getRedisClient();
-      await client.command(["PING"]);
-      checks.redis = { ok: true, detail: "pong" };
-    }
+    if (!isRedisConfigured()) throw new Error("redis is not configured");
+    const client = getRedisClient();
+    await client.command(["PING"]);
+    checks.redis = { ok: true, detail: "pong" };
   } catch (e) {
     checks.redis = { ok: false, detail: String(e?.message || e) };
   }
@@ -615,9 +671,20 @@ async function getHealthSnapshot() {
     const twitch = getPublicTokenSnapshot?.() || {};
     const hasBot = Boolean(twitch?.bot?.hasAccessToken || twitch?.bot?.hasRefreshToken);
     const hasStreamer = Boolean(twitch?.streamer?.hasAccessToken || twitch?.streamer?.hasRefreshToken);
+    const botMissingScopes = Array.isArray(twitch?.bot?.missingScopes)
+      ? twitch.bot.missingScopes
+      : [];
+    const streamerMissingScopes = Array.isArray(twitch?.streamer?.missingScopes)
+      ? twitch.streamer.missingScopes
+      : [];
+    const scopesOk = botMissingScopes.length === 0 && streamerMissingScopes.length === 0;
     checks.twitch = {
-      ok: hasBot && hasStreamer,
-      detail: `bot=${hasBot ? "ok" : "missing"} streamer=${hasStreamer ? "ok" : "missing"}`,
+      ok: hasBot && hasStreamer && scopesOk,
+      detail:
+        `bot=${hasBot ? "ok" : "missing"}` +
+        ` streamer=${hasStreamer ? "ok" : "missing"}` +
+        ` botMissingScopes=${botMissingScopes.length}` +
+        ` streamerMissingScopes=${streamerMissingScopes.length}`,
     };
   } catch (e) {
     checks.twitch = { ok: false, detail: String(e?.message || e) };
@@ -658,6 +725,13 @@ function diffFlatKeys(beforeObj = {}, afterObj = {}, keys = []) {
     out[key] = { before, after };
   }
   return out;
+}
+
+function resolveModeTitleTemplate(template = "", gameName = "") {
+  const title = String(template || "").trim();
+  const game = String(gameName || "").trim();
+  if (!title) return "";
+  return title.replace(/\{game\}/gi, game || "Game");
 }
 
 function escapeHtmlForErrorPage(value) {
@@ -2328,6 +2402,31 @@ function buildOpenApiSpec({ requestOrigin = "" } = {}) {
           },
         },
       },
+      "/api/admin/channel-points": {
+        get: {
+          tags: ["Admin"],
+          summary: "Owner-only channel points spend analytics",
+          parameters: [
+            {
+              in: "query",
+              name: "days",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 365, default: 30 },
+            },
+            {
+              in: "query",
+              name: "limitUsers",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 2000, default: 200 },
+            },
+          ],
+          responses: {
+            200: { description: "Analytics rows" },
+            401: { description: "Unauthorized" },
+            403: { description: "Owner only" },
+          },
+        },
+      },
       "/api/admin/health": {
         get: {
           tags: ["Admin"],
@@ -3085,7 +3184,7 @@ const {
 
 function renderAuthLandingHtml({ settings, snapshot }) {
   const redirectUri = escapeHtml(settings?.redirectUri || "not_set");
-  const tokenPath = escapeHtml(snapshot?.tokenStorePath || "secrets/twitch_tokens.json");
+  const tokenPath = escapeHtml(snapshot?.tokenStorePath || "mainsbot:twitch:tokens:<instance>");
   const botStatus = snapshot?.bot?.hasAccessToken ? "Connected" : "Not Connected";
   const streamerStatus = snapshot?.streamer?.hasAccessToken ? "Connected" : "Not Connected";
 
@@ -3138,7 +3237,7 @@ function renderAuthSuccessHtml({ role = "", login = "", snapshot }) {
   const roleText = escapeHtml(role || "unknown");
   const loginText = escapeHtml(login || "unknown");
   const redirectUri = escapeHtml(snapshot?.redirectUri || "not_set");
-  const tokenPath = escapeHtml(snapshot?.tokenStorePath || "secrets/twitch_tokens.json");
+  const tokenPath = escapeHtml(snapshot?.tokenStorePath || "mainsbot:twitch:tokens:<instance>");
   const botStatus = snapshot?.bot?.hasAccessToken ? "Connected" : "Not Connected";
   const streamerStatus = snapshot?.streamer?.hasAccessToken ? "Connected" : "Not Connected";
 
@@ -3316,7 +3415,7 @@ function renderAuthSuccessRedirectHtml({
 
 function renderRobloxAuthLandingHtml({ settings, snapshot }) {
   const redirectUri = escapeHtml(settings?.redirectUri || "not_set");
-  const tokenPath = escapeHtml(snapshot?.tokenStorePath || "secrets/roblox_tokens.json");
+  const tokenPath = escapeHtml(snapshot?.tokenStorePath || "mainsbot:roblox:tokens:<instance>");
   const status = snapshot?.bot?.hasAccessToken ? "Connected" : "Not Connected";
   const login = String(snapshot?.bot?.login || "").trim();
   const userId = String(snapshot?.bot?.userId || "").trim();
@@ -3369,7 +3468,7 @@ function renderRobloxAuthSuccessHtml({ login = "", snapshot }) {
   const loginText = escapeHtml(rawLogin || (rawUserId ? `User ID ${rawUserId}` : "unknown"));
   const linkedUserId = escapeHtml(rawUserId);
   const redirectUri = escapeHtml(snapshot?.redirectUri || "not_set");
-  const tokenPath = escapeHtml(snapshot?.tokenStorePath || "secrets/roblox_tokens.json");
+  const tokenPath = escapeHtml(snapshot?.tokenStorePath || "mainsbot:roblox:tokens:<instance>");
   const status = snapshot?.bot?.hasAccessToken ? "Connected" : "Not Connected";
 
   return `<!doctype html>
@@ -3439,6 +3538,53 @@ const BLOCKED_SOURCE_PATHS = new Set([
   "/static/admin.css",
   "/static/_admin.scss",
 ]);
+
+const OVERLAY_WS_PATHS = new Set(["/overlay/ws", "/overlay/ws/", "/overlay", "/overlay/"]);
+const overlayWss = new WebSocketServer({ noServer: true });
+const overlayClients = new Set();
+let overlayBroadcastTimer = null;
+let overlayLastPayloadHash = "";
+let overlaySocketServer = null;
+
+function hashOverlayPayload(payload) {
+  try {
+    return createHash("sha1").update(JSON.stringify(payload || {})).digest("hex");
+  } catch {
+    return String(Date.now());
+  }
+}
+
+function sendOverlayPayloadToClient(ws, payload) {
+  try {
+    if (!ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify(payload || {}));
+  } catch {}
+}
+
+async function broadcastOverlayPrediction({ force = false } = {}) {
+  if (!overlayClients.size) return;
+  const payload = await getPredictionOverlaySnapshotFromDeps();
+  const hash = hashOverlayPayload(payload);
+  if (!force && hash === overlayLastPayloadHash) return;
+  overlayLastPayloadHash = hash;
+  for (const ws of overlayClients) {
+    sendOverlayPayloadToClient(ws, payload);
+  }
+}
+
+function startOverlayBroadcastLoop() {
+  if (overlayBroadcastTimer || !overlayClients.size) return;
+  overlayBroadcastTimer = setInterval(() => {
+    void broadcastOverlayPrediction({ force: false });
+  }, 3000);
+  if (typeof overlayBroadcastTimer?.unref === "function") overlayBroadcastTimer.unref();
+}
+
+function stopOverlayBroadcastLoop() {
+  if (!overlayBroadcastTimer) return;
+  clearInterval(overlayBroadcastTimer);
+  overlayBroadcastTimer = null;
+}
 
 const webServer = http.createServer(async (req, res) => {
   try {
@@ -4178,7 +4324,7 @@ const webServer = http.createServer(async (req, res) => {
       } catch {}
 
       const sanitizedSettingsObj = sanitizeSettingsForStorage(settingsObj);
-      const backendRaw = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
+      const backendRaw = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
       const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
       return sendJsonResponse(
         res,
@@ -4251,7 +4397,7 @@ const webServer = http.createServer(async (req, res) => {
           },
         });
 
-        const backendRaw = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
+        const backendRaw = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
         const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
         return sendJsonResponse(
           res,
@@ -4693,6 +4839,46 @@ const webServer = http.createServer(async (req, res) => {
     );
   }
 
+  if (routePath === "/api/admin/channel-points") {
+    if (!adminAllowed) {
+      return sendJsonResponse(
+        res,
+        401,
+        { ok: false, error: "Unauthorized" },
+        { "cache-control": "no-store" }
+      );
+    }
+    const adminRole = getAdminSessionRole(adminSession);
+    if (!roleAtLeast(adminRole, "owner")) {
+      return sendJsonResponse(
+        res,
+        403,
+        { ok: false, error: "Owner-only endpoint." },
+        { "cache-control": "no-store" }
+      );
+    }
+    if (method !== "GET") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+    const days = Math.max(1, Math.min(365, Number(parsedUrl.searchParams.get("days") || 30) || 30));
+    const limitUsers = Math.max(
+      1,
+      Math.min(2000, Number(parsedUrl.searchParams.get("limitUsers") || 200) || 200)
+    );
+    const payload = await getChannelPointsAnalyticsSnapshotFromDeps({ days, limitUsers });
+    return sendJsonResponse(
+      res,
+      200,
+      { ok: true, ...payload },
+      { "cache-control": "no-store" }
+    );
+  }
+
   if (routePath === "/api/admin/health") {
     if (!adminAllowed) {
       return sendJsonResponse(
@@ -4875,7 +5061,7 @@ const webServer = http.createServer(async (req, res) => {
           },
         });
 
-        const backendRaw = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
+        const backendRaw = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
         const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
         return sendJsonResponse(res, 200, { ok: true, backend }, { "cache-control": "no-store" });
       } catch (e) {
@@ -4975,7 +5161,13 @@ const webServer = http.createServer(async (req, res) => {
 
       const modeKey = String(modeCfg.key || modeKeyFromCommand(normalizedMode)).trim();
       const overrideTitle = titles && modeKey ? String(titles[modeKey] || "").trim() : "";
-      const title = overrideTitle || String(modeCfg.title || "").trim();
+      const gameNameOverride = String(
+        (modeGames && modeGames[normalizedMode]) ||
+          modeCfg.gameName ||
+          ""
+      ).trim();
+      const titleTemplate = overrideTitle || String(modeCfg.title || "").trim();
+      const title = resolveModeTitleTemplate(titleTemplate, gameNameOverride);
       if (!title) {
         return sendJsonResponse(
           res,
@@ -5007,12 +5199,6 @@ const webServer = http.createServer(async (req, res) => {
           { "cache-control": "no-store" }
         );
       }
-
-      const gameNameOverride = String(
-        (modeGames && modeGames[normalizedMode]) ||
-          modeCfg.gameName ||
-          ""
-      ).trim();
 
       const gameId = gameNameOverride
         ? await getGameIdByName({
@@ -6061,6 +6247,20 @@ const webServer = http.createServer(async (req, res) => {
     return res.end(JSON.stringify(getStatusSnapshot()));
   }
 
+  if (routePath === "/api/overlay/prediction") {
+    if (method !== "GET") {
+      return sendJsonResponse(
+        res,
+        405,
+        { ok: false, error: "Method not allowed." },
+        { "cache-control": "no-store" }
+      );
+    }
+
+    const payload = await getPredictionOverlaySnapshotFromDeps();
+    return sendJsonResponse(res, 200, payload, { "cache-control": "no-store" });
+  }
+
   if (routePath === "/health") {
     if (method !== "GET") {
       return sendJsonResponse(
@@ -6145,6 +6345,21 @@ const webServer = http.createServer(async (req, res) => {
         500,
         "Server Error",
         `Failed to load live page: ${String(e?.message || e)}`
+      );
+    }
+  }
+
+  if (routePath === "/overlay" || routePath === "/overlay/prediction") {
+    const overlayPath = path.join(WEB_DIR, "overlay-prediction.html");
+    try {
+      const html = fs.readFileSync(overlayPath, "utf8");
+      return sendHtmlResponse(res, 200, html);
+    } catch (e) {
+      return sendErrorPage(
+        res,
+        500,
+        "Server Error",
+        `Failed to load overlay page: ${String(e?.message || e)}`
       );
     }
   }
@@ -6259,9 +6474,59 @@ const webServer = http.createServer(async (req, res) => {
   }
 });
 
+overlayWss.on("connection", (ws) => {
+  overlayClients.add(ws);
+  startOverlayBroadcastLoop();
+  void getPredictionOverlaySnapshotFromDeps()
+    .then((payload) => sendOverlayPayloadToClient(ws, payload))
+    .catch(() => {});
+
+  ws.on("close", () => {
+    overlayClients.delete(ws);
+    if (!overlayClients.size) stopOverlayBroadcastLoop();
+  });
+
+  ws.on("error", () => {
+    overlayClients.delete(ws);
+    if (!overlayClients.size) stopOverlayBroadcastLoop();
+  });
+});
+
+function normalizeWsPath(req) {
+  try {
+    const u = new URL(String(req?.url || "/"), "http://localhost");
+    return u.pathname;
+  } catch {
+    return "/";
+  }
+}
+
+function handleOverlayUpgrade(req, socket, head) {
+  const pathname = normalizeWsPath(req);
+  if (!OVERLAY_WS_PATHS.has(pathname)) return false;
+  overlayWss.handleUpgrade(req, socket, head, (ws) => {
+    overlayWss.emit("connection", ws, req);
+  });
+  return true;
+}
+
+webServer.on("upgrade", (req, socket, head) => {
+  const handled = handleOverlayUpgrade(req, socket, head);
+  if (!handled) {
+    try {
+      socket.destroy();
+    } catch {}
+  }
+});
+
 const WEB_LISTEN = String(process.env.WEB_LISTEN || "").trim().toLowerCase();
+const effectiveListenMode = WEB_LISTEN || (isLocalTesting ? "tcp" : "socket");
 const wantSocket =
-  WEB_LISTEN === "socket" ? true : WEB_LISTEN === "tcp" ? false : Boolean(WEB_SOCKET_PATH);
+  effectiveListenMode === "socket"
+    ? true
+    : effectiveListenMode === "tcp"
+      ? false
+      : Boolean(WEB_SOCKET_PATH);
 
 if (wantSocket && !WEB_SOCKET_PATH) {
   console.warn("[WEB] WEB_LISTEN=socket but WEB_SOCKET_PATH is empty; falling back to tcp.");
@@ -6270,9 +6535,19 @@ if (wantSocket && !WEB_SOCKET_PATH) {
 webServer.on("error", (err) => {
   const code = String(err?.code || "");
   if (code === "EADDRINUSE") {
+    const listenTarget = wantSocket && WEB_SOCKET_PATH ? WEB_SOCKET_PATH : `${WEB_HOST}:${WEB_PORT}`;
     console.error(
-      `[WEB] listen failed: address already in use (${WEB_HOST}:${WEB_PORT}). ` +
-        `Stop the other process or change [web].port in your INI.`
+      `[WEB] listen failed: address already in use (${listenTarget}). ` +
+        `Stop the other process or change your [web] listen target in the INI.`
+    );
+    return;
+  }
+
+  if (code === "ENOENT" || code === "EACCES") {
+    const listenTarget = wantSocket && WEB_SOCKET_PATH ? WEB_SOCKET_PATH : `${WEB_HOST}:${WEB_PORT}`;
+    console.error(
+      `[WEB] listen failed for ${listenTarget}: ${code}. ` +
+        `Check that the socket directory exists and nginx/systemd can access it.`
     );
     return;
   }
@@ -6280,20 +6555,56 @@ webServer.on("error", (err) => {
   console.error("[WEB] server error:", err);
 });
 
-if (wantSocket && WEB_SOCKET_PATH) {
+function cleanupSocketPath(socketPath = "", label = "socket") {
+  if (!socketPath) return;
   const isNamedPipe =
-    process.platform === "win32" || /^\\\\\\\\\\.\\\\pipe\\\\/i.test(WEB_SOCKET_PATH);
-  if (!isNamedPipe) {
-    try {
-      fs.unlinkSync(WEB_SOCKET_PATH);
-    } catch (e) {
-      if (e?.code !== "ENOENT") {
-        console.warn("[WEB] socket cleanup failed:", String(e?.message || e));
-      }
+    process.platform === "win32" || /^\\\\\\\\\\.\\\\pipe\\\\/i.test(socketPath);
+  if (isNamedPipe) return;
+  try {
+    fs.unlinkSync(socketPath);
+  } catch (e) {
+    if (e?.code !== "ENOENT") {
+      console.warn(`[WEB] ${label} cleanup failed:`, String(e?.message || e));
     }
   }
+}
+
+function ensureSocketParentDir(socketPath = "", label = "socket") {
+  if (!socketPath) return;
+  const isNamedPipe =
+    process.platform === "win32" || /^\\\\\\\\\\.\\\\pipe\\\\/i.test(socketPath);
+  if (isNamedPipe) return;
+  try {
+    const dir = path.dirname(socketPath);
+    if (dir && !fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+    }
+    try {
+      fs.chmodSync(dir, 0o755);
+    } catch {}
+  } catch (e) {
+    console.warn(`[WEB] ${label} parent dir setup failed:`, String(e?.message || e));
+  }
+}
+
+function applySocketPermissions(socketPath = "", label = "socket") {
+  if (!socketPath) return;
+  const isNamedPipe =
+    process.platform === "win32" || /^\\\\\\\\\\.\\\\pipe\\\\/i.test(socketPath);
+  if (isNamedPipe) return;
+  try {
+    fs.chmodSync(socketPath, 0o666);
+  } catch (e) {
+    console.warn(`[WEB] ${label} chmod failed:`, String(e?.message || e));
+  }
+}
+
+if (wantSocket && WEB_SOCKET_PATH) {
+  ensureSocketParentDir(WEB_SOCKET_PATH, "web socket");
+  cleanupSocketPath(WEB_SOCKET_PATH, "web socket");
 
   webServer.listen(WEB_SOCKET_PATH, () => {
+    applySocketPermissions(WEB_SOCKET_PATH, "web socket");
     console.log(`[WEB] WEB_DIR=${WEB_DIR}`);
     console.log(`[WEB] index exists=${fs.existsSync(path.join(WEB_DIR, "index.html"))}`);
     console.log(`[WEB] serving unix socket ${WEB_SOCKET_PATH}`);
@@ -6303,6 +6614,40 @@ if (wantSocket && WEB_SOCKET_PATH) {
     console.log(`[WEB] WEB_DIR=${WEB_DIR}`);
     console.log(`[WEB] index exists=${fs.existsSync(path.join(WEB_DIR, "index.html"))}`);
     console.log(`[WEB] serving http://${WEB_HOST}:${WEB_PORT}`);
+  });
+}
+
+const wantOverlayDedicatedSocket =
+  !isLocalTesting &&
+  wantSocket &&
+  WEB_OVERLAY_SOCKET_PATH &&
+  WEB_OVERLAY_SOCKET_PATH !== WEB_SOCKET_PATH;
+
+if (wantOverlayDedicatedSocket) {
+  overlaySocketServer = http.createServer((req, res) => {
+    res.writeHead(426, {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store",
+    });
+    res.end("Upgrade Required");
+  });
+  overlaySocketServer.on("upgrade", (req, socket, head) => {
+    const handled = handleOverlayUpgrade(req, socket, head);
+    if (!handled) {
+      try {
+        socket.destroy();
+      } catch {}
+    }
+  });
+  overlaySocketServer.on("error", (err) => {
+    console.error("[WEB] overlay socket server error:", err);
+  });
+
+  ensureSocketParentDir(WEB_OVERLAY_SOCKET_PATH, "overlay socket");
+  cleanupSocketPath(WEB_OVERLAY_SOCKET_PATH, "overlay socket");
+  overlaySocketServer.listen(WEB_OVERLAY_SOCKET_PATH, () => {
+    applySocketPermissions(WEB_OVERLAY_SOCKET_PATH, "overlay socket");
+    console.log(`[WEB] serving overlay websocket unix socket ${WEB_OVERLAY_SOCKET_PATH}`);
   });
 }
 
@@ -6316,6 +6661,19 @@ if (wantSocket && WEB_SOCKET_PATH) {
         } catch {}
         moderatorRefreshTimer = null;
       }
+      stopOverlayBroadcastLoop();
+      for (const ws of overlayClients) {
+        try {
+          ws.close(1001, "shutdown");
+        } catch {}
+      }
+      overlayClients.clear();
+      try {
+        overlayWss?.close?.();
+      } catch {}
+      try {
+        overlaySocketServer?.close?.();
+      } catch {}
       try {
         webServer?.close?.();
       } catch {}

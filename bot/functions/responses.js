@@ -1,8 +1,10 @@
 import * as ROBLOX_FUNCTIONS from "../api/roblox/index.js";
 import * as TWITCH_FUNCTIONS from "../api/twitch/helix.js";
 import * as SPOTIFY_FUNCTIONS from "../api/spotify/index.js";
-import { getPublicRobloxTokenSnapshot } from "../api/roblox/auth.js";
+import { getPublicRobloxTokenSnapshot, primeRobloxTokenStoreCache } from "../api/roblox/auth.js";
 import fs, { link } from 'fs'
+
+await primeRobloxTokenStoreCache();
 
 const BOT_OAUTH = process.env.BOT_OAUTH// bot oauth token for performing actions
 const COOKIE = process.env.COOKIE // <--- change this to your cookie

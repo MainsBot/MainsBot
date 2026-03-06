@@ -27,7 +27,7 @@ const ENV_PATH_BY_KEY = {
 };
 
 function readBackend() {
-  return String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
+  return String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
 }
 
 function readInstanceName() {
@@ -81,19 +81,17 @@ function buildDefaultSettings() {
       link: "type !link to get the link to join",
       "1v1": "type 1v1 in chat once to get a chance to 1v1 the streamer",
       ticket: "type !ticket to join the game",
-      val: "type !val to join",
     },
     main: {
       join: "!join",
       link: "!link",
       "1v1": "!1v1",
       ticket: "!ticket",
-      val: "!val",
     },
     nonFollowers: {
       join: "click the follow button on twitch to get access to the join command",
     },
-    validModes: ["!join.on", "!link.on", "!1v1.on", "!ticket.on", "!val.on", "!reddit.on"],
+    validModes: ["!join.on", "!ticket.on", "!link.on", "!1v1.on"],
     specialModes: [
       "!ks.on",
       "!ks.off",
@@ -122,15 +120,12 @@ function buildDefaultSettings() {
       "1v1":
         "the streamer is currently 1v1ing viewers, type 1v1 in chat once to get a chance to be picked.",
       ticket: "type !ticket to join the game.",
-      val: "the streamer is currently playing valorant, type !val to join.",
     },
     titles: {
-      join: "FREE ROBUX LIVE - WIN THIS GAME - !JOIN TO PLAY - !socials !discord",
-      link: "FREE ROBUX LIVE - WIN THIS GAME - !LINK TO PLAY - !socials !discord",
-      ticket: "FREE ROBUX LIVE - WIN THIS GAME - !TICKET TO PLAY - !socials !discord",
-      "1v1": "ARSENAL 1V1 - WIN = FREE ROBUX - !1V1 TO PLAY - !socials !discord",
-      val: "VALORANT - !VAL TO PLAY - !socials !discord",
-      reddit: "REDDIT RECAP - !socials !discord !reddit",
+      join: "!JOIN IN {game}",
+      link: "!LINK IN {game}",
+      ticket: "!TICKET IN {game}",
+      "1v1": "1V1S IN {game}",
     },
     filters: {
       spam: {

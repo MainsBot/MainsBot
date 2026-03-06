@@ -161,14 +161,13 @@ TWITCH_CHAT_BROADCASTER_LOGIN = '' // defaults to CHANNEL_NAME
 // OAuth web auth + token storage
 TWITCH_AUTH_REDIRECT_URI = 'https://example.com/auth/callback'
 TWITCH_AUTH_FORCE_VERIFY = true
-TWITCH_TOKEN_STORE_PATH = 'secrets/twitch_tokens.json'
+// OAuth tokens are stored in Redis per instance.
 
 // Roblox OAuth 2.0 token storage
 ROBLOX_CLIENT_ID = ''
 ROBLOX_CLIENT_SECRET = ''
 ROBLOX_AUTH_REDIRECT_URI = 'https://example.com/auth/roblox/callback'
 ROBLOX_AUTH_SCOPES = 'openid profile'
-ROBLOX_TOKEN_STORE_PATH = 'secrets/roblox_tokens.json'
 
 // Web admin login (protects /auth/*)
 WEB_COOKIE_SECRET = ''

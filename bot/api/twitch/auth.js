@@ -1,15 +1,13 @@
 // Twitch OAuth + token store helpers
-import fs from "fs";
-import path from "path";
 import fetch from "node-fetch";
+import { getRedisNamespace, isRedisConfigured } from "../redis/client.js";
+import { resolveInstanceName } from "../../functions/instance.js";
 
 const TOKEN_ENDPOINT = "https://id.twitch.tv/oauth2/token";
 const VALIDATE_ENDPOINT = "https://id.twitch.tv/oauth2/validate";
-const DEFAULT_TOKEN_STORE_PATH = path.resolve(
-  process.cwd(),
-  "secrets",
-  "twitch_tokens.json"
-);
+const REDIS_PREFIX = "mainsbot:twitch:tokens:";
+let cachedStore = withDefaults(null);
+let cacheLoaded = false;
 
 export const TWITCH_ROLES = Object.freeze({
   BOT: "bot",
@@ -31,19 +29,49 @@ const DEFAULT_BOT_SCOPES = [
 ];
 
 const DEFAULT_STREAMER_SCOPES = [
+  "channel:bot",
   "channel:manage:broadcast",
   "channel:manage:polls",
+  "channel:manage:predictions",
   "channel:read:polls",
+  "channel:read:predictions",
+  "channel:read:subscriptions",
   "channel:manage:redemptions",
-  "channel:manage:moderators",
   "channel:read:redemptions",
+  "channel:manage:moderators",
   "moderation:read",
+  "moderator:manage:announcements",
   "moderator:manage:banned_users",
+  "moderator:manage:blocked_terms",
+  "moderator:manage:chat_messages",
   "moderator:manage:chat_settings",
+  "moderator:read:blocked_terms",
+  "moderator:read:chatters",
   "moderator:read:moderators",
   "moderator:read:vips",
-  "channel:bot",
 ];
+
+const REQUIRED_ROLE_SCOPES = Object.freeze({
+  [TWITCH_ROLES.BOT]: DEFAULT_BOT_SCOPES,
+  [TWITCH_ROLES.STREAMER]: DEFAULT_STREAMER_SCOPES,
+});
+
+function normalizeScopeList(scopes) {
+  if (!Array.isArray(scopes)) return [];
+  return scopes
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+}
+
+function getMissingScopes(haveScopes = [], requiredScopes = []) {
+  const have = new Set(normalizeScopeList(haveScopes).map((s) => s.toLowerCase()));
+  const out = [];
+  for (const scope of normalizeScopeList(requiredScopes)) {
+    const normalized = scope.toLowerCase();
+    if (!have.has(normalized)) out.push(scope);
+  }
+  return out;
+}
 
 function normalizeRole(value) {
   const role = String(value || "").trim().toLowerCase();
@@ -79,13 +107,6 @@ function safeJsonParse(text, fallback = null) {
     return JSON.parse(text);
   } catch {
     return fallback;
-  }
-}
-
-function ensureDirFor(filePath) {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
@@ -217,37 +238,51 @@ export async function validateAccessToken(accessToken) {
 }
 
 export function getTokenStorePath(env = process.env) {
-  const raw = String(env?.TWITCH_TOKEN_STORE_PATH || "").trim();
-  if (!raw) return DEFAULT_TOKEN_STORE_PATH;
-  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+  void env;
+  return `${REDIS_PREFIX}${resolveInstanceName()}`;
 }
 
-export function readTokenStore(tokenStorePath = getTokenStorePath()) {
-  try {
-    if (!fs.existsSync(tokenStorePath)) return withDefaults(null);
-    const raw = fs.readFileSync(tokenStorePath, "utf8");
-    const json = safeJsonParse(raw, null);
-    return withDefaults(json);
-  } catch {
-    return withDefaults(null);
+function getRedisStore() {
+  if (!isRedisConfigured()) {
+    throw new Error("Redis is required for Twitch token storage. Configure [redis].");
   }
+  return getRedisNamespace(REDIS_PREFIX);
 }
 
-export function writeTokenStore(data, tokenStorePath = getTokenStorePath()) {
+async function loadTokenStoreFromRedis({ force = false } = {}) {
+  if (!force && cacheLoaded) return withDefaults(cachedStore);
+  const redis = getRedisStore();
+  const raw = await redis.get(resolveInstanceName());
+  const parsed = raw ? safeJsonParse(raw, null) : null;
+  cachedStore = withDefaults(parsed);
+  cacheLoaded = true;
+  return withDefaults(cachedStore);
+}
+
+export function readTokenStore() {
+  return withDefaults(cachedStore);
+}
+
+export async function writeTokenStore(data) {
+  const redis = getRedisStore();
   const normalized = withDefaults(data);
-  ensureDirFor(tokenStorePath);
-  fs.writeFileSync(tokenStorePath, JSON.stringify(normalized, null, 2), "utf8");
-  return normalized;
+  await redis.set(resolveInstanceName(), JSON.stringify(normalized));
+  cachedStore = withDefaults(normalized);
+  cacheLoaded = true;
+  return withDefaults(cachedStore);
+}
+
+export async function primeTokenStoreCache() {
+  await loadTokenStoreFromRedis({ force: true });
 }
 
 export function getRoleRecord({
   role,
   settings = buildTwitchAuthSettings(),
-  tokenStorePath = getTokenStorePath(),
 } = {}) {
   const normalizedRole = normalizeRole(role);
   const roleSettings = requireRoleSettings(settings, normalizedRole);
-  const store = readTokenStore(tokenStorePath);
+  const store = readTokenStore();
   const stored = cleanRoleRecord(store[normalizedRole], {
     client_id: roleSettings.clientId,
     user_id: roleSettings.fallbackUserId,
@@ -417,7 +452,6 @@ export async function exchangeCodeForRole({
   role,
   code,
   settings = buildTwitchAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getTokenStorePath(),
 } = {}) {
   const normalizedRole = normalizeRole(role);
   const roleSettings = requireRoleSettings(settings, normalizedRole);
@@ -445,7 +479,7 @@ export async function exchangeCodeForRole({
     tokenResponse.access_token
   ).catch(() => ({}));
 
-  const store = readTokenStore(tokenStorePath);
+  const store = await loadTokenStoreFromRedis();
   const previous = cleanRoleRecord(store[normalizedRole], {
     client_id: roleSettings.clientId,
     user_id: roleSettings.fallbackUserId,
@@ -459,18 +493,17 @@ export async function exchangeCodeForRole({
   });
 
   store[normalizedRole] = merged;
-  writeTokenStore(store, tokenStorePath);
+  await writeTokenStore(store);
   return merged;
 }
 
 export async function refreshRoleToken({
   role,
   settings = buildTwitchAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getTokenStorePath(),
 } = {}) {
   const normalizedRole = normalizeRole(role);
   const roleSettings = requireRoleSettings(settings, normalizedRole);
-  const store = readTokenStore(tokenStorePath);
+  const store = await loadTokenStoreFromRedis();
   const current = cleanRoleRecord(store[normalizedRole], {
     client_id: roleSettings.clientId,
     user_id: roleSettings.fallbackUserId,
@@ -506,22 +539,21 @@ export async function refreshRoleToken({
   });
 
   store[normalizedRole] = merged;
-  writeTokenStore(store, tokenStorePath);
+  await writeTokenStore(store);
   return merged;
 }
 
 export async function getRoleAccessToken({
   role,
   settings = buildTwitchAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getTokenStorePath(),
   minTtlSec = 120,
 } = {}) {
+  await loadTokenStoreFromRedis();
   const normalizedRole = normalizeRole(role);
   const roleSettings = requireRoleSettings(settings, normalizedRole);
   let record = getRoleRecord({
     role: normalizedRole,
     settings,
-    tokenStorePath,
   });
 
   if (record.access_token && shouldRefreshRecord(record, minTtlSec)) {
@@ -529,7 +561,6 @@ export async function getRoleAccessToken({
       record = await refreshRoleToken({
         role: normalizedRole,
         settings,
-        tokenStorePath,
       });
     } catch {}
   }
@@ -569,14 +600,12 @@ export async function getRoleAccessToken({
 export function getRoleIdentity({
   role,
   settings = buildTwitchAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getTokenStorePath(),
 } = {}) {
   const normalizedRole = normalizeRole(role);
   const roleSettings = requireRoleSettings(settings, normalizedRole);
   const record = getRoleRecord({
     role: normalizedRole,
     settings,
-    tokenStorePath,
   });
 
   return {
@@ -589,9 +618,8 @@ export function getRoleIdentity({
 
 export function getPublicTokenSnapshot({
   settings = buildTwitchAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getTokenStorePath(),
 } = {}) {
-  const store = readTokenStore(tokenStorePath);
+  const store = readTokenStore();
 
   const buildRoleSummary = (role) => {
     const normalizedRole = normalizeRole(role);
@@ -604,13 +632,25 @@ export function getPublicTokenSnapshot({
 
     const expiresAt = Number(record.expires_at || 0);
     const expiresInSec = expiresAt ? Math.floor((expiresAt - Date.now()) / 1000) : null;
+    const requiredScopes = Array.from(
+      new Set(
+        normalizeScopeList([
+          ...(REQUIRED_ROLE_SCOPES[normalizedRole] || []),
+          ...(Array.isArray(roleSettings.scopes) ? roleSettings.scopes : []),
+        ])
+      )
+    );
+    const currentScopes = Array.isArray(record.scopes) ? record.scopes : [];
+    const missingScopes = getMissingScopes(currentScopes, requiredScopes);
 
     return {
       role: normalizedRole,
       login: record.login || null,
       userId: record.user_id || null,
       clientId: record.client_id || null,
-      scopes: Array.isArray(record.scopes) ? record.scopes : [],
+      scopes: currentScopes,
+      requiredScopes,
+      missingScopes,
       hasAccessToken: Boolean(record.access_token),
       hasRefreshToken: Boolean(record.refresh_token),
       expiresAt: expiresAt || null,
@@ -621,7 +661,7 @@ export function getPublicTokenSnapshot({
   };
 
   return {
-    tokenStorePath,
+    tokenStorePath: getTokenStorePath(),
     redirectUri: settings.redirectUri || null,
     forceVerify: !!settings.forceVerify,
     bot: buildRoleSummary(TWITCH_ROLES.BOT),

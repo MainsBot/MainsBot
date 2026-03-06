@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "https://esm.sh/react@18.3.1";
+import React, { useEffect, useMemo, useRef, useState } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
 import { applyStreamerThemeFromStatus } from "/static/theme.js";
@@ -75,6 +75,7 @@ function App() {
   const [jsonText, setJsonText] = useState("{}");
   const [backend, setBackend] = useState("unknown");
   const [keywords, setKeywords] = useState({});
+  const importFileRef = useRef(null);
 
   async function loadKeywords() {
     const res = await fetch("/api/admin/keywords", {
@@ -109,6 +110,26 @@ function App() {
       setStatus("Keywords saved.");
     } catch (e) {
       setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
+
+  async function importKeywordsFile(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    try {
+      setStatus(`Importing ${String(file.name || "keywords.json")}...`);
+      const text = await file.text();
+      const parsed = JSON.parse(String(text || "{}"));
+      const normalized = normalizeKeywords(parsed);
+      setKeywords(normalized);
+      setJsonText(JSON.stringify(normalized, null, 2));
+      setStatus(
+        `Imported ${Object.keys(normalized).length} categories. Click Save Keywords to persist.`
+      );
+    } catch (e) {
+      setStatus(`Error: Invalid JSON file (${String(e?.message || e)})`);
+    } finally {
+      if (event?.target) event.target.value = "";
     }
   }
 
@@ -179,7 +200,17 @@ function App() {
           value=${jsonText}
           onInput=${(e) => setJsonText(e.target.value)}
         ></textarea>
+        <input
+          ref=${importFileRef}
+          type="file"
+          accept="application/json,.json"
+          style=${{ display: "none" }}
+          onChange=${importKeywordsFile}
+        />
         <div className="settings-actions">
+          <button className="btn btn--ghost" onClick=${() => importFileRef.current?.click?.()}>
+            Import JSON File
+          </button>
           <button className="btn" onClick=${saveKeywords}>Save Keywords</button>
           <span className="statusline">${status}</span>
         </div>

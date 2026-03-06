@@ -834,6 +834,36 @@ async function fetchPlaceGameName(placeId) {
   }
 }
 
+async function fetchUniverseIdByPlaceId(placeId) {
+  const id = Number(placeId || 0);
+  if (!Number.isInteger(id) || id <= 0) return 0;
+
+  try {
+    const r = await fetch(
+      `https://apis.roblox.com/universes/v1/places/${encodeURIComponent(id)}/universe`
+    );
+    if (r.ok) {
+      const d = await r.json().catch(() => null);
+      const universeId = Number(d?.universeId ?? 0);
+      if (Number.isInteger(universeId) && universeId > 0) return universeId;
+    }
+  } catch {}
+
+  try {
+    const r = await fetch(
+      `https://api.roblox.com/universes/get-universe-containing-place?placeid=${encodeURIComponent(
+        id
+      )}`
+    );
+    if (!r.ok) return 0;
+    const d = await r.json().catch(() => null);
+    const universeId = Number(d?.UniverseId ?? d?.universeId ?? 0);
+    return Number.isInteger(universeId) && universeId > 0 ? universeId : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function resolvePresenceLocation(presence = {}) {
   const type = Number(presence?.userPresenceType ?? 0);
   const location = String(presence?.lastLocation || "").trim();
@@ -846,7 +876,7 @@ export async function resolvePresenceLocation(presence = {}) {
   }
 
   const universeId = Number(presence?.universeId ?? 0);
-  const placeId = Number(presence?.placeId ?? 0);
+  const placeId = Number(presence?.placeId ?? presence?.rootPlaceId ?? 0);
   const cacheKey =
     universeId > 0
       ? `u:${universeId}`
@@ -860,8 +890,12 @@ export async function resolvePresenceLocation(presence = {}) {
   }
 
   let resolvedName = "";
-  if (universeId > 0) {
-    resolvedName = await fetchUniverseGameName(universeId);
+  let resolvedUniverseId = universeId;
+  if (resolvedUniverseId <= 0 && placeId > 0) {
+    resolvedUniverseId = await fetchUniverseIdByPlaceId(placeId);
+  }
+  if (resolvedUniverseId > 0) {
+    resolvedName = await fetchUniverseGameName(resolvedUniverseId);
   }
   if (!resolvedName && placeId > 0) {
     resolvedName = await fetchPlaceGameName(placeId);
@@ -890,7 +924,9 @@ function normalizePresencePayload(p = null) {
     userPresenceType: type,
     lastLocation: normalizedLocation,
     placeId: p?.placeId ?? null,
+    rootPlaceId: p?.rootPlaceId ?? null,
     universeId: p?.universeId ?? null,
+    gameId: p?.gameId ?? null,
   };
 }
 
@@ -899,10 +935,16 @@ function shouldEnrichPresenceWithLegacy(presence = null) {
   if (type !== 2) return false;
 
   const placeId = Number(presence?.placeId ?? 0);
+  const rootPlaceId = Number(presence?.rootPlaceId ?? 0);
   const universeId = Number(presence?.universeId ?? 0);
   const location = String(presence?.lastLocation || "").trim();
 
-  return placeId <= 0 && universeId <= 0 && isGenericPresenceLocation(location);
+  return (
+    placeId <= 0 &&
+    rootPlaceId <= 0 &&
+    universeId <= 0 &&
+    isGenericPresenceLocation(location)
+  );
 }
 
 async function fetchPresenceLegacyPayload(userId) {
@@ -969,7 +1011,7 @@ export const getPresence = async (userId) => {
         },
         body: JSON.stringify({ userIds: [Number(userId)] }),
       },
-      { csrf: true, allowLegacyFallback: false }
+      { csrf: true, allowLegacyFallback: true }
     );
 
     // If Roblox returns 403/429/500 etc, don't crash
@@ -1033,6 +1075,7 @@ export const monitorGetPresence = async (userId) => {
       userPresenceType: presence?.userPresenceType ?? 0,
       lastLocation: presence?.lastLocation ?? "Website",
       placeId: presence?.placeId ?? null,
+      rootPlaceId: presence?.rootPlaceId ?? null,
       universeId: presence?.universeId ?? null,
       raw: null,
     };
@@ -1054,6 +1097,7 @@ export function monitorGetPresenceSync(userId, cb) {
         userPresenceType: presence?.userPresenceType ?? 0,
         lastLocation: presence?.lastLocation ?? "Website",
         placeId: presence?.placeId ?? null,
+        rootPlaceId: presence?.rootPlaceId ?? null,
         universeId: presence?.universeId ?? null,
         raw: null,
       });

@@ -19,6 +19,7 @@ import { flushStateNow } from "../data/postgres/stateInterceptor.js";
 import { normalizeKeywordsObject, readKeywordsState, writeKeywordsState } from "../data/postgres/keywordsStore.js";
 import { readActivityLogState, appendActivityLogEntryState } from "../data/postgres/activityLogStore.js";
 import { bumpCommandUsageState } from "../data/postgres/commandUsageStore.js";
+import { appendChannelPointsEventsState, getChannelPointsAnalyticsState } from "../data/postgres/channelPointsStore.js";
 import { resolveStateSchema } from "../data/postgres/db.js";
 import { ensureStateTable, readStateValue, writeStateValue } from "../data/postgres/stateStore.js";
 import { normalizeKeywordText, messageContainsKeywordPhrase } from "./keywords/match.js";
@@ -79,14 +80,18 @@ import {
   registerRobloxModule,
 } from "./modules/roblox.js";
 import {
-  getTokenStorePath,
   readTokenStore,
   getRoleAccessToken,
   TWITCH_ROLES,
+  primeTokenStoreCache,
 } from "./api/twitch/auth.js";
 import {
   getPublicRobloxTokenSnapshot,
+  primeRobloxTokenStoreCache,
 } from "./api/roblox/auth.js";
+
+await primeTokenStoreCache();
+await primeRobloxTokenStoreCache();
 
 const ROBLOX_UNLINKED_CHAT_MESSAGE = "Streamer hasn't linked Roblox yet.";
 function resolveTrackedRobloxUserId() {
@@ -139,7 +144,7 @@ function normalizeAuthToken(value) {
     .replace(/^bearer\s+/i, "");
 }
 
-const TWITCH_TOKEN_STORE = readTokenStore(getTokenStorePath());
+const TWITCH_TOKEN_STORE = readTokenStore();
 const TWITCH_BOT_STORE = TWITCH_TOKEN_STORE?.bot || {};
 const TWITCH_STREAMER_STORE = TWITCH_TOKEN_STORE?.streamer || {};
 
@@ -448,21 +453,30 @@ const WORDS_PATH = path.resolve(
         : LEGACY_ARCHIVE_WORDS_PATH)
   ).trim()
 );
-const DEFAULT_VALID_MODES = ["!join.on", "!link.on", "!1v1.on", "!ticket.on", "!val.on", "!reddit.on"];
+const DEFAULT_VALID_MODES = ["!join.on", "!ticket.on", "!link.on", "!1v1.on"];
 const DEFAULT_MODE_DEFINITIONS = {
   "!join.on": {
     responseCommand: "!join",
     timerMessage: "type !join to join the game",
-    title: "FREE ROBUX LIVE - WIN THIS GAME - !JOIN TO PLAY - !socials !discord",
+    title: "!JOIN IN {game}",
     gameName: "Roblox",
     keywordKey: "join",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!ticket.on": {
+    responseCommand: "!ticket",
+    timerMessage: "type !ticket to join the game",
+    title: "!TICKET IN {game}",
+    gameName: "Roblox",
+    keywordKey: "ticket",
     recapSpamCount: 0,
     recapMessage: "",
   },
   "!link.on": {
     responseCommand: "!link",
     timerMessage: "type !link to get the link to join",
-    title: "FREE ROBUX LIVE - WIN THIS GAME - !LINK TO PLAY - !socials !discord",
+    title: "!LINK IN {game}",
     gameName: "Roblox",
     keywordKey: "link",
     recapSpamCount: 0,
@@ -471,38 +485,11 @@ const DEFAULT_MODE_DEFINITIONS = {
   "!1v1.on": {
     responseCommand: "!1v1",
     timerMessage: "type 1v1 in chat once to get a chance to 1v1 the streamer",
-    title: "ARSENAL 1V1 - WIN = FREE ROBUX - !1V1 TO PLAY - !socials !discord",
+    title: "1V1S IN {game}",
     gameName: "Roblox",
     keywordKey: "1v1",
     recapSpamCount: 0,
     recapMessage: "",
-  },
-  "!ticket.on": {
-    responseCommand: "!ticket",
-    timerMessage: "type !ticket to join the game",
-    title: "FREE ROBUX LIVE - WIN THIS GAME - !TICKET TO PLAY - !socials !discord",
-    gameName: "Roblox",
-    keywordKey: "ticket",
-    recapSpamCount: 0,
-    recapMessage: "",
-  },
-  "!val.on": {
-    responseCommand: "!val",
-    timerMessage: "type !val to join",
-    title: "VALORANT - !VAL TO PLAY - !socials !discord",
-    gameName: "VALORANT",
-    keywordKey: "val",
-    recapSpamCount: 0,
-    recapMessage: "",
-  },
-  "!reddit.on": {
-    responseCommand: "!reddit",
-    timerMessage: "",
-    title: "REDDIT RECAP - !socials !discord !reddit",
-    gameName: "Just Chatting",
-    keywordKey: "reddit",
-    recapSpamCount: 3,
-    recapMessage: "REDDIT RECAP TIME: {url}",
   },
 };
 const DEFAULT_SPECIAL_MODES = [
@@ -1029,7 +1016,7 @@ function getLatestStreamEndMs() {
 
 function getLinkedStreamerLogin() {
   try {
-    const latestStore = readTokenStore(getTokenStorePath());
+    const latestStore = readTokenStore();
     const linkedLogin = String(latestStore?.streamer?.login || "")
       .trim()
       .toLowerCase();
@@ -2130,6 +2117,13 @@ function getModeConfig(settings = {}, modeCommand = "") {
   };
 }
 
+function resolveModeTitleTemplate(template = "", gameName = "") {
+  const title = String(template || "").trim();
+  const game = String(gameName || "").trim();
+  if (!title) return "";
+  return title.replace(/\{game\}/gi, game || "Game");
+}
+
 async function applyModeToTwitch({ client, mode, userstate }) {
   const normalizedMode = normalizeModeCommand(mode);
   if (!normalizedMode) return false;
@@ -2139,7 +2133,8 @@ async function applyModeToTwitch({ client, mode, userstate }) {
   const modeCfg = getModeConfig(s, normalizedMode);
   if (!modeCfg) return false;
 
-  const title = modeCfg.title;
+  const gameName = String(modeCfg.gameName || "").trim();
+  const title = resolveModeTitleTemplate(modeCfg.title, gameName);
   if (!title) {
     console.warn(`[applyModeToTwitch] No title set for "${modeCfg.key}" in settings.modes`);
     return false;
@@ -2151,7 +2146,6 @@ async function applyModeToTwitch({ client, mode, userstate }) {
       throw new Error("Missing streamer OAuth token/client id (link streamer in /auth).");
     }
 
-    const gameName = String(modeCfg.gameName || "").trim();
     const gameId = gameName
       ? await TWITCH_FUNCTIONS.getGameIdByName({
           token: auth.accessToken,
@@ -2939,6 +2933,7 @@ try {
       channelName: CHANNEL_NAME,
       settingsPath: SETTINGS_PATH,
       streamsPath: STREAMS_PATH,
+      onChannelPointEvent: (event) => recordChannelPointsEvent(event),
       liveUpHandler,
       liveDownHandler,
     });
@@ -3137,6 +3132,142 @@ async function getActivityLogSnapshot(limit = 120) {
   }
 }
 
+async function recordChannelPointsEvent(event = {}) {
+  try {
+    await appendChannelPointsEventsState({
+      schema: STATE_SCHEMA,
+      instance: INSTANCE_NAME,
+      events: [event],
+    });
+  } catch {}
+}
+
+async function getChannelPointsAnalyticsSnapshot({ days = 30, limitUsers = 200 } = {}) {
+  try {
+    return await getChannelPointsAnalyticsState({
+      schema: STATE_SCHEMA,
+      instance: INSTANCE_NAME,
+      days,
+      limitUsers,
+    });
+  } catch {
+    return {
+      days: Math.max(1, Math.floor(Number(days) || 30)),
+      limitUsers: Math.max(1, Math.floor(Number(limitUsers) || 200)),
+      userCount: 0,
+      users: [],
+    };
+  }
+}
+
+let predictionOverlayCache = { at: 0, payload: null };
+
+function parsePredictionOverlayPayload(rawPayload = null) {
+  const payload = rawPayload && typeof rawPayload === "object" ? rawPayload : {};
+  const root = Array.isArray(payload) ? payload[0] : payload;
+  const event =
+    root?.data?.community?.channel?.prediction?.event ||
+    root?.data?.community?.channel?.prediction?.activeEvent ||
+    root?.data?.prediction?.event ||
+    null;
+
+  const nowIso = new Date().toISOString();
+  if (!event || typeof event !== "object") {
+    return {
+      ok: true,
+      active: false,
+      fetchedAt: nowIso,
+      prediction: null,
+    };
+  }
+
+  const outcomesRaw = Array.isArray(event?.outcomes) ? event.outcomes : [];
+  const outcomes = outcomesRaw.map((outcome) => {
+    const points = Math.max(
+      0,
+      Math.floor(
+        Number(
+          outcome?.channelPoints ||
+            outcome?.totalChannelPoints ||
+            outcome?.totalPoints ||
+            outcome?.points ||
+            0
+        ) || 0
+      )
+    );
+    const users = Math.max(
+      0,
+      Math.floor(
+        Number(outcome?.users || outcome?.totalUsers || outcome?.predictorsCount || 0) || 0
+      )
+    );
+    return {
+      id: String(outcome?.id || "").trim(),
+      title: String(outcome?.title || "").trim() || "Option",
+      color: String(outcome?.color || "").trim().toUpperCase(),
+      points,
+      users,
+    };
+  });
+
+  const totalPoints = outcomes.reduce((sum, row) => sum + row.points, 0);
+  const normalizedOutcomes = outcomes
+    .map((row) => ({
+      ...row,
+      pct: totalPoints > 0 ? Number(((row.points / totalPoints) * 100).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => (b.points - a.points) || a.title.localeCompare(b.title));
+
+  return {
+    ok: true,
+    active: true,
+    fetchedAt: nowIso,
+    prediction: {
+      id: String(event?.id || "").trim(),
+      status: String(event?.status || "").trim().toUpperCase(),
+      title: String(event?.title || "").trim() || "Prediction",
+      createdAt: String(event?.createdAt || event?.startedAt || "").trim() || null,
+      lockAt: String(event?.lockingAt || event?.lockAt || "").trim() || null,
+      endedAt: String(event?.endedAt || "").trim() || null,
+      totalPoints,
+      outcomes: normalizedOutcomes,
+      winningOutcomeId: String(
+        event?.winningOutcomeId || event?.winningOutcome?.id || ""
+      ).trim() || null,
+    },
+  };
+}
+
+async function getPredictionOverlaySnapshot({ force = false } = {}) {
+  const now = Date.now();
+  if (
+    !force &&
+    predictionOverlayCache?.payload &&
+    now - Number(predictionOverlayCache.at || 0) < 4000
+  ) {
+    return predictionOverlayCache.payload;
+  }
+
+  try {
+    const raw = await TWITCH_FUNCTIONS.getLatestPredictionData();
+    const parsed = parsePredictionOverlayPayload(raw);
+    predictionOverlayCache = { at: now, payload: parsed };
+    return parsed;
+  } catch (e) {
+    const fallback =
+      predictionOverlayCache?.payload ||
+      {
+        ok: false,
+        active: false,
+        fetchedAt: new Date().toISOString(),
+        prediction: null,
+        error: String(e?.message || e),
+      };
+    predictionOverlayCache = { at: now, payload: fallback };
+    return fallback;
+  }
+}
+
 function isWebModuleEnabled() {
   const raw = String(process.env.MODULE_WEB ?? "").trim().toLowerCase();
   if (!raw) return false;
@@ -3152,6 +3283,8 @@ const WEB = isWebModuleEnabled()
       getKeywordsSnapshot,
       saveKeywordsSnapshot,
       getActivityLogSnapshot,
+      getChannelPointsAnalyticsSnapshot,
+      getPredictionOverlaySnapshot,
       logActivity,
     })
   : null;

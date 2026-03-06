@@ -200,16 +200,9 @@ function applyInstanceDefaults(ini) {
     // Optional module data
     setEnvIfMissing("GAMEPING_ROLES_PATH", path.join(stateDir, "game_pings.json"));
 
-    // Per-instance OAuth token stores (JSON)
-    setEnvOverride("TWITCH_TOKEN_STORE_PATH", path.join(absDir, "secrets", "twitch_tokens.json"));
-    setEnvOverride("ROBLOX_TOKEN_STORE_PATH", path.join(absDir, "secrets", "roblox_tokens.json"));
-    setEnvOverride("SPOTIFY_TOKEN_STORE_PATH", path.join(absDir, "secrets", "spotify_tokens.json"));
   }
 
   const paths = ini?.paths && typeof ini.paths === "object" ? ini.paths : {};
-  if (paths.twitch_token_store) setEnvOverride("TWITCH_TOKEN_STORE_PATH", paths.twitch_token_store);
-  if (paths.roblox_token_store) setEnvOverride("ROBLOX_TOKEN_STORE_PATH", paths.roblox_token_store);
-  if (paths.spotify_token_store) setEnvOverride("SPOTIFY_TOKEN_STORE_PATH", paths.spotify_token_store);
   if (paths.tab_path || paths.tabPath || paths.aubrey_tab_path || paths.aubreyTabPath) {
     setEnvOverride(
       "TAB_PATH",
@@ -233,9 +226,15 @@ function applyWebConfig(ini) {
     setEnvOverride("WEB_ADMIN_PASSWORD_HASH", web.admin_password_hash || web.adminPasswordHash);
   }
   if (web.listen) setEnvOverride("WEB_LISTEN", web.listen);
+  if (web.local_testing != null || web.localTesting != null) {
+    setEnvOverride("WEB_LOCAL_TESTING", web.local_testing ?? web.localTesting);
+  }
   if (web.port) setEnvOverride("WEB_PORT", web.port);
   if (web.host) setEnvOverride("WEB_HOST", web.host);
   if (web.socket_path || web.socketPath) setEnvOverride("WEB_SOCKET_PATH", web.socket_path || web.socketPath);
+  if (web.overlay_socket_path || web.overlaySocketPath) {
+    setEnvOverride("WEB_OVERLAY_SOCKET_PATH", web.overlay_socket_path || web.overlaySocketPath);
+  }
   if (web.public_url || web.publicUrl) setEnvOverride("WEB_PUBLIC_URL", web.public_url || web.publicUrl);
   if (web.origin || web.web_origin || web.webOrigin) {
     setEnvOverride("WEB_ORIGIN", web.origin || web.web_origin || web.webOrigin);
@@ -278,7 +277,9 @@ function applyWebConfig(ini) {
 
 function applyStateConfig(ini) {
   const state = ini?.state && typeof ini.state === "object" ? ini.state : {};
-  if (state.backend) setEnvOverride("STATE_BACKEND", state.backend);
+  void state;
+  // Settings/state are DB-backed in this build.
+  setEnvOverride("STATE_BACKEND", "postgres");
   if (state.words_path || state.wordsPath) {
     const wordsPath = asAbs(state.words_path || state.wordsPath);
     ensureDir(path.dirname(wordsPath));
@@ -681,7 +682,7 @@ function seedInstanceStateFiles() {
   const dataDir = String(process.env.DATA_DIR || "").trim();
   if (!dataDir) return;
 
-  const backend = String(process.env.STATE_BACKEND || "file").trim().toLowerCase();
+  const backend = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
   const settingsPath = String(process.env.SETTINGS_PATH || "").trim();
   const streamsPath = String(process.env.STREAMS_PATH || "").trim();
   const quotesPath = String(process.env.QUOTES_PATH || "").trim();

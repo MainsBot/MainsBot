@@ -1,17 +1,15 @@
 // Roblox OAuth + token store helpers
-import fs from "fs";
-import path from "path";
 import fetch from "node-fetch";
+import { getRedisNamespace, isRedisConfigured } from "../redis/client.js";
+import { resolveInstanceName } from "../../functions/instance.js";
 
 const AUTH_ENDPOINT = "https://apis.roblox.com/oauth/v1/authorize";
 const TOKEN_ENDPOINT = "https://apis.roblox.com/oauth/v1/token";
 const USERINFO_ENDPOINT = "https://apis.roblox.com/oauth/v1/userinfo";
 
-const DEFAULT_TOKEN_STORE_PATH = path.resolve(
-  process.cwd(),
-  "secrets",
-  "roblox_tokens.json"
-);
+const REDIS_PREFIX = "mainsbot:roblox:tokens:";
+let cachedStore = withDefaults(null);
+let cacheLoaded = false;
 
 const DEFAULT_SCOPES = ["openid", "profile"];
 
@@ -40,13 +38,6 @@ function safeJsonParse(text, fallback = null) {
     return JSON.parse(text);
   } catch {
     return fallback;
-  }
-}
-
-function ensureDirFor(filePath) {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
@@ -214,32 +205,42 @@ function mergeTokenRecord({
 }
 
 export function getRobloxTokenStorePath(env = process.env) {
-  const raw = String(env?.ROBLOX_TOKEN_STORE_PATH || "").trim();
-  if (!raw) return DEFAULT_TOKEN_STORE_PATH;
-  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+  void env;
+  return `${REDIS_PREFIX}${resolveInstanceName()}`;
 }
 
-export function readRobloxTokenStore(
-  tokenStorePath = getRobloxTokenStorePath()
-) {
-  try {
-    if (!fs.existsSync(tokenStorePath)) return withDefaults(null);
-    const raw = fs.readFileSync(tokenStorePath, "utf8");
-    const parsed = safeJsonParse(raw, null);
-    return withDefaults(parsed);
-  } catch {
-    return withDefaults(null);
+function getRedisStore() {
+  if (!isRedisConfigured()) {
+    throw new Error("Redis is required for Roblox token storage. Configure [redis].");
   }
+  return getRedisNamespace(REDIS_PREFIX);
 }
 
-export function writeRobloxTokenStore(
-  data,
-  tokenStorePath = getRobloxTokenStorePath()
-) {
+async function loadRobloxTokenStoreFromRedis({ force = false } = {}) {
+  if (!force && cacheLoaded) return withDefaults(cachedStore);
+  const redis = getRedisStore();
+  const raw = await redis.get(resolveInstanceName());
+  const parsed = raw ? safeJsonParse(raw, null) : null;
+  cachedStore = withDefaults(parsed);
+  cacheLoaded = true;
+  return withDefaults(cachedStore);
+}
+
+export function readRobloxTokenStore() {
+  return withDefaults(cachedStore);
+}
+
+export async function writeRobloxTokenStore(data) {
+  const redis = getRedisStore();
   const normalized = withDefaults(data);
-  ensureDirFor(tokenStorePath);
-  fs.writeFileSync(tokenStorePath, JSON.stringify(normalized, null, 2), "utf8");
-  return normalized;
+  await redis.set(resolveInstanceName(), JSON.stringify(normalized));
+  cachedStore = withDefaults(normalized);
+  cacheLoaded = true;
+  return withDefaults(cachedStore);
+}
+
+export async function primeRobloxTokenStoreCache() {
+  await loadRobloxTokenStoreFromRedis({ force: true });
 }
 
 export function buildRobloxAuthSettings(env = process.env) {
@@ -289,7 +290,6 @@ export function buildRobloxAuthorizeUrl({
 export async function exchangeRobloxCode({
   code,
   settings = buildRobloxAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getRobloxTokenStorePath(),
 } = {}) {
   if (!code) throw new Error("Missing authorization code");
   if (!settings.clientId) throw new Error("Missing ROBLOX_CLIENT_ID");
@@ -305,7 +305,7 @@ export async function exchangeRobloxCode({
   });
 
   const userInfo = await fetchUserInfo(tokenResponse.access_token);
-  const store = readRobloxTokenStore(tokenStorePath);
+  const store = await loadRobloxTokenStoreFromRedis();
   const previous = cleanBotRecord(store.bot, settings);
   const merged = mergeTokenRecord({
     previous,
@@ -314,15 +314,14 @@ export async function exchangeRobloxCode({
     userInfo,
   });
   store.bot = merged;
-  writeRobloxTokenStore(store, tokenStorePath);
+  await writeRobloxTokenStore(store);
   return merged;
 }
 
 export async function refreshRobloxToken({
   settings = buildRobloxAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getRobloxTokenStorePath(),
 } = {}) {
-  const store = readRobloxTokenStore(tokenStorePath);
+  const store = await loadRobloxTokenStoreFromRedis();
   const current = cleanBotRecord(store.bot, settings);
 
   const refreshToken =
@@ -348,20 +347,20 @@ export async function refreshRobloxToken({
     userInfo,
   });
   store.bot = merged;
-  writeRobloxTokenStore(store, tokenStorePath);
+  await writeRobloxTokenStore(store);
   return merged;
 }
 
 export async function getRobloxAccessToken({
   settings = buildRobloxAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getRobloxTokenStorePath(),
   minTtlSec = 120,
 } = {}) {
-  let record = cleanBotRecord(readRobloxTokenStore(tokenStorePath).bot, settings);
+  await loadRobloxTokenStoreFromRedis();
+  let record = cleanBotRecord(readRobloxTokenStore().bot, settings);
 
   if (record.access_token && shouldRefreshRecord(record, minTtlSec)) {
     try {
-      record = await refreshRobloxToken({ settings, tokenStorePath });
+      record = await refreshRobloxToken({ settings });
     } catch {}
   }
 
@@ -395,14 +394,13 @@ export async function getRobloxAccessToken({
 
 export function getPublicRobloxTokenSnapshot({
   settings = buildRobloxAuthSettings(),
-  tokenStorePath = settings.tokenStorePath || getRobloxTokenStorePath(),
 } = {}) {
-  const record = cleanBotRecord(readRobloxTokenStore(tokenStorePath).bot, settings);
+  const record = cleanBotRecord(readRobloxTokenStore().bot, settings);
   const expiresAt = Number(record.expires_at || 0);
   const expiresInSec = expiresAt ? Math.floor((expiresAt - Date.now()) / 1000) : null;
 
   return {
-    tokenStorePath,
+    tokenStorePath: getRobloxTokenStorePath(),
     redirectUri: settings.redirectUri || null,
     clientId: settings.clientId || null,
     scopes: settings.scopes || [],

@@ -1,12 +1,24 @@
-## Example nginx site (reverse proxy -> unix socket)
+## Example nginx site (reverse proxy -> unix sockets)
 ## Update:
 ## - `server_name`
 ## - TLS bits (certs)
-## - `proxy_pass` socket path to match your `WEB_SOCKET_PATH`
+## - socket paths to match WEB_SOCKET_PATH / WEB_OVERLAY_SOCKET_PATH
+## Recommended per-instance layout:
+## - /run/mainsbot/<instance>/web.sock
+## - /run/mainsbot/<instance>/overlay.sock
+
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  '' close;
+}
 
 server {
-  listen 80;
+  listen 443 ssl;
+  listne [::]443 ssl;
   server_name example.com;
+
+  ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
 
   # If you're terminating TLS elsewhere, ensure these headers are set.
   proxy_set_header Host $host;
@@ -16,7 +28,19 @@ server {
   location / {
     proxy_http_version 1.1;
     proxy_set_header Connection "";
-    proxy_pass http://unix:/run/mainsbot-example.sock:;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_pass http://unix:/run/mainsbot/example/web.sock:;
+  }
+
+  location /overlay/ws {
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_pass http://unix:/run/mainsbot/example/overlay.sock:;
   }
 }
-
