@@ -16,18 +16,25 @@ export function createTmiClient({
   const user = String(username || "").trim();
   const token = normalizeAuthToken(oauthToken);
   const channel = String(channelName || "").trim().replace(/^#/, "");
-  if (!user) throw new Error("createTmiClient: missing username");
-  if (!token) throw new Error("createTmiClient: missing oauthToken");
   if (!channel) throw new Error("createTmiClient: missing channelName");
 
-  return new tmi.Client({
+  const config = {
     options: { debug: !!debug },
-    identity: {
-      username: user,
-      password: `OAuth:${token}`,
-    },
     channels: [channel],
-  });
+  };
+
+  if (token) {
+    if (!user) throw new Error("createTmiClient: missing username");
+    config.identity = {
+      username: user,
+      password: `oauth:${token}`,
+    };
+  }
+
+  const client = new tmi.Client(config);
+  client.__mainsbotAnonymous = !token;
+  client.__mainsbotIrcUsername = user || "";
+  return client;
 }
 
 export function createOptionalTmiClient({
@@ -77,4 +84,3 @@ export function attachClientEventLogs({
     safeRecent?.(channel || defaultChannelName, message, "irc");
   });
 }
-

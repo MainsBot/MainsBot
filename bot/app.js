@@ -297,6 +297,8 @@ const STREAMER_TOKEN =
 const TWITCH_CHAT_ALLOW_IRC_FALLBACK = flagFromEnv(
   process.env.TWITCH_CHAT_ALLOW_IRC_FALLBACK ?? "false"
 );
+const HAS_BOT_IRC_AUTH = Boolean(normalizeAuthToken(BOT_OAUTH));
+const TWITCH_CHAT_CAN_USE_IRC_FALLBACK = TWITCH_CHAT_ALLOW_IRC_FALLBACK && HAS_BOT_IRC_AUTH;
 
 const WAIT_REGISTER = 5 * 60 * 1000; // number of milliseconds, to wait before starting to get stream information
 const PLAYTIME_TICK_MS = 60 * 1000; // how often to persist playtime and check game changes
@@ -926,6 +928,12 @@ const lastEventSentAt = {
 var streamNumber = Object.keys(STREAMS).length;
 
 // ---------- TWITCH / IRC (tmi.js) ----------
+if (!HAS_BOT_IRC_AUTH) {
+  console.warn(
+    "[TWITCH][IRC] BOT_OAUTH missing; starting anonymous read-only IRC client. Outbound chat will require Helix auth and IRC fallback is disabled until /auth/twitch/bot is linked."
+  );
+}
+
 const client = createTmiClient({
   username: BOT_NAME,
   oauthToken: BOT_OAUTH,
@@ -1273,10 +1281,10 @@ TWITCH_FUNCTIONS.installHelixChatTransport({
   },
   onError: ({ source, error }) => {
     console.warn(
-      `[TWITCH][HELIX_CHAT] ${source} send failed (${TWITCH_CHAT_ALLOW_IRC_FALLBACK ? "IRC fallback on" : "IRC fallback off"}): ${String(error?.message || error)}`
+      `[TWITCH][HELIX_CHAT] ${source} send failed (${TWITCH_CHAT_CAN_USE_IRC_FALLBACK ? "IRC fallback on" : "IRC fallback off"}): ${String(error?.message || error)}`
     );
   },
-  allowIrcFallback: TWITCH_CHAT_ALLOW_IRC_FALLBACK,
+  allowIrcFallback: TWITCH_CHAT_CAN_USE_IRC_FALLBACK,
 });
 
 try {
