@@ -27,6 +27,6 @@
     "smoke:web": "node tools/web/smoke-admin-api.mjs"
   },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   }
 }
