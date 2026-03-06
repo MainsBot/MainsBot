@@ -427,6 +427,28 @@ function renderBootFatal(rootEl, error, context = "Admin boot") {
   `;
 }
 
+class AdminErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error: error || new Error("Unknown admin render error") };
+  }
+
+  componentDidCatch(error) {
+    console.error("[admin] error boundary caught:", error);
+  }
+
+  render() {
+    if (this.state?.error) {
+      return renderFatalPanel(this.state.error, "Admin dashboard");
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("home");
@@ -1775,7 +1797,7 @@ if (rootEl) {
     renderBootFatal(rootEl, reason, "Admin runtime");
   });
   try {
-    createRoot(rootEl).render(html`<${App} />`);
+    createRoot(rootEl).render(html`<${AdminErrorBoundary}><${App} /></${AdminErrorBoundary}>`);
   } catch (error) {
     console.error("[admin] boot failed:", error);
     renderBootFatal(rootEl, error, "Admin boot");

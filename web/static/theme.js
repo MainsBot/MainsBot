@@ -172,12 +172,6 @@ export function applyStreamerThemeFromStatus(status) {
     source.streamerColor ||
     source.channelColor ||
     "";
-  if (applyStreamerThemeColor(explicitColor)) return;
-  const streamerName =
-    source.channelName ||
-    source.channelDisplayName ||
-    source.channel ||
-    source.channelNameDisplay ||
-    "";
-  applyStreamerTheme(streamerName);
+  if (applyStreamerThemeColor(explicitColor)) return true;
+  return false;
 }
