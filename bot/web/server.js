@@ -560,6 +560,18 @@ async function getStatusSnapshot() {
       themeColor = String(
         (await getUserChatColor({
           userId: TWITCH_CHANNEL_ID,
+          login: TWITCH_CHANNEL_NAME,
+          preferredRole: "streamer",
+        })) || ""
+      )
+        .trim()
+        .toUpperCase();
+    } catch {}
+  } else if (!themeColor && TWITCH_CHANNEL_NAME) {
+    try {
+      themeColor = String(
+        (await getUserChatColor({
+          login: TWITCH_CHANNEL_NAME,
           preferredRole: "streamer",
         })) || ""
       )
@@ -803,6 +815,7 @@ function renderErrorPageHtml(statusCode, title, message) {
 function sendHtmlResponse(res, statusCode, html, extraHeaders = {}) {
   res.writeHead(Number(statusCode) || 200, {
     "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
     ...extraHeaders,
   });
   return res.end(minifyHtml(html));
@@ -1354,6 +1367,7 @@ async function readJsonBody(req, { limitBytes = 1024 * 1024 } = {}) {
 function sendCssResponse(res, statusCode, css, sourceLabel = "inline-css", extraHeaders = {}) {
   res.writeHead(Number(statusCode) || 200, {
     "content-type": "text/css; charset=utf-8",
+    "cache-control": "no-store",
     ...extraHeaders,
   });
   return res.end(minifyCss(css, sourceLabel));
@@ -1369,6 +1383,7 @@ async function sendJsResponse(
   const output = await minifyJs(js, sourceLabel);
   res.writeHead(Number(statusCode) || 200, {
     "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "no-store",
     ...extraHeaders,
   });
   return res.end(output);

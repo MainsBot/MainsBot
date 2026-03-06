@@ -13,9 +13,19 @@
 
   --panel: rgba(34, 28, 12, 0.78);
   --panel2: rgba(26, 21, 9, 0.92);
+  --topbar-bg: rgba(26, 21, 9, 0.78);
+  --surface-soft: rgba(26, 21, 9, 0.72);
+  --surface-1: rgba(9, 8, 4, 0.42);
+  --surface-2: rgba(9, 8, 4, 0.34);
+  --surface-3: rgba(9, 8, 4, 0.24);
+  --surface-4: rgba(9, 8, 4, 0.26);
+  --surface-5: rgba(9, 8, 4, 0.55);
 
   --border: rgba(255, 196, 80, 0.28);
   --border2: rgba(255, 255, 255, 0.08);
+  --ghost-bg: rgba(255, 255, 255, 0.04);
+  --ghost-border: rgba(255, 255, 255, 0.08);
+  --field-border: rgba(255, 255, 255, 0.08);
 
   --text: #fff3d6;
   --muted: rgba(255, 243, 214, 0.65);
@@ -23,12 +33,21 @@
   --accent: #ffbd59;
   --accent2: #ffe3a8;
   --accent3: #ff8c2b;
+  --accent-text: var(--accent2);
   --accent-rgb: 255 189 89;
   --accent2-rgb: 255 227 168;
   --accent3-rgb: 255 140 43;
 
   --ok: #2ecc71;
   --bad: #ff5c5c;
+  --danger-bg: rgba(255, 92, 92, 0.14);
+  --danger-border: rgba(255, 92, 92, 0.35);
+  --danger-text: #ffd4d4;
+  --input-bg: rgba(9, 8, 4, 0.55);
+  --input-placeholder: rgba(255, 243, 214, 0.45);
+  --mod-card-bg: linear-gradient(90deg, rgba(255, 92, 92, 0.14), var(--panel));
+  --mod-card-cmd: rgb(255, 170, 170);
+  --mod-card-stripe-blend: screen;
 
   --shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
   --shadow2: 0 12px 24px rgba(0, 0, 0, 0.32);
@@ -41,18 +60,39 @@
 }
 
 :root[data-theme="light"] {
-  --bg0: #f6f0df;
-  --bg1: #fef9ed;
-  --bg2: #f4ead3;
+  --bg0: #f5eee0;
+  --bg1: #fcf8f0;
+  --bg2: #efe5d2;
 
-  --panel: rgba(255, 255, 255, 0.86);
-  --panel2: rgba(255, 255, 255, 0.94);
+  --panel: rgba(255, 255, 255, 0.9);
+  --panel2: rgba(255, 255, 255, 0.97);
+  --topbar-bg: rgba(255, 255, 255, 0.86);
+  --surface-soft: rgba(255, 255, 255, 0.82);
+  --surface-1: rgba(255, 255, 255, 0.76);
+  --surface-2: rgba(255, 255, 255, 0.84);
+  --surface-3: rgba(255, 255, 255, 0.7);
+  --surface-4: rgba(255, 255, 255, 0.78);
+  --surface-5: rgba(255, 255, 255, 0.94);
 
-  --border: rgb(var(--accent-rgb) / 0.32);
-  --border2: rgba(31, 26, 16, 0.16);
+  --border: rgb(var(--accent-rgb) / 0.26);
+  --border2: rgba(54, 42, 22, 0.14);
+  --ghost-bg: rgba(255, 255, 255, 0.54);
+  --ghost-border: rgba(54, 42, 22, 0.12);
+  --field-border: rgba(54, 42, 22, 0.12);
 
   --text: #2c2110;
-  --muted: rgba(44, 33, 16, 0.68);
+  --muted: rgba(44, 33, 16, 0.72);
+  --accent-text: rgb(var(--accent-rgb) / 0.96);
+  --ok: #169b60;
+  --bad: #d64545;
+  --danger-bg: rgba(214, 69, 69, 0.08);
+  --danger-border: rgba(214, 69, 69, 0.22);
+  --danger-text: #b33d3d;
+  --input-bg: rgba(255, 255, 255, 0.94);
+  --input-placeholder: rgba(60, 46, 25, 0.46);
+  --mod-card-bg: linear-gradient(90deg, rgba(214, 69, 69, 0.08), var(--panel));
+  --mod-card-cmd: #c54848;
+  --mod-card-stripe-blend: multiply;
 
   --shadow: 0 20px 40px rgba(63, 44, 18, 0.16);
   --shadow2: 0 10px 24px rgba(63, 44, 18, 0.12);
@@ -395,7 +435,7 @@ html {
   margin-top: 6px;
   padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(26, 21, 9, 0.72);
+  background: var(--surface-soft);
   border: 1px solid var(--border2);
   box-shadow: var(--shadow2);
   display: grid;
@@ -662,7 +702,7 @@ html {
 
 .cmdcard__cmd {
   font-family: var(--font-mono);
-  color: var(--accent2);
+  color: var(--accent-text);
   font-weight: 850;
 }
 
@@ -694,20 +734,20 @@ html {
   padding: 5px 10px;
   border-radius: 999px;
 
-  background: rgba(255, 92, 92, 0.18);
+  background: var(--danger-bg);
   color: var(--bad);
-  border: 1px solid rgba(255, 92, 92, 0.35);
+  border: 1px solid var(--danger-border);
   letter-spacing: 0.5px;
 }
 
 /* MOD ONLY: keep red, add animated stripe */
 .cmdcard.mod-only {
   border-left: 4px solid rgba(255, 92, 92, 0.95);
-  background: linear-gradient(90deg, rgba(255, 92, 92, 0.14), var(--panel));
+  background: var(--mod-card-bg);
 }
 
 .cmdcard.mod-only .cmdcard__cmd {
-  color: rgb(255, 170, 170);
+  color: var(--mod-card-cmd);
 }
 
 /* animated diagonal stripe overlay */
@@ -726,7 +766,7 @@ html {
   background-size: 24px 24px;
   animation: stripeMove 6s linear infinite;
   pointer-events: none;
-  mix-blend-mode: screen;
+  mix-blend-mode: var(--mod-card-stripe-blend);
 }
 
 @keyframes stripeMove {

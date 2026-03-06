@@ -985,14 +985,6 @@ function App() {
     }
   }
 
-  if (loading) {
-    return html`<div className="muted">Loading dashboard...</div>`;
-  }
-
-  if (!settings) {
-    return html`<div className="muted">Failed to load settings.</div>`;
-  }
-
   const viewerLogin = normalizeLogin(session?.login || auth?.session?.login || "");
   const viewerUserId = normalizeId(session?.userId || auth?.session?.userId || "");
   const ownerLogin = normalizeLogin(auth?.identities?.ownerLogin || "");
@@ -1026,6 +1018,14 @@ function App() {
     if (view !== "points") return;
     void loadChannelPoints({ days: pointsDays, limitUsers: 300 });
   }, [view, canViewPointsDashboard, pointsDays]);
+
+  if (loading) {
+    return html`<div className="muted">Loading dashboard...</div>`;
+  }
+
+  if (!settings) {
+    return html`<div className="muted">Failed to load settings.</div>`;
+  }
 
   const twitchBotConnected = isOAuthConnected(auth?.bot);
   const twitchStreamerConnected = isOAuthConnected(auth?.streamer);

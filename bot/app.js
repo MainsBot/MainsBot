@@ -994,6 +994,7 @@ async function refreshExternalStatus() {
   try {
     const color = await TWITCH_FUNCTIONS.getUserChatColor({
       userId: CHANNEL_ID,
+      login: CHANNEL_NAME,
       preferredRole: "streamer",
     });
     next.themeColor = String(color || "").trim().toUpperCase() || null;

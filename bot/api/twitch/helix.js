@@ -830,12 +830,12 @@ async function getHelixUserIdByLogin({ login, auth, preferredRole } = {}) {
 
   const resolvedAuth =
     auth ||
-    (await resolveHelixModeratorAuth({
-      preferred: preferredRole,
+    (await resolveHelixReadAuth({
+      preferredRole,
       requiredScopes: [],
     }));
   if (!resolvedAuth) {
-    throw new Error("Missing Twitch OAuth token (bot/streamer) for Helix request");
+    throw new Error("Missing Twitch OAuth token for Helix request");
   }
 
   const url = `https://api.twitch.tv/helix/users?login=${encodeURIComponent(normalized)}`;
@@ -904,9 +904,17 @@ async function resolveHelixReadAuth({
 
 export async function getUserChatColor({
   userId,
+  login,
   preferredRole = "auto",
 } = {}) {
-  const targetUserId = String(userId || "").trim();
+  let targetUserId = String(userId || "").trim();
+  if (!targetUserId) {
+    targetUserId =
+      (await getHelixUserIdByLogin({
+        login,
+        preferredRole,
+      })) || "";
+  }
   if (!targetUserId) return "";
 
   const cached = helixUserChatColorCache.get(targetUserId);

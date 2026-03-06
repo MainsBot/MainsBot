@@ -23,7 +23,7 @@
   padding: 12px 14px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: rgba(26, 21, 9, 0.78);
+  background: var(--topbar-bg);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--shadow2);
@@ -125,7 +125,7 @@
   border-radius: 12px;
   background: rgb(var(--accent-rgb) / 0.16);
   border: 1px solid rgb(var(--accent-rgb) / 0.35);
-  color: var(--accent2);
+  color: var(--accent-text);
   font-weight: 900;
   text-decoration: none;
   cursor: pointer;
@@ -157,15 +157,15 @@
 }
 
 .btn--ghost {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--ghost-bg);
+  border-color: var(--ghost-border);
   color: var(--text);
 }
 
 .btn--danger {
-  background: rgba(255, 92, 92, 0.14);
-  border-color: rgba(255, 92, 92, 0.35);
-  color: #ffd4d4;
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
 }
 
 .row {
@@ -206,7 +206,7 @@
 .panel {
   border-radius: var(--radius2);
   border: 1px solid var(--border2);
-  background: rgba(9, 8, 4, 0.42);
+  background: var(--surface-1);
   padding: 14px 14px;
 }
 
@@ -264,8 +264,8 @@
   gap: 16px;
   padding: 12px 12px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(9, 8, 4, 0.34);
+  border: 1px solid var(--field-border);
+  background: var(--surface-2);
 }
 
 .field--compact {
@@ -300,7 +300,7 @@
   max-width: 420px;
   border-radius: 12px;
   border: 1px solid rgb(var(--accent-rgb) / 0.22);
-  background: rgba(9, 8, 4, 0.55);
+  background: var(--input-bg);
   padding: 10px 12px;
   color: var(--text);
   font-family: var(--font-sans);
@@ -315,7 +315,7 @@
 
 .in::placeholder,
 .textarea::placeholder {
-  color: rgba(255, 243, 214, 0.45);
+  color: var(--input-placeholder);
 }
 
 .in:focus,
@@ -368,9 +368,9 @@
   height: 28px;
   border-radius: 999px;
   border: 1px solid rgb(var(--accent-rgb) / 0.22);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--ghost-bg);
   position: relative;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
   transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
 }
 
@@ -420,8 +420,8 @@
   gap: 10px;
   padding: 12px 12px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(9, 8, 4, 0.34);
+  border: 1px solid var(--field-border);
+  background: var(--surface-2);
 }
 
 .statusline {
@@ -433,15 +433,15 @@
 .details {
   margin-top: 16px;
   border-radius: var(--radius2);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(9, 8, 4, 0.24);
+  border: 1px solid var(--field-border);
+  background: var(--surface-3);
   padding: 10px 12px 12px;
 }
 
 .details summary {
   cursor: pointer;
   font-weight: 900;
-  color: rgba(255, 243, 214, 0.82);
+  color: var(--text);
 }
 
 .details summary::marker {
@@ -450,8 +450,8 @@
 
 .table-wrap {
   border-radius: var(--radius2);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(9, 8, 4, 0.26);
+  border: 1px solid var(--field-border);
+  background: var(--surface-4);
   overflow: auto;
 }
 
@@ -464,24 +464,24 @@
 .table-wrap th,
 .table-wrap td {
   padding: 12px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--field-border);
   vertical-align: top;
 }
 
 .table-wrap th {
-  color: rgba(255, 243, 214, 0.68);
+  color: var(--muted);
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-weight: 900;
   position: sticky;
   top: 0;
-  background: rgba(9, 8, 4, 0.55);
+  background: var(--surface-5);
   backdrop-filter: blur(10px);
 }
 
 .table-wrap td {
-  color: rgba(255, 243, 214, 0.86);
+  color: var(--text);
 }
 
 .table-wrap tr:hover td {
@@ -489,7 +489,7 @@
 }
 
 .table-wrap code {
-  color: var(--accent2);
+  color: var(--accent-text);
 }
 
 .table-wrap .quote-text-input {
@@ -509,8 +509,8 @@
 }
 
 .quote-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(9, 8, 4, 0.34);
+  border: 1px solid var(--field-border);
+  background: var(--surface-2);
   border-radius: var(--radius2);
   padding: 12px;
   display: grid;
@@ -578,7 +578,7 @@
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 243, 214, 0.72);
+  color: var(--muted);
 }
 
 .login-input {
