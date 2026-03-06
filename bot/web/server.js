@@ -145,6 +145,7 @@ export function startWebServer(deps = {}) {
   const TWITCH_BOT_NAME = String(process.env.BOT_NAME || "")
     .trim()
     .toLowerCase();
+  const CUSTOM_COMMANDS_INSTANCE = resolveInstanceName();
 
   const DEFAULT_WEB_SOCKET_PATH =
     process.platform === "win32"
@@ -814,7 +815,6 @@ const REDEMPTIONS_LOG_PATH =
   abs(String(process.env.REDEMPTIONS_LOG_PATH || "").trim()) ||
   abs(DATA_DIR ? path.join(DATA_DIR, "d", "REDEMPTIONS_LOG.json") : "./data/REDEMPTIONS_LOG.json");
 const CUSTOM_COMMANDS_SCHEMA = resolveStateSchema();
-const CUSTOM_COMMANDS_INSTANCE = resolveInstanceName();
 const CUSTOM_COMMANDS_STATE_KEY = "custom_commands";
 
 function normalizeCustomCommandName(value) {
