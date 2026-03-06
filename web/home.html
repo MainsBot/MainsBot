@@ -22,7 +22,6 @@
       <div class="topbar__links">
         <a class="btn btn--sm" href="/home">Home</a>
         <a class="btn btn--sm btn--ghost" href="/commands">Commands</a>
-        <a class="btn btn--sm btn--ghost" href="/live">Live</a>
         <button class="btn btn--sm btn--ghost theme-toggle" id="themeToggle" type="button">Light</button>
         <span id="topbarAdminLink"></span>
       </div>
@@ -33,12 +32,8 @@
       <header class="hero-card">
         <div>
           <div class="pill">Stream Assistant</div>
-          <h1 class="hero-title">Everything for <span id="heroChannelName">your stream</span></h1>
-          <p class="hero-sub">Track live state, see current activity, and jump into commands and admin tools quickly.</p>
-          <div class="home-live-row">
-            <span class="live-dot" id="homeLiveDot" aria-hidden="true"></span>
-            <span class="live-text" id="homeLiveText">Offline</span>
-          </div>
+          <h1 class="hero-title"><span id="heroBotName">MainsBot</span> for <span id="heroChannelName">your stream</span></h1>
+          <p class="hero-sub">Bot username: <strong id="heroBotLogin">-</strong> · Channel: <strong id="heroChannelLogin">-</strong></p>
         </div>
       </header>
 
@@ -47,10 +42,6 @@
           <h2>Commands</h2>
           <p>Browse all bot commands with category filters and cooldown hints.</p>
         </a>
-        <a class="quick-card" href="/live">
-          <h2>Live Snapshot</h2>
-          <p>See Twitch/Roblox/Spotify runtime values and current mode state.</p>
-        </a>
         <a class="quick-card" href="/swagger">
           <h2>API Docs</h2>
           <p>Open Swagger docs for status and admin API endpoints.</p>
@@ -58,10 +49,10 @@
       </section>
 
       <section class="home-stats">
-        <div class="home-stat"><span class="muted">Twitch</span><strong id="homeTwitch">-</strong></div>
+        <div class="home-stat"><span class="muted">Bot Username</span><strong id="homeBot">-</strong></div>
+        <div class="home-stat"><span class="muted">Channel</span><strong id="homeChannel">-</strong></div>
         <div class="home-stat"><span class="muted">Roblox</span><strong id="homeRoblox">-</strong></div>
         <div class="home-stat"><span class="muted">Spotify</span><strong id="homeSpotify">-</strong></div>
-        <div class="home-stat"><span class="muted">Uptime</span><strong id="homeUptime">-</strong></div>
         <div class="home-stat"><span class="muted">Mode</span><strong id="homeMode">-</strong></div>
         <div class="home-stat"><span class="muted">Keywords</span><strong id="homeKeywords">-</strong></div>
       </section>

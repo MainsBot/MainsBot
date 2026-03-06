@@ -21,6 +21,7 @@ import { createWebAdminAuth } from "../api/twitch/webAdmin.js";
 import {
   isUserModerator,
   listChannelModerators,
+  getUserChatColor,
   updateChannelInfo,
   getGameIdByName,
   listCustomRewards,
@@ -538,13 +539,49 @@ fs.watchFile(path.join(WEB_DIR, "index.html"), { interval: 1200 }, () => {
 });
 
 
-// ---------- BOT STATUS (provided by app.js) ----------
-function getStatusSnapshot() {
+// ---------- BOT STATUS (provided by app.js or reconstructed by web) ----------
+async function getStatusSnapshot() {
+  let snapshot = {};
   try {
-    return typeof deps.getStatusSnapshot === "function" ? deps.getStatusSnapshot() : {};
+    snapshot = typeof deps.getStatusSnapshot === "function" ? await deps.getStatusSnapshot() : {};
   } catch {
-    return {};
+    snapshot = {};
   }
+
+  const base = snapshot && typeof snapshot === "object" ? { ...snapshot } : {};
+  let themeColor = String(
+    base.twitchThemeColor || base.themeColor || base.streamerColor || ""
+  )
+    .trim()
+    .toUpperCase();
+
+  if (!themeColor && TWITCH_CHANNEL_ID) {
+    try {
+      themeColor = String(
+        (await getUserChatColor({
+          userId: TWITCH_CHANNEL_ID,
+          preferredRole: "streamer",
+        })) || ""
+      )
+        .trim()
+        .toUpperCase();
+    } catch {}
+  }
+
+  return {
+    instance: String(base.instance || resolveInstanceName() || "").trim() || null,
+    botName: String(base.botName || TWITCH_BOT_NAME || "").trim() || null,
+    botDisplayName:
+      String(base.botDisplayName || base.botName || TWITCH_BOT_NAME || "").trim() || null,
+    channelName: String(base.channelName || TWITCH_CHANNEL_NAME || "").trim() || null,
+    channelDisplayName:
+      String(base.channelDisplayName || TWITCH_CHANNEL_NAME || "").trim() || null,
+    webPublicUrl: String(base.webPublicUrl || WEB_PUBLIC_URL || "").trim() || null,
+    themeColor: themeColor || null,
+    twitchThemeColor: themeColor || null,
+    ...base,
+    ...(themeColor ? { themeColor, twitchThemeColor: themeColor } : {}),
+  };
 }
 
 function getKeywordsSnapshotFromDeps() {
@@ -6244,7 +6281,7 @@ const webServer = http.createServer(async (req, res) => {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
     });
-    return res.end(JSON.stringify(getStatusSnapshot()));
+    return res.end(JSON.stringify(await getStatusSnapshot()));
   }
 
   if (routePath === "/api/overlay/prediction") {

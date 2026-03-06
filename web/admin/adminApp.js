@@ -52,6 +52,7 @@ const FILTER_DEFAULTS = {
     message: "{atUser} No links allowed in chat.",
   },
 };
+const DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE = "{streamerDisplay} is now listening to {track}";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => {
@@ -264,6 +265,11 @@ function normalizeSettings(raw) {
   src.linkFilter = src.linkFilter == null ? true : Boolean(src.linkFilter);
   src.currentMode = String(src.currentMode || "!join.on").trim() || "!join.on";
   src.currentGame = String(src.currentGame || "Website").trim() || "Website";
+  src.spotifyAnnounceEnabled = Boolean(src.spotifyAnnounceEnabled);
+  src.spotifyAnnounceTemplate =
+    String(src.spotifyAnnounceTemplate || DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE).trim() ||
+    DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE;
+  src.spotifyAnnounceEmote = String(src.spotifyAnnounceEmote || "").trim();
 
   src.linkAllowlist = asArray(src.linkAllowlist);
   src.linkAllowlistText = String(src.linkAllowlistText || toCsv(src.linkAllowlist));
@@ -428,60 +434,93 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       try {
-        const [
-          settingsRes,
-          statusRes,
-          authRes,
-          sessionRes,
-          keywordsRes,
-          customCommandsRes,
-          analyticsRes,
-          healthRes,
-          activityRes,
-        ] = await Promise.all([
-          fetch("/api/admin/settings", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/status", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/admin/session", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/admin/keywords", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/admin/custom-commands", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/admin/analytics/commands?days=7&platform=all&limit=20", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/admin/health", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/admin/activity?limit=120", { credentials: "same-origin", cache: "no-store" }),
-        ]);
+        const settingsRes = await fetch("/api/admin/settings", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
         const settingsPayload = await settingsRes.json().catch(() => null);
         if (!settingsRes.ok) {
           throw new Error(settingsPayload?.error || `${settingsRes.status} ${settingsRes.statusText}`);
         }
+        if (cancelled) return;
         setSettings(normalizeSettings(settingsPayload?.settings || {}));
-        const runtimePayload = statusRes.ok ? await statusRes.json().catch(() => null) : null;
-        setRuntime(runtimePayload);
-        applyStreamerThemeFromStatus(runtimePayload);
-        setAuth(authRes.ok ? await authRes.json().catch(() => null) : null);
-        setSession(sessionRes.ok ? await sessionRes.json().catch(() => null) : null);
-        const keywordsPayload = keywordsRes.ok ? await keywordsRes.json().catch(() => null) : null;
-        const normalizedKeywords = normalizeKeywords(keywordsPayload?.keywords || {});
-        setKeywords(normalizedKeywords);
-        setKeywordsText(JSON.stringify(normalizedKeywords, null, 2));
-        const customCommandsPayload = customCommandsRes.ok
-          ? await customCommandsRes.json().catch(() => null)
-          : null;
-        setCustomCommandRows(normalizeCustomCommandRows(customCommandsPayload?.rows || []));
-        const analyticsPayload = analyticsRes.ok ? await analyticsRes.json().catch(() => null) : null;
-        setAnalyticsRows(Array.isArray(analyticsPayload?.rows) ? analyticsPayload.rows : []);
-        const healthPayload = healthRes.ok ? await healthRes.json().catch(() => null) : null;
-        setHealth(healthPayload || null);
-        const activityPayload = activityRes.ok ? await activityRes.json().catch(() => null) : null;
-        setActivityRows(Array.isArray(activityPayload?.rows) ? activityPayload.rows : []);
       } catch (e) {
-        setStatus(`Error: ${String(e?.message || e)}`);
+        if (!cancelled) setStatus(`Error: ${String(e?.message || e)}`);
       } finally {
-        setActivityLoading(false);
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
+
+      const tasks = [
+        (async () => {
+          const res = await fetch("/api/status", { credentials: "same-origin", cache: "no-store" });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (cancelled) return;
+          setRuntime(body);
+          applyStreamerThemeFromStatus(body);
+        })(),
+        (async () => {
+          const res = await fetch("/api/auth/status", { credentials: "same-origin", cache: "no-store" });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (!cancelled) setAuth(body);
+        })(),
+        (async () => {
+          const res = await fetch("/api/admin/session", { credentials: "same-origin", cache: "no-store" });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (!cancelled) setSession(body);
+        })(),
+        (async () => {
+          const res = await fetch("/api/admin/keywords", { credentials: "same-origin", cache: "no-store" });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (cancelled) return;
+          const normalizedKeywords = normalizeKeywords(body?.keywords || {});
+          setKeywords(normalizedKeywords);
+          setKeywordsText(JSON.stringify(normalizedKeywords, null, 2));
+        })(),
+        (async () => {
+          const res = await fetch("/api/admin/custom-commands", { credentials: "same-origin", cache: "no-store" });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (!cancelled) {
+            setCustomCommandRows(normalizeCustomCommandRows(body?.rows || []));
+          }
+        })(),
+        (async () => {
+          const res = await fetch("/api/admin/analytics/commands?days=7&platform=all&limit=20", {
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (!cancelled) {
+            setAnalyticsRows(Array.isArray(body?.rows) ? body.rows : []);
+          }
+        })(),
+        (async () => {
+          const res = await fetch("/api/admin/health", { credentials: "same-origin", cache: "no-store" });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (!cancelled) setHealth(body || null);
+        })(),
+        (async () => {
+          const res = await fetch("/api/admin/activity?limit=120", {
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+          const body = res.ok ? await res.json().catch(() => null) : null;
+          if (!cancelled) {
+            setActivityRows(Array.isArray(body?.rows) ? body.rows : []);
+          }
+        })(),
+      ];
+
+      await Promise.allSettled(tasks);
+      if (!cancelled) setActivityLoading(false);
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function refreshActivity(overrideQuery = null) {
@@ -1218,6 +1257,32 @@ function App() {
               </div>
 
               <div className="grid grid--3">
+                <div className="panel">
+                  <h3>Spotify Announcer</h3>
+                  <div className="fieldlist">
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Enable Song Change Message</div>
+                        <div className="field__hint">Announce the new track in chat whenever Spotify switches songs.</div>
+                      </div>
+                      <${ToggleSwitch} checked=${settings.spotifyAnnounceEnabled} onChange=${(e) => setField("spotifyAnnounceEnabled", e.target.checked)} />
+                    </div>
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Announcement Template</div>
+                        <div className="field__hint">Placeholders: <code>{"{streamerDisplay}"}</code>, <code>{"{song}"}</code>, <code>{"{artists}"}</code>, <code>{"{track}"}</code>, <code>{"{emote}"}</code>.</div>
+                      </div>
+                      <input className="in in--sm" value=${String(settings.spotifyAnnounceTemplate || "")} onChange=${(e) => setField("spotifyAnnounceTemplate", e.target.value)} placeholder="${DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE}" />
+                    </div>
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Emote Text</div>
+                        <div className="field__hint">Optional. Enter the emote text you want around the song title.</div>
+                      </div>
+                      <input className="in in--sm" value=${String(settings.spotifyAnnounceEmote || "")} onChange=${(e) => setField("spotifyAnnounceEmote", e.target.value)} placeholder="channelJam" />
+                    </div>
+                  </div>
+                </div>
                 <div className="panel">
                   <h3>Spam Filter</h3>
                   <div className="fieldlist">

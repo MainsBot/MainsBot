@@ -38,6 +38,7 @@ export const DEFAULT_MODE_DEFINITIONS = {
 };
 
 const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
+const DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE = "{streamerDisplay} is now listening to {track}";
 
 export function normalizeModeCommand(value) {
   let out = String(value || "").trim().toLowerCase();
@@ -77,6 +78,15 @@ export function sanitizeSettingsForStorage(input = {}) {
   out.currentMode = str(out.currentMode, "!join.on");
   out.currentGame = str(out.currentGame, "Website");
   out.currentLink = out.currentLink == null ? null : str(out.currentLink, "");
+  out.spotifyAnnounceEnabled = bool(out.spotifyAnnounceEnabled, false);
+  out.spotifyAnnounceTemplate = str(
+    out.spotifyAnnounceTemplate,
+    DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE
+  );
+  if (!out.spotifyAnnounceTemplate) {
+    out.spotifyAnnounceTemplate = DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE;
+  }
+  out.spotifyAnnounceEmote = str(out.spotifyAnnounceEmote, "");
 
   out.filterExemptions = arrStr(out.filterExemptions);
   out.bots = arrStr(out.bots);

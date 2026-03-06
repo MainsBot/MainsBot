@@ -43,7 +43,11 @@ import {
 import * as PLAYTIME from "./functions/playtime.js";
 import * as SPOTIFY from "./api/spotify/index.js";
 import { getChatPerms } from "./functions/permissions.js";
-import { registerSpotifyCommands, isSpotifyModuleEnabled } from "./modules/spotifyCommands.js";
+import {
+  formatSpotifyTrackLabel,
+  registerSpotifyCommands,
+  isSpotifyModuleEnabled,
+} from "./modules/spotifyCommands.js";
 import { isGamepingModuleEnabled, registerGamepingModule } from "./modules/gameping.js";
 import { isPubsubModuleEnabled, startTwitchPubsub } from "./modules/twitchPubsub.js";
 import { isAlertsModuleEnabled, registerAlertsModule } from "./modules/alerts.js";
@@ -516,6 +520,8 @@ const DEFAULT_IGNORE_MODES = [
   "!linkfilter.off",
   "!sleep.on",
 ];
+const DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE = "{streamerDisplay} is now listening to {track}";
+const SPOTIFY_STATUS_POLL_MS = 10_000;
 
 const BUILD_INFO = getBuildInfo();
 
@@ -687,6 +693,12 @@ function withSettingsDefaults(input = {}) {
     base.currentMode = base.validModes[0] || "!join.on";
   }
 
+  base.spotifyAnnounceEnabled = Boolean(base.spotifyAnnounceEnabled);
+  base.spotifyAnnounceTemplate =
+    safeString(base.spotifyAnnounceTemplate || DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE) ||
+    DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE;
+  base.spotifyAnnounceEmote = safeString(base.spotifyAnnounceEmote || "");
+
   return base;
 }
 
@@ -754,11 +766,152 @@ function saveSettings(next) {
 let EXTERNAL_STATUS = {
   twitchLive: null,
   twitchUptime: null,
+  themeColor: null,
   roblox: { game: null, placeId: null, presenceType: null },
-  spotify: { playing: false, isPlaying: false, name: null, artists: null },
+  spotify: {
+    playing: false,
+    isPlaying: false,
+    name: null,
+    artists: null,
+    uri: null,
+    url: null,
+  },
   updatedAt: null,
   errors: {},
 };
+
+let spotifyStatusRefreshInFlight = null;
+let spotifyAnnouncePrimed = false;
+let spotifyLastObservedTrackKey = "";
+
+function createEmptySpotifyStatus() {
+  return {
+    playing: false,
+    isPlaying: false,
+    name: null,
+    artists: null,
+    uri: null,
+    url: null,
+  };
+}
+
+function getSpotifyTrackKey(snapshot = {}) {
+  const uri = String(snapshot?.uri || "").trim();
+  if (uri) return uri;
+  const name = String(snapshot?.name || "").trim().toLowerCase();
+  const artists = String(snapshot?.artists || "").trim().toLowerCase();
+  if (!name && !artists) return "";
+  return `${name}::${artists}`;
+}
+
+function renderSpotifyAnnouncementMessage(settings = {}, snapshot = {}) {
+  const template =
+    String(settings?.spotifyAnnounceTemplate || "").trim() || DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE;
+  const emote = String(settings?.spotifyAnnounceEmote || "").trim();
+  const song = String(snapshot?.name || "").trim();
+  const artists = String(snapshot?.artists || "").trim();
+  const track = formatSpotifyTrackLabel({ name: song, artists });
+
+  return template
+    .replaceAll("{streamerDisplay}", String(STREAMER_DISPLAY_NAME || CHANNEL_NAME || "Streamer"))
+    .replaceAll("{song}", song)
+    .replaceAll("{title}", song)
+    .replaceAll("{artists}", artists)
+    .replaceAll("{artist}", artists)
+    .replaceAll("{track}", track)
+    .replaceAll("{emote}", emote)
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;!?])/g, "$1")
+    .trim();
+}
+
+async function maybeAnnounceSpotifyTrack(snapshot = {}) {
+  const nextKey = getSpotifyTrackKey(snapshot);
+  if (!spotifyAnnouncePrimed) {
+    spotifyAnnouncePrimed = true;
+    spotifyLastObservedTrackKey = nextKey;
+    return;
+  }
+
+  const changed = nextKey !== spotifyLastObservedTrackKey;
+  spotifyLastObservedTrackKey = nextKey;
+
+  const settings = readSettingsFromDisk();
+  if (!settings?.spotifyAnnounceEnabled || settings?.ks) return;
+
+  const isActivelyPlaying = Boolean(snapshot?.playing && snapshot?.isPlaying);
+  if (!isActivelyPlaying || !nextKey || !changed) return;
+
+  const message = renderSpotifyAnnouncementMessage(settings, snapshot);
+  if (!message) return;
+
+  await sendPresenceHelixMessage(message, "spotify_now_playing");
+  void logActivity({
+    action: "spotify_now_playing_auto",
+    platform: "twitch",
+    detail: "Auto-announced Spotify song change",
+    meta: {
+      trackName: String(snapshot?.name || "").trim(),
+      trackArtists: String(snapshot?.artists || "").trim(),
+      trackUri: String(snapshot?.uri || "").trim(),
+      message,
+    },
+  }).catch(() => {});
+}
+
+async function refreshSpotifyExternalStatus({ announce = false } = {}) {
+  if (spotifyStatusRefreshInFlight) return spotifyStatusRefreshInFlight;
+
+  spotifyStatusRefreshInFlight = (async () => {
+    const nextSpotify = createEmptySpotifyStatus();
+    let spotifyError = "";
+
+    if (isSpotifyModuleEnabled()) {
+      try {
+        const sp = await SPOTIFY.getNowPlaying();
+        if (sp?.playing) {
+          nextSpotify.playing = true;
+          nextSpotify.isPlaying = !!sp.isPlaying;
+          nextSpotify.name = sp.name ?? null;
+          nextSpotify.artists = sp.artists ?? null;
+          nextSpotify.uri = sp.uri ?? null;
+          nextSpotify.url = sp.url ?? null;
+        }
+      } catch (e) {
+        spotifyError = String(e?.message || e);
+      }
+    }
+
+    const nextErrors = {
+      ...(EXTERNAL_STATUS?.errors && typeof EXTERNAL_STATUS.errors === "object"
+        ? EXTERNAL_STATUS.errors
+        : {}),
+    };
+    if (spotifyError) nextErrors.spotify = spotifyError;
+    else delete nextErrors.spotify;
+
+    EXTERNAL_STATUS = {
+      ...EXTERNAL_STATUS,
+      spotify: nextSpotify,
+      errors: nextErrors,
+      updatedAt: Date.now(),
+    };
+
+    if (!announce) {
+      spotifyAnnouncePrimed = true;
+      spotifyLastObservedTrackKey = getSpotifyTrackKey(nextSpotify);
+      return;
+    }
+
+    await maybeAnnounceSpotifyTrack(nextSpotify);
+  })();
+
+  try {
+    await spotifyStatusRefreshInFlight;
+  } finally {
+    spotifyStatusRefreshInFlight = null;
+  }
+}
 
 function readSettingsSnapshot() {
   try {
@@ -796,13 +949,22 @@ startSettingsWatcher({
 });
 
 async function refreshExternalStatus() {
+  const previousStatus =
+    EXTERNAL_STATUS && typeof EXTERNAL_STATUS === "object" ? EXTERNAL_STATUS : {};
   const next = {
     twitchLive: null,
     twitchUptime: null,
+    themeColor: String(previousStatus?.themeColor || "").trim() || null,
     roblox: { game: null, placeId: null, presenceType: null },
-    spotify: { playing: false, isPlaying: false, name: null, artists: null },
+    spotify:
+      previousStatus?.spotify && typeof previousStatus.spotify === "object"
+        ? { ...createEmptySpotifyStatus(), ...previousStatus.spotify }
+        : createEmptySpotifyStatus(),
     updatedAt: null,
-    errors: {},
+    errors:
+      previousStatus?.errors && typeof previousStatus.errors === "object"
+        ? { ...previousStatus.errors }
+        : {},
   };
 
   try {
@@ -830,6 +992,14 @@ async function refreshExternalStatus() {
   }
 
   try {
+    const color = await TWITCH_FUNCTIONS.getUserChatColor({
+      userId: CHANNEL_ID,
+      preferredRole: "streamer",
+    });
+    next.themeColor = String(color || "").trim().toUpperCase() || null;
+  } catch {}
+
+  try {
     const linkedRobloxUserId = getTrackedRobloxUserId();
     if (linkedRobloxUserId) {
       const p = await ROBLOX_FUNCTIONS.getPresence(linkedRobloxUserId);
@@ -844,28 +1014,16 @@ async function refreshExternalStatus() {
     next.errors.roblox = String(e?.message || e);
   }
 
-  if (isSpotifyModuleEnabled()) {
-    try {
-      const sp = await SPOTIFY.getNowPlaying();
-      if (sp?.playing) {
-        next.spotify = {
-          playing: true,
-          isPlaying: !!sp.isPlaying,
-          name: sp.name ?? null,
-          artists: sp.artists ?? null,
-        };
-      }
-    } catch (e) {
-      next.errors.spotify = String(e?.message || e);
-    }
-  }
-
   next.updatedAt = Date.now();
   EXTERNAL_STATUS = next;
 }
 
 refreshExternalStatus();
+void refreshSpotifyExternalStatus({ announce: false });
 setInterval(refreshExternalStatus, 30000);
+setInterval(() => {
+  void refreshSpotifyExternalStatus({ announce: true });
+}, SPOTIFY_STATUS_POLL_MS);
 
 var commandsList = ["!join", "!link", "!ticket", "!1v1"];
 
@@ -3099,9 +3257,13 @@ function getStatusSnapshot() {
   return {
     ...BOT_STATUS,
     instance: INSTANCE_NAME,
+    botName: BOT_NAME || null,
+    botDisplayName: BOT_NAME || null,
     channelName: CHANNEL_NAME || null,
     channelDisplayName: STREAMER_DISPLAY_NAME,
     webPublicUrl: WEB_PUBLIC_URL || null,
+    themeColor: EXTERNAL_STATUS.themeColor || null,
+    twitchThemeColor: EXTERNAL_STATUS.themeColor || null,
     build: BUILD_INFO,
     ks: settings?.ks ?? BOT_STATUS.ks,
     currentMode: settings?.currentMode ?? BOT_STATUS.currentMode,

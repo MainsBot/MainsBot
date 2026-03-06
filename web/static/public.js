@@ -6,9 +6,12 @@ const els = {
   themeToggle: $("themeToggle"),
   adminLinkSlot: $("topbarAdminLink"),
   right: document.querySelector(".topbar__right"),
+  heroBotName: $("heroBotName"),
+  heroBotLogin: $("heroBotLogin"),
   heroChannelName: $("heroChannelName"),
-  liveDot: $("homeLiveDot"),
-  liveText: $("homeLiveText"),
+  heroChannelLogin: $("heroChannelLogin"),
+  bot: $("homeBot"),
+  channel: $("homeChannel"),
   twitch: $("homeTwitch"),
   roblox: $("homeRoblox"),
   spotify: $("homeSpotify"),
@@ -127,12 +130,18 @@ function updateFromStatus(status) {
       : `MainsBot - ${channelLabel}`;
   }
 
-  const live = s.twitchLive === true;
-  if (els.liveDot) {
-    els.liveDot.className = `live-dot ${live ? "live-dot--on" : "live-dot--off"}`;
+  const botLabel = String(s.botDisplayName || s.botName || "").trim();
+  const botLogin = String(s.botName || "").trim();
+  if (botLabel) setText(els.heroBotName, botLabel);
+  if (botLogin) {
+    setText(els.heroBotLogin, botLogin);
+    setText(els.bot, botLogin);
   }
-  if (els.liveText) {
-    setText(els.liveText, live ? "Live" : "Offline");
+
+  const channelLogin = String(s.channelName || "").trim();
+  if (channelLogin) {
+    setText(els.heroChannelLogin, channelLogin);
+    setText(els.channel, channelLogin);
   }
 
   let twitchText = s.twitchLive === true ? "Live" : s.twitchLive === false ? "Offline" : "-";
@@ -186,7 +195,7 @@ function updateFromStatus(status) {
           build.commit || "unknown"
         )}${build.dirty ? " (dirty)" : ""}`
       : "";
-    const left = url || channelLabel || "MainsBot";
+    const left = url || channelLabel || botLogin || "MainsBot";
     setText(els.footer, buildText ? `${left} • ${buildText}` : left);
   }
 

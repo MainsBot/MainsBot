@@ -32,7 +32,7 @@ export function isSpotifyModuleEnabled() {
   return true;
 }
 
-function cleanSpotifyTrackTitle(name) {
+export function cleanSpotifyTrackTitle(name) {
   let title = String(name || "").trim();
   if (!title) return "";
 
@@ -50,7 +50,7 @@ function cleanSpotifyTrackTitle(name) {
   return title;
 }
 
-function formatSpotifyTrackLabel(track) {
+export function formatSpotifyTrackLabel(track) {
   const rawName = String(track?.name || "").trim();
   const cleanName = cleanSpotifyTrackTitle(rawName) || rawName || "Unknown Track";
   const artists = String(track?.artists || "").trim();

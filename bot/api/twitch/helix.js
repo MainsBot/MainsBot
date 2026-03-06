@@ -816,6 +816,8 @@ export async function listChannelModerators({
 
 const helixUserIdCache = new Map();
 const HELIX_USER_ID_TTL_MS = 60 * 60 * 1000;
+const helixUserChatColorCache = new Map();
+const HELIX_USER_CHAT_COLOR_TTL_MS = 30 * 60 * 1000;
 
 async function getHelixUserIdByLogin({ login, auth, preferredRole } = {}) {
   const normalized = normalizeTwitchLogin(login);
@@ -847,6 +849,95 @@ async function getHelixUserIdByLogin({ login, auth, preferredRole } = {}) {
   const userId = String(json?.data?.[0]?.id || "").trim() || null;
   helixUserIdCache.set(normalized, { userId, expiresAt: Date.now() + HELIX_USER_ID_TTL_MS });
   return userId;
+}
+
+async function resolveHelixReadAuth({
+  preferredRole = "auto",
+  requiredScopes = [],
+} = {}) {
+  const userAuth = await resolveHelixModeratorAuth({
+    preferred: preferredRole,
+    requiredScopes,
+  }).catch(() => null);
+  if (userAuth?.accessToken && userAuth?.clientId) {
+    return {
+      clientId: String(userAuth.clientId || "").trim(),
+      accessToken: String(userAuth.accessToken || "").trim(),
+      mode: `user_${String(userAuth.role || preferredRole || "auto").trim() || "auto"}`,
+    };
+  }
+
+  const clientId = String(CLIENT_ID || MAINS_BOT_CLIENT_ID || "").trim();
+  const clientSecret = String(CLIENT_SECRET || "").trim();
+  if (!clientId) return null;
+
+  if (hasValidCachedAppToken(clientId)) {
+    return {
+      clientId,
+      accessToken: String(helixAppTokenCache.token || "").trim(),
+      mode: "app_cached",
+    };
+  }
+
+  if (clientSecret) {
+    try {
+      const token = await requestAppAccessToken({ clientId, clientSecret });
+      return {
+        clientId,
+        accessToken: token,
+        mode: "app_client_credentials",
+      };
+    } catch {}
+  }
+
+  const staticAppToken = getStaticAppAccessToken();
+  if (staticAppToken) {
+    return {
+      clientId,
+      accessToken: staticAppToken,
+      mode: "app_static",
+    };
+  }
+
+  return null;
+}
+
+export async function getUserChatColor({
+  userId,
+  preferredRole = "auto",
+} = {}) {
+  const targetUserId = String(userId || "").trim();
+  if (!targetUserId) return "";
+
+  const cached = helixUserChatColorCache.get(targetUserId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return String(cached.color || "").trim().toUpperCase();
+  }
+
+  const auth = await resolveHelixReadAuth({
+    preferredRole,
+    requiredScopes: [],
+  });
+  if (!auth?.clientId || !auth?.accessToken) return "";
+
+  try {
+    const url = new URL("https://api.twitch.tv/helix/chat/color");
+    url.searchParams.set("user_id", targetUserId);
+    const json = await fetchHelixJson({
+      url: url.toString(),
+      method: "GET",
+      clientId: auth.clientId,
+      accessToken: auth.accessToken,
+    });
+    const color = String(json?.data?.[0]?.color || "").trim().toUpperCase();
+    helixUserChatColorCache.set(targetUserId, {
+      color,
+      expiresAt: Date.now() + HELIX_USER_CHAT_COLOR_TTL_MS,
+    });
+    return color;
+  } catch {
+    return "";
+  }
 }
 
 export async function updateChatSettings(patch = {}, { preferredRole = "auto" } = {}) {
