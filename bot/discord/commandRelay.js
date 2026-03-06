@@ -1,6 +1,4 @@
-import discordPkg from "discord.js";
-
-const { GatewayIntentBits, PermissionsBitField } = discordPkg;
+import { GatewayIntentBits, PermissionsBitField } from "./compat.js";
 
 function flagFromValue(value) {
   return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());

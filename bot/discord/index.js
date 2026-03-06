@@ -1,15 +1,13 @@
-import discordPkg from "discord.js";
 import { createDiscordMessenger } from "./messenger.js";
 import { getDiscordCommandRelayIntents, registerDiscordCommandRelay } from "./commandRelay.js";
-import { getRoleAccessToken, TWITCH_ROLES } from "../api/twitch/auth.js";
-
-const {
-  WebhookClient,
-  EmbedBuilder,
+import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-} = discordPkg;
+  createWebhookClientFromUrl,
+  EmbedBuilder,
+} from "./compat.js";
+import { getRoleAccessToken, TWITCH_ROLES } from "../api/twitch/auth.js";
 
 function readEnvString(name) {
   return String(process.env[name] || "").trim();
@@ -288,7 +286,7 @@ async function resolveDiscordIdentityForAudit({
 
 export function initDiscord({ logger = console } = {}) {
   const webhookUrl = readEnvString("DISCORD_WEBHOOK_URL");
-  const webhookClient = webhookUrl ? new WebhookClient({ url: webhookUrl }) : null;
+  const webhookClient = createWebhookClientFromUrl(webhookUrl);
 
   const commandsEnabled = flagFromValue(readEnvString("DISCORD_COMMANDS_ENABLED") || "0");
   const discordMessenger = createDiscordMessenger({

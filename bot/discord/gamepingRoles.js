@@ -1,8 +1,6 @@
 import fs from "fs";
 import path from "path";
-import discordPkg from "discord.js";
-
-const { Client, GatewayIntentBits } = discordPkg;
+import { Client, GatewayIntentBits } from "./compat.js";
 
 function flagFromValue(value) {
   return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());

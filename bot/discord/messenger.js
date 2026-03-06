@@ -1,6 +1,4 @@
-import discordPkg from "discord.js";
-
-const { Client, GatewayIntentBits } = discordPkg;
+import { Client, GatewayIntentBits } from "./compat.js";
 
 export function createDiscordMessenger({ token, intents, logger = console } = {}) {
   const botToken = String(token || "").trim();
