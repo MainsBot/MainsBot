@@ -37,6 +37,8 @@ export const DEFAULT_MODE_DEFINITIONS = {
   },
 };
 
+const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
+
 export function normalizeModeCommand(value) {
   let out = String(value || "").trim().toLowerCase();
   if (!out) return "";
@@ -80,6 +82,11 @@ export function sanitizeSettingsForStorage(input = {}) {
   out.bots = arrStr(out.bots);
   out.joinTimer = bool(out.joinTimer, true);
   out.gamesPlayedCount = int(out.gamesPlayedCount, 5);
+  out.autoFocOffEnabled = bool(out.autoFocOffEnabled, true);
+  out.autoFocOffDelayMs = Math.max(
+    MIN_AUTO_FOC_OFF_DELAY_MS,
+    int(out.autoFocOffDelayMs, MIN_AUTO_FOC_OFF_DELAY_MS)
+  );
 
   out.timer = obj(out.timer, {});
   out.main = obj(out.main, {});

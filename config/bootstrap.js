@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { randomBytes } from "crypto";
 import { readIniFile } from "./ini.js";
 
 const APP_ENV_PREFIXES_TO_CLEAR = [
@@ -129,6 +130,41 @@ function setEnvOverride(key, value) {
   if (!key) return;
   if (value == null) return;
   process.env[key] = String(value);
+}
+
+function shouldAutoGenerateCookieSecret(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return true;
+  if (normalized === "change_me_to_a_long_random_string") return true;
+  if (/^auto$/i.test(normalized)) return true;
+  return false;
+}
+
+function ensureGeneratedWebCookieSecret() {
+  const current = String(process.env.WEB_COOKIE_SECRET || "").trim();
+  if (!shouldAutoGenerateCookieSecret(current)) return;
+
+  const dataDir = String(process.env.DATA_DIR || "").trim();
+  if (!dataDir) return;
+
+  const secretsDir = path.join(dataDir, "secrets");
+  const secretPath = path.join(secretsDir, "web_cookie_secret.txt");
+  ensureDir(secretsDir);
+
+  let secret = "";
+  try {
+    if (fs.existsSync(secretPath)) {
+      secret = String(fs.readFileSync(secretPath, "utf8") || "").trim();
+    }
+  } catch {}
+
+  if (!secret) {
+    secret = randomBytes(48).toString("hex");
+    fs.writeFileSync(secretPath, `${secret}\n`, "utf8");
+  }
+
+  setEnvOverride("WEB_COOKIE_SECRET", secret);
+  setEnvOverride("WEB_COOKIE_SECRET_PATH", secretPath);
 }
 
 function applyEnvSection(ini) {
@@ -837,6 +873,8 @@ export async function bootstrapConfig() {
       applySecretsJson(secrets);
       setEnvOverride("SECRETS_PATH", asAbs(secretsPath));
     }
+
+    ensureGeneratedWebCookieSecret();
 
     seedInstanceStateFiles();
 

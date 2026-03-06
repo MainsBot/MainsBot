@@ -1623,6 +1623,12 @@ async function logHandler(
 
 async function customModFunctions(client, message, twitchUsername, userstate) {
   var messageArray = ([] = message.toLowerCase().split(" "));
+  const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
+  const normalizeAutoFocOffDelayMs = (value, fallback = MIN_AUTO_FOC_OFF_DELAY_MS) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return fallback;
+    return Math.max(MIN_AUTO_FOC_OFF_DELAY_MS, Math.floor(n));
+  };
 
   const reply = (text) =>
     client.raw(
@@ -1649,10 +1655,10 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
 
   if (trimmedMessage.toLowerCase() === "!autofoc") {
     const enabled = SETTINGS?.autoFocOffEnabled !== false;
-    const delayMsRaw = Number(SETTINGS?.autoFocOffDelayMs);
-    const delayMs = Number.isFinite(delayMsRaw) && delayMsRaw >= 0
-      ? Math.floor(delayMsRaw)
-      : Math.max(0, Number(process.env.WAIT_UNTIL_FOC_OFF) || 0);
+    const delayMs = normalizeAutoFocOffDelayMs(
+      SETTINGS?.autoFocOffDelayMs,
+      normalizeAutoFocOffDelayMs(process.env.WAIT_UNTIL_FOC_OFF)
+    );
     return reply(
       `Auto FOC OFF: ${enabled ? "ON" : "OFF"} | Delay: ${Math.round(
         delayMs / 1000
@@ -1674,7 +1680,9 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
 
   if (trimmedMessage.toLowerCase().startsWith("!autofoc.interval")) {
     const raw = trimmedMessage.slice("!autofoc.interval".length).trim();
-    const delayMs = parseIntervalMs(raw);
+    const delayMsParsed = parseIntervalMs(raw);
+    const delayMs =
+      delayMsParsed == null ? null : normalizeAutoFocOffDelayMs(delayMsParsed);
     if (delayMs == null) {
       return reply("Usage: !autofoc.interval <number>[ms|s|m] (default unit: seconds)");
     }

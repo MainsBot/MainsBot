@@ -38,6 +38,14 @@ function normalizeEventType(value) {
     .replace(/[-.\s]+/g, "_");
 }
 
+const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
+
+function normalizeAutoFocOffDelayMs(value, fallback = MIN_AUTO_FOC_OFF_DELAY_MS) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.max(MIN_AUTO_FOC_OFF_DELAY_MS, Math.floor(n));
+}
+
 export function isPubsubModuleEnabled() {
   const raw = String(process.env.MODULE_PUBSUB ?? "").trim();
   if (raw) return flagFromValue(raw);
@@ -78,7 +86,7 @@ export function startTwitchPubsub({
   const SETTINGS_PATH = settingsPath;
   const STREAMS_PATH = streamsPath;
 
-  const WAIT_UNTIL_FOC_OFF = Math.max(0, Number(process.env.WAIT_UNTIL_FOC_OFF) || 0);
+  const WAIT_UNTIL_FOC_OFF = normalizeAutoFocOffDelayMs(process.env.WAIT_UNTIL_FOC_OFF);
   const WAIT_UNTIL_FOC_OFF_RAID = Math.max(0, Number(process.env.WAIT_UNTIL_FOC_OFF_RAID) || 0);
   const POLL_FALLBACK_ENABLED = flagFromValue(
     process.env.POLL_FALLBACK_ENABLED ?? "1"
@@ -677,11 +685,10 @@ var StartListener = function () {
         const followData = messageData?.data || {};
         const followChange = followData.moderation_action;
         const autoFocEnabled = SETTINGS?.autoFocOffEnabled !== false;
-        const autoFocDelayMsRaw = Number(SETTINGS?.autoFocOffDelayMs);
-        const autoFocDelayMs =
-          Number.isFinite(autoFocDelayMsRaw) && autoFocDelayMsRaw >= 0
-            ? Math.floor(autoFocDelayMsRaw)
-            : WAIT_UNTIL_FOC_OFF;
+        const autoFocDelayMs = normalizeAutoFocOffDelayMs(
+          SETTINGS?.autoFocOffDelayMs,
+          WAIT_UNTIL_FOC_OFF
+        );
 
         if (followChange == "followers") {
           // follow only mode gets enabled
@@ -692,6 +699,9 @@ var StartListener = function () {
             if (!autoFocEnabled) {
               logger.log("[pubsub] auto FOC OFF disabled; leaving followers-only enabled");
             } else {
+              logger.log?.(
+                `[pubsub] auto FOC OFF waiting ${Math.round(autoFocDelayMs / 1000)}s before disabling followers-only`
+              );
               await delay(autoFocDelayMs);
               await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, { preferredRole: "bot" }).catch((e) => {
                 console.warn(

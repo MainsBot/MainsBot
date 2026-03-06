@@ -6532,6 +6532,11 @@ if (wantSocket && !WEB_SOCKET_PATH) {
   console.warn("[WEB] WEB_LISTEN=socket but WEB_SOCKET_PATH is empty; falling back to tcp.");
 }
 
+console.log(
+  `[WEB] listen mode=${effectiveListenMode} local_testing=${isLocalTesting ? "1" : "0"} ` +
+    `socket=${WEB_SOCKET_PATH || "(none)"} host=${WEB_HOST} port=${WEB_PORT}`
+);
+
 webServer.on("error", (err) => {
   const code = String(err?.code || "");
   if (code === "EADDRINUSE") {
