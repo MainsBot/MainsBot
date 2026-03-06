@@ -388,6 +388,45 @@ function ToggleSwitch({ checked, onChange }) {
   `;
 }
 
+function renderFatalPanel(error, context = "Admin dashboard") {
+  const message = String(error?.message || error || "Unknown error").trim() || "Unknown error";
+  const stack = String(error?.stack || "").trim();
+  return html`
+    <div className="panel">
+      <h2>${context} failed</h2>
+      <div className="meta" style=${{ marginTop: "8px" }}>
+        ${message}
+      </div>
+      ${stack
+        ? html`
+            <details className="details">
+              <summary>Stack trace</summary>
+              <pre className="status-json-wrap" style=${{ marginTop: "10px" }}><code>${stack}</code></pre>
+            </details>
+          `
+        : null}
+    </div>
+  `;
+}
+
+function renderBootFatal(rootEl, error, context = "Admin boot") {
+  if (!rootEl) return;
+  const message = String(error?.message || error || "Unknown error").trim() || "Unknown error";
+  const stack = String(error?.stack || "").trim();
+  rootEl.className = "";
+  rootEl.innerHTML = `
+    <div class="panel">
+      <h2>${escapeHtml(context)} failed</h2>
+      <div class="meta" style="margin-top:8px">${escapeHtml(message)}</div>
+      ${
+        stack
+          ? `<details class="details"><summary>Stack trace</summary><pre class="status-json-wrap" style="margin-top:10px"><code>${escapeHtml(stack)}</code></pre></details>`
+          : ""
+      }
+    </div>
+  `;
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("home");
@@ -1019,40 +1058,41 @@ function App() {
     void loadChannelPoints({ days: pointsDays, limitUsers: 300 });
   }, [view, canViewPointsDashboard, pointsDays]);
 
-  if (loading) {
-    return html`<div className="muted">Loading dashboard...</div>`;
-  }
+  try {
+    if (loading) {
+      return html`<div className="muted">Loading dashboard...</div>`;
+    }
 
-  if (!settings) {
-    return html`<div className="muted">Failed to load settings.</div>`;
-  }
+    if (!settings) {
+      return html`<div className="muted">Failed to load settings.</div>`;
+    }
 
-  const twitchBotConnected = isOAuthConnected(auth?.bot);
-  const twitchStreamerConnected = isOAuthConnected(auth?.streamer);
-  const twitchBotMissingScopes = getMissingScopes(auth?.bot?.scopes, REQUIRED_BOT_SCOPES);
-  const twitchStreamerMissingScopes = getMissingScopes(
-    auth?.streamer?.scopes,
-    REQUIRED_STREAMER_SCOPES
-  );
-  const spotifyConnected = Boolean(
-    auth?.spotify?.hasRefreshToken || auth?.spotify?.hasAccessToken
-  );
-  const robloxConnected = isOAuthConnected(auth?.roblox?.bot);
-  const spotifyReady = Boolean(
-    auth?.spotify?.hasClientId &&
-      auth?.spotify?.hasClientSecret &&
-      (auth?.spotify?.hasRefreshToken || auth?.spotify?.hasAccessToken)
-  );
-  const robloxReady = Boolean(robloxConnected);
-  const tokenCoverageReady =
-    twitchBotConnected &&
-    twitchStreamerConnected &&
-    !twitchBotMissingScopes.length &&
-    !twitchStreamerMissingScopes.length &&
-    spotifyReady &&
-    robloxReady;
+    const twitchBotConnected = isOAuthConnected(auth?.bot);
+    const twitchStreamerConnected = isOAuthConnected(auth?.streamer);
+    const twitchBotMissingScopes = getMissingScopes(auth?.bot?.scopes, REQUIRED_BOT_SCOPES);
+    const twitchStreamerMissingScopes = getMissingScopes(
+      auth?.streamer?.scopes,
+      REQUIRED_STREAMER_SCOPES
+    );
+    const spotifyConnected = Boolean(
+      auth?.spotify?.hasRefreshToken || auth?.spotify?.hasAccessToken
+    );
+    const robloxConnected = isOAuthConnected(auth?.roblox?.bot);
+    const spotifyReady = Boolean(
+      auth?.spotify?.hasClientId &&
+        auth?.spotify?.hasClientSecret &&
+        (auth?.spotify?.hasRefreshToken || auth?.spotify?.hasAccessToken)
+    );
+    const robloxReady = Boolean(robloxConnected);
+    const tokenCoverageReady =
+      twitchBotConnected &&
+      twitchStreamerConnected &&
+      !twitchBotMissingScopes.length &&
+      !twitchStreamerMissingScopes.length &&
+      spotifyReady &&
+      robloxReady;
 
-  return html`
+    return html`
     <div className="grid">
       <div className="panel">
         <div className="panel__top">
@@ -1714,11 +1754,30 @@ function App() {
           `}
     </div>
   `;
+  } catch (error) {
+    console.error("[admin] render failed:", error);
+    return renderFatalPanel(error, "Admin dashboard");
+  }
 }
 
 initTopbarSession();
 
 const rootEl = document.getElementById("adminRoot");
 if (rootEl) {
-  createRoot(rootEl).render(html`<${App} />`);
+  window.addEventListener("error", (event) => {
+    if (!event?.error) return;
+    console.error("[admin] window error:", event.error);
+    renderBootFatal(rootEl, event.error, "Admin runtime");
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason || new Error("Unhandled promise rejection");
+    console.error("[admin] unhandled rejection:", reason);
+    renderBootFatal(rootEl, reason, "Admin runtime");
+  });
+  try {
+    createRoot(rootEl).render(html`<${App} />`);
+  } catch (error) {
+    console.error("[admin] boot failed:", error);
+    renderBootFatal(rootEl, error, "Admin boot");
+  }
 }
