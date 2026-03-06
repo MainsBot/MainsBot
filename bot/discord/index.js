@@ -1,13 +1,15 @@
-import {
+import discordPkg from "discord.js";
+import { createDiscordMessenger } from "./messenger.js";
+import { getDiscordCommandRelayIntents, registerDiscordCommandRelay } from "./commandRelay.js";
+import { getRoleAccessToken, TWITCH_ROLES } from "../api/twitch/auth.js";
+
+const {
   WebhookClient,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-} from "discord.js";
-import { createDiscordMessenger } from "./messenger.js";
-import { getDiscordCommandRelayIntents, registerDiscordCommandRelay } from "./commandRelay.js";
-import { getRoleAccessToken, TWITCH_ROLES } from "../api/twitch/auth.js";
+} = discordPkg;
 
 function readEnvString(name) {
   return String(process.env[name] || "").trim();

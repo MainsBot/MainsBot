@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
-import { Client, GatewayIntentBits } from "discord.js";
+import discordPkg from "discord.js";
+
+const { Client, GatewayIntentBits } = discordPkg;
 
 function flagFromValue(value) {
   return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
@@ -174,4 +176,3 @@ export async function ensureGamepingRolesDump({ logger = console } = {}) {
     } catch {}
   }
 }
-
