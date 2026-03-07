@@ -182,6 +182,10 @@ const setClass = (el, v) => {
 const NO_ERROR_EMOTE_URL =
   "https://cdn.betterttv.net/emote/5e74e336d6581c3724c0d49d/3x.webp";
 
+function getThemeToggleMarkup() {
+  return `<button class="btn btn--sm btn--ghost theme-toggle" id="themeToggle" type="button">Light</button>`;
+}
+
 function setLastErrorDisplay(lastError) {
   if (!els.lastErr) return;
 
@@ -212,22 +216,26 @@ function renderTopbarSession(session) {
     }
     right.innerHTML = `
       <div class="row" style="justify-content:flex-end">
+        ${getThemeToggleMarkup()}
         <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
         <span class="muted" style="font-size:13px">Logged in as</span>
         <strong>${escapeHtml(login)}</strong>
         <a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a>
       </div>
     `;
+    initThemeToggle();
     return;
   }
 
   if (adminLinkSlot) adminLinkSlot.innerHTML = "";
   right.innerHTML = `
     <div class="row" style="justify-content:flex-end">
+      ${getThemeToggleMarkup()}
       <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
       <a class="btn btn--sm" href="/admin/login">Login</a>
     </div>
   `;
+  initThemeToggle();
 }
 
 async function initTopbarSession() {
@@ -245,6 +253,7 @@ async function initTopbarSession() {
    ========================= */
 
 function initThemeToggle() {
+  els.themeToggle = $("themeToggle");
   if (!els.themeToggle) return;
 
   const setThemeLabel = () => {

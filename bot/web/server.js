@@ -67,6 +67,12 @@ import {
   sanitizeSettingsForStorage,
   createAdminRenderers,
 } from "./admin/index.js";
+import {
+  countHiddenWebsiteKeywordCategories,
+  getWebsiteKeywordCatalog,
+  mergeWebsiteKeywordsForStorage,
+  projectKeywordsForWebsite,
+} from "../keywords/websiteCatalog.js";
 import { resolveInstanceName } from "../functions/instance.js";
 import { getDefaultCommandsCatalog } from "./defaultCommandsCatalog.js";
 import { renderPajbotTemplate } from "../functions/pajbotTemplate.js";
@@ -4526,13 +4532,16 @@ const webServer = http.createServer(async (req, res) => {
     if (method === "GET") {
       try {
         const fromDeps = getKeywordsSnapshotFromDeps();
+        const keywordsSource = fromDeps || {};
         if (fromDeps) {
           return sendJsonResponse(
             res,
             200,
             {
               ok: true,
-              keywords: fromDeps,
+              keywords: projectKeywordsForWebsite(keywordsSource),
+              catalog: getWebsiteKeywordCatalog(),
+              hiddenCategoryCount: countHiddenWebsiteKeywordCategories(keywordsSource),
               backend: "postgres",
             },
             { "cache-control": "no-store" }
@@ -4550,7 +4559,9 @@ const webServer = http.createServer(async (req, res) => {
           200,
           {
             ok: true,
-            keywords,
+            keywords: projectKeywordsForWebsite(keywords),
+            catalog: getWebsiteKeywordCatalog(),
+            hiddenCategoryCount: countHiddenWebsiteKeywordCategories(keywords),
             backend: "file",
           },
           { "cache-control": "no-store" }
@@ -4579,40 +4590,65 @@ const webServer = http.createServer(async (req, res) => {
         }
 
         const normalized = normalizeKeywordsObject(rawKeywords);
-        validateKeywordsForStorageOrThrow(normalized);
         const fromDeps = getKeywordsSnapshotFromDeps();
+        let existingKeywords = fromDeps || {};
+
+        if (!fromDeps) {
+          try {
+            const raw = fs.readFileSync(WORDS_FILE_PATH, "utf8");
+            existingKeywords = normalizeKeywordsObject(safeJsonParse(raw, {}));
+          } catch {
+            existingKeywords = {};
+          }
+        }
+
+        const merged = mergeWebsiteKeywordsForStorage(existingKeywords, normalized);
+        const projected = projectKeywordsForWebsite(merged);
+        validateKeywordsForStorageOrThrow(merged);
 
         if (fromDeps) {
-          const saved = await saveKeywordsSnapshotFromDeps(normalized);
+          const saved = await saveKeywordsSnapshotFromDeps(merged);
           queueActivityLog({
             action: "admin_save_keywords",
             source: "web",
             actor: getActivityActor(adminSession),
             detail: "Updated keyword categories",
-            meta: { categories: Object.keys(saved || {}).length },
+            meta: { categories: Object.keys(projectKeywordsForWebsite(saved || {})).length },
           });
           return sendJsonResponse(
             res,
             200,
-            { ok: true, keywords: saved, backend: "postgres" },
+            {
+              ok: true,
+              keywords: projectKeywordsForWebsite(saved),
+              catalog: getWebsiteKeywordCatalog(),
+              hiddenCategoryCount: countHiddenWebsiteKeywordCategories(saved),
+              backend: "postgres",
+            },
             { "cache-control": "no-store" }
           );
         }
 
         fs.mkdirSync(path.dirname(WORDS_FILE_PATH), { recursive: true });
-        fs.writeFileSync(WORDS_FILE_PATH, JSON.stringify(normalized, null, 2), "utf8");
+        fs.writeFileSync(WORDS_FILE_PATH, JSON.stringify(merged, null, 2), "utf8");
         queueActivityLog({
           action: "admin_save_keywords",
           source: "web",
           actor: getActivityActor(adminSession),
           detail: "Updated keyword categories",
-          meta: { categories: Object.keys(normalized || {}).length },
+          meta: { categories: Object.keys(projected || {}).length },
         });
 
         return sendJsonResponse(
           res,
           200,
-          { ok: true, keywords: normalized, backend: "file" },
+          {
+            ok: true,
+            keywords: projected,
+            catalog: getWebsiteKeywordCatalog(),
+            hiddenCategoryCount: countHiddenWebsiteKeywordCategories(merged),
+            backend: "file",
+          },
           { "cache-control": "no-store" }
         );
       } catch (e) {

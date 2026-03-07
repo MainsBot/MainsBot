@@ -397,6 +397,10 @@ function initThemeToggle() {
   });
 }
 
+function getThemeToggleMarkup() {
+  return `<button class="btn btn--sm btn--ghost theme-toggle" id="themeToggle" type="button">Light</button>`;
+}
+
 async function initStreamerTheme() {
   try {
     const res = await fetch("/api/status", {
@@ -418,21 +422,25 @@ async function initTopbarSession() {
     if (session?.allowed && login) {
       right.innerHTML = `
         <div class="row" style="justify-content:flex-end">
+          ${getThemeToggleMarkup()}
           <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
           <span class="muted" style="font-size:13px">Logged in as</span>
           <strong>${escapeHtml(login)}</strong>
           <a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a>
         </div>
       `;
+      initThemeToggle();
       return;
     }
   } catch {}
   right.innerHTML = `
     <div class="row" style="justify-content:flex-end">
+      ${getThemeToggleMarkup()}
       <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
       <a class="btn btn--sm" href="/admin/login">Login</a>
     </div>
   `;
+  initThemeToggle();
 }
 
 function ToggleSwitch({ checked, onChange, disabled = false }) {

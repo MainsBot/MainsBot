@@ -5,8 +5,6 @@ import { applyStreamerThemeFromStatus } from "/static/theme.js";
 
 const html = htm.bind(React.createElement);
 
-let keywordRowSeq = 0;
-
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => {
     if (ch === "&") return "&amp;";
@@ -17,16 +15,15 @@ function escapeHtml(value) {
   });
 }
 
-function makeKeywordRowId() {
-  keywordRowSeq += 1;
-  return `kw:${Date.now()}:${keywordRowSeq}`;
-}
-
 function parsePhraseList(value) {
-  return String(value || "")
-    .split(/[,\n]+/)
-    .map((item) => String(item || "").trim().toLowerCase())
-    .filter(Boolean);
+  return Array.from(
+    new Set(
+      String(value || "")
+        .split(/[,\n]+/)
+        .map((item) => String(item || "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
 }
 
 function normalizeKeywords(raw) {
@@ -43,14 +40,13 @@ function normalizeKeywords(raw) {
         ? rawValue.phrases
         : [];
 
-    const seen = new Set();
-    const phrases = [];
-    for (const phraseRaw of sourcePhrases) {
-      const phrase = String(phraseRaw || "").trim().toLowerCase();
-      if (!phrase || seen.has(phrase)) continue;
-      seen.add(phrase);
-      phrases.push(phrase);
-    }
+    const phrases = Array.from(
+      new Set(
+        sourcePhrases
+          .map((phraseRaw) => String(phraseRaw || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
 
     const response =
       rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)
@@ -64,16 +60,52 @@ function normalizeKeywords(raw) {
   return out;
 }
 
-function rowsFromKeywords(raw) {
-  const normalized = normalizeKeywords(raw);
-  return Object.entries(normalized)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, entry]) => ({
-      id: makeKeywordRowId(),
+function normalizeCatalog(rawCatalog) {
+  const list = Array.isArray(rawCatalog) ? rawCatalog : [];
+  const out = [];
+  const seen = new Set();
+
+  for (const item of list) {
+    const key = String(item?.key || "").trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
       key,
+      responseEditable: item?.responseEditable !== false,
+      responseLockReason: String(item?.responseLockReason || "").trim(),
+    });
+  }
+
+  return out;
+}
+
+function filterSupportedKeywords(rawKeywords, catalog = []) {
+  const supported = new Set((Array.isArray(catalog) ? catalog : []).map((item) => item.key));
+  const normalized = normalizeKeywords(rawKeywords);
+  const out = {};
+
+  for (const [key, entry] of Object.entries(normalized)) {
+    if (!supported.has(key)) continue;
+    out[key] = entry;
+  }
+
+  return out;
+}
+
+function rowsFromCatalog(catalog = [], rawKeywords = {}) {
+  const normalized = normalizeKeywords(rawKeywords);
+  return (Array.isArray(catalog) ? catalog : []).map((item, index) => {
+    const entry = normalized[item.key] || { phrases: [], response: "" };
+    return {
+      id: `kw:${item.key}`,
+      key: item.key,
+      order: index,
+      responseEditable: item.responseEditable !== false,
+      responseLockReason: String(item.responseLockReason || "").trim(),
       phrasesText: Array.isArray(entry?.phrases) ? entry.phrases.join(", ") : "",
-      response: String(entry?.response || ""),
-    }));
+      response: item.responseEditable !== false ? String(entry?.response || "") : "",
+    };
+  });
 }
 
 function keywordsFromRows(rows = []) {
@@ -82,8 +114,8 @@ function keywordsFromRows(rows = []) {
   for (const row of Array.isArray(rows) ? rows : []) {
     const key = String(row?.key || "").trim().toLowerCase();
     if (!key) continue;
-    const phrases = Array.from(new Set(parsePhraseList(row?.phrasesText)));
-    const response = String(row?.response || "").trim();
+    const phrases = parsePhraseList(row?.phrasesText);
+    const response = row?.responseEditable === false ? "" : String(row?.response || "").trim();
     if (!phrases.length && !response) continue;
     out[key] = { phrases, response };
   }
@@ -91,13 +123,8 @@ function keywordsFromRows(rows = []) {
   return out;
 }
 
-function createKeywordRow(seed = {}) {
-  return {
-    id: makeKeywordRowId(),
-    key: String(seed?.key || "").trim().toLowerCase(),
-    phrasesText: String(seed?.phrasesText || "").trim(),
-    response: String(seed?.response || ""),
-  };
+function hasRowContent(row) {
+  return parsePhraseList(row?.phrasesText).length > 0 || String(row?.response || "").trim().length > 0;
 }
 
 function updateThemeToggleLabel() {
@@ -123,6 +150,10 @@ function initThemeToggle() {
   });
 }
 
+function getThemeToggleMarkup() {
+  return `<button class="btn btn--sm btn--ghost theme-toggle" id="themeToggle" type="button">Light</button>`;
+}
+
 async function initTopbarSession() {
   const right = document.getElementById("adminTopbarRight");
   if (!right) return;
@@ -133,21 +164,25 @@ async function initTopbarSession() {
     if (session?.allowed && login) {
       right.innerHTML = `
         <div class="row" style="justify-content:flex-end">
+          ${getThemeToggleMarkup()}
           <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
           <span class="muted" style="font-size:13px">Logged in as</span>
           <strong>${escapeHtml(login)}</strong>
           <a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a>
         </div>
       `;
+      initThemeToggle();
       return;
     }
   } catch {}
   right.innerHTML = `
     <div class="row" style="justify-content:flex-end">
+      ${getThemeToggleMarkup()}
       <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
       <a class="btn btn--sm" href="/admin/login">Login</a>
     </div>
   `;
+  initThemeToggle();
 }
 
 async function initStreamerTheme() {
@@ -165,12 +200,26 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [backend, setBackend] = useState("unknown");
+  const [catalog, setCatalog] = useState([]);
+  const [hiddenCategoryCount, setHiddenCategoryCount] = useState(0);
   const [rows, setRows] = useState([]);
   const [jsonText, setJsonText] = useState("{}");
   const importFileRef = useRef(null);
 
+  const orderedRows = useMemo(
+    () =>
+      [...rows].sort((a, b) => {
+        const activeDelta = Number(hasRowContent(b)) - Number(hasRowContent(a));
+        if (activeDelta !== 0) return activeDelta;
+        return Number(a.order || 0) - Number(b.order || 0);
+      }),
+    [rows]
+  );
   const normalizedKeywords = useMemo(() => keywordsFromRows(rows), [rows]);
-  const categoryCount = useMemo(() => Object.keys(normalizedKeywords).length, [normalizedKeywords]);
+  const activeKeywordCount = useMemo(
+    () => rows.reduce((sum, row) => sum + (hasRowContent(row) ? 1 : 0), 0),
+    [rows]
+  );
   const phraseCount = useMemo(
     () =>
       Object.values(normalizedKeywords).reduce(
@@ -192,11 +241,19 @@ function App() {
     setJsonText(JSON.stringify(normalizedKeywords, null, 2));
   }, [normalizedKeywords]);
 
-  function syncRowsFromKeywords(nextKeywords, nextBackend = backend) {
-    const normalized = normalizeKeywords(nextKeywords);
-    setRows(rowsFromKeywords(normalized));
+  function syncRowsFromKeywords(
+    nextKeywords,
+    nextBackend = backend,
+    nextCatalog = catalog,
+    nextHiddenCategoryCount = hiddenCategoryCount
+  ) {
+    const safeCatalog = normalizeCatalog(nextCatalog);
+    const filtered = filterSupportedKeywords(nextKeywords, safeCatalog);
+    setCatalog(safeCatalog);
+    setRows(rowsFromCatalog(safeCatalog, filtered));
     setBackend(String(nextBackend || "unknown"));
-    return normalized;
+    setHiddenCategoryCount(Math.max(0, Number(nextHiddenCategoryCount) || 0));
+    return filtered;
   }
 
   async function loadKeywords() {
@@ -206,7 +263,12 @@ function App() {
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
-    syncRowsFromKeywords(body?.keywords || {}, body?.backend || "unknown");
+    syncRowsFromKeywords(
+      body?.keywords || {},
+      body?.backend || "unknown",
+      body?.catalog || [],
+      body?.hiddenCategoryCount || 0
+    );
   }
 
   async function saveKeywords() {
@@ -220,7 +282,12 @@ function App() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
-      syncRowsFromKeywords(body?.keywords || {}, body?.backend || "unknown");
+      syncRowsFromKeywords(
+        body?.keywords || {},
+        body?.backend || "unknown",
+        body?.catalog || catalog,
+        body?.hiddenCategoryCount || 0
+      );
       setStatus("Keywords saved.");
     } catch (e) {
       setStatus(`Error: ${String(e?.message || e)}`);
@@ -231,17 +298,27 @@ function App() {
     setStatus("Saving JSON...");
     try {
       const parsed = JSON.parse(String(jsonText || "{}"));
-      const normalized = normalizeKeywords(parsed);
+      const filtered = filterSupportedKeywords(parsed, catalog);
+      const ignoredCount = Object.keys(normalizeKeywords(parsed)).length - Object.keys(filtered).length;
       const res = await fetch("/api/admin/keywords", {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ keywords: normalized }),
+        body: JSON.stringify({ keywords: filtered }),
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText}`);
-      syncRowsFromKeywords(body?.keywords || {}, body?.backend || "unknown");
-      setStatus("Keywords saved from JSON.");
+      syncRowsFromKeywords(
+        body?.keywords || {},
+        body?.backend || "unknown",
+        body?.catalog || catalog,
+        body?.hiddenCategoryCount || 0
+      );
+      setStatus(
+        ignoredCount > 0
+          ? `Keywords saved from JSON. Ignored ${ignoredCount} unsupported categories.`
+          : "Keywords saved from JSON."
+      );
     } catch (e) {
       setStatus(`Error: ${String(e?.message || e)}`);
     }
@@ -254,10 +331,13 @@ function App() {
       setStatus(`Importing ${String(file.name || "keywords.json")}...`);
       const text = await file.text();
       const parsed = JSON.parse(String(text || "{}"));
-      const normalized = normalizeKeywords(parsed);
-      syncRowsFromKeywords(normalized, backend);
+      const filtered = filterSupportedKeywords(parsed, catalog);
+      const ignoredCount = Object.keys(normalizeKeywords(parsed)).length - Object.keys(filtered).length;
+      syncRowsFromKeywords(filtered, backend, catalog, hiddenCategoryCount);
       setStatus(
-        `Imported ${Object.keys(normalized).length} keyword entries. Click Save Keywords to persist.`
+        ignoredCount > 0
+          ? `Imported ${Object.keys(filtered).length} supported keyword entries and ignored ${ignoredCount} unsupported categories. Click Save Keywords to persist.`
+          : `Imported ${Object.keys(filtered).length} supported keyword entries. Click Save Keywords to persist.`
       );
     } catch (e) {
       setStatus(`Error: Invalid JSON file (${String(e?.message || e)})`);
@@ -273,34 +353,16 @@ function App() {
           ? {
               ...row,
               ...patch,
-              key:
-                patch.key == null
-                  ? row.key
-                  : String(patch.key || "").trim().toLowerCase(),
+              response:
+                row.responseEditable === false && Object.prototype.hasOwnProperty.call(patch, "response")
+                  ? ""
+                  : Object.prototype.hasOwnProperty.call(patch, "response")
+                    ? String(patch.response || "")
+                    : row.response,
             }
           : row
       )
     );
-  }
-
-  function removeRow(id) {
-    setRows((prev) => prev.filter((row) => row.id !== id));
-  }
-
-  function duplicateRow(id) {
-    setRows((prev) => {
-      const found = prev.find((row) => row.id === id);
-      if (!found) return prev;
-      return [...prev, createKeywordRow({
-        key: found.key ? `${found.key}_copy` : "",
-        phrasesText: found.phrasesText,
-        response: found.response,
-      })];
-    });
-  }
-
-  function addRow() {
-    setRows((prev) => [...prev, createKeywordRow()]);
   }
 
   useEffect(() => {
@@ -327,7 +389,7 @@ function App() {
             <div className="pill">Keywords</div>
             <h1 style=${{ marginTop: "10px", marginBottom: 0 }}>Keyword Manager</h1>
             <div className="muted" style=${{ marginTop: "6px" }}>
-              Add phrase triggers and either keep a built-in handler or set a custom response.
+              Only built-in keyword categories from <code>responses.js</code> are shown here. Dynamic keywords keep their built-in reply logic.
             </div>
           </div>
           <div className="row">
@@ -339,17 +401,20 @@ function App() {
 
       <div className="grid grid--3">
         <div className="panel">
-          <h2>Entries</h2>
-          <div style=${{ marginTop: "8px" }}><strong>${categoryCount}</strong></div>
+          <h2>Supported</h2>
+          <div style=${{ marginTop: "8px" }}><strong>${catalog.length}</strong></div>
         </div>
         <div className="panel">
-          <h2>Phrases</h2>
-          <div style=${{ marginTop: "8px" }}><strong>${phraseCount}</strong></div>
+          <h2>Active</h2>
+          <div style=${{ marginTop: "8px" }}><strong>${activeKeywordCount}</strong></div>
         </div>
         <div className="panel">
           <h2>Custom Replies</h2>
           <div style=${{ marginTop: "8px" }}><strong>${customResponseCount}</strong></div>
-          <div className="meta">Backend: ${backend}</div>
+          <div className="meta">Phrases: ${phraseCount} • Backend: ${backend}</div>
+          ${hiddenCategoryCount > 0
+            ? html`<div className="meta">Hidden legacy categories preserved: ${hiddenCategoryCount}</div>`
+            : null}
         </div>
       </div>
 
@@ -357,9 +422,6 @@ function App() {
         <div className="settings-actions" style=${{ marginTop: 0 }}>
           <button className="btn btn--ghost" onClick=${() => importFileRef.current?.click?.()}>
             Import JSON File
-          </button>
-          <button className="btn btn--ghost" onClick=${addRow}>
-            Add Keyword
           </button>
           <button className="btn" onClick=${saveKeywords}>
             Save Keywords
@@ -376,42 +438,20 @@ function App() {
         />
 
         <div className="quotes-list" style=${{ marginTop: "14px" }}>
-          ${rows.length
-            ? rows.map((row) => html`
+          ${orderedRows.length
+            ? orderedRows.map((row) => html`
                 <article className="quote-card" key=${row.id}>
                   <div className="quote-card__head">
-                    <span className="pill">${row.key || "New keyword"}</span>
-                    <div className="row">
-                      <button className="btn btn--sm btn--ghost" onClick=${() => duplicateRow(row.id)}>
-                        Duplicate
-                      </button>
-                      <button className="btn btn--sm btn--danger" onClick=${() => removeRow(row.id)}>
-                        Delete
-                      </button>
-                    </div>
+                    <span className="pill">${row.key}</span>
+                    <span className="meta">${hasRowContent(row) ? "Configured" : "Inactive"}</span>
                   </div>
 
                   <div className="fieldlist">
                     <div className="field">
                       <div className="field__meta">
-                        <div className="field__label">Key</div>
-                        <div className="field__hint">
-                          Internal keyword key. Keep built-in names like <code>join</code> or <code>game</code> if you want their existing handler.
-                        </div>
-                      </div>
-                      <input
-                        className="in in--sm"
-                        value=${row.key}
-                        onInput=${(e) => updateRow(row.id, { key: e.target.value })}
-                        placeholder="join"
-                      />
-                    </div>
-
-                    <div className="field">
-                      <div className="field__meta">
                         <div className="field__label">Trigger Phrases</div>
                         <div className="field__hint">
-                          Comma-separated phrases. Any phrase match will trigger this entry.
+                          Comma-separated phrases. Any phrase match will trigger the <code>${row.key}</code> keyword.
                         </div>
                       </div>
                       <textarea
@@ -424,16 +464,24 @@ function App() {
 
                     <div className="field">
                       <div className="field__meta">
-                        <div className="field__label">Custom Response</div>
+                        <div className="field__label">Response</div>
                         <div className="field__hint">
-                          Leave blank to use a built-in handler. Supported tokens: <code>{user}</code>, <code>{streamerDisplay}</code>, <code>{channel}</code>, <code>{message}</code>
+                          ${row.responseEditable
+                            ? html`Leave blank to keep the built-in handler. Supported tokens: <code>{user}</code>, <code>{streamerDisplay}</code>, <code>{channel}</code>, <code>{message}</code>.`
+                            : row.responseLockReason || "This keyword uses its built-in response logic and is not editable here."}
                         </div>
                       </div>
                       <textarea
                         className="textarea textarea--sm"
                         value=${row.response}
+                        disabled=${row.responseEditable === false}
                         onInput=${(e) => updateRow(row.id, { response: e.target.value })}
-                        placeholder="@{user}, {streamerDisplay} is currently switching games."
+                        placeholder=${row.responseEditable === false
+                          ? "Built-in response only"
+                          : "@{user}, {streamerDisplay} is currently switching games."}
+                        style=${row.responseEditable === false
+                          ? { opacity: 0.6, cursor: "not-allowed" }
+                          : null}
                       ></textarea>
                     </div>
                   </div>
@@ -441,7 +489,7 @@ function App() {
               `)
             : html`
                 <div className="panel">
-                  <div className="muted">No keyword entries yet. Add one to start managing trigger phrases and responses.</div>
+                  <div className="muted">No built-in keyword categories are available.</div>
                 </div>
               `}
         </div>
@@ -451,8 +499,7 @@ function App() {
         <details className="details">
           <summary>Advanced JSON editor</summary>
           <div className="meta" style=${{ marginTop: "8px" }}>
-            Supports both legacy <code>{ "join": ["phrase"] }</code> and new
-            <code>{ "join": { "phrases": ["phrase"], "response": "" } }</code> formats.
+            Only supported keyword categories from <code>responses.js</code> are accepted here. Hidden unsupported categories stay stored but are not editable from the website.
           </div>
           <textarea
             className="textarea"

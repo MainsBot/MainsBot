@@ -83,7 +83,12 @@ function setThemeLabel() {
   els.themeToggle.textContent = isLight ? "Dark" : "Light";
 }
 
+function getThemeToggleMarkup() {
+  return `<button class="btn btn--sm btn--ghost theme-toggle" id="themeToggle" type="button">Light</button>`;
+}
+
 function initThemeToggle() {
+  els.themeToggle = $("themeToggle");
   if (!els.themeToggle) return;
   const saved = localStorage.getItem("theme");
   document.documentElement.dataset.theme = saved === "light" ? "light" : "dark";
@@ -109,22 +114,26 @@ function renderTopbarSession(session) {
     }
     els.right.innerHTML = `
       <div class="row" style="justify-content:flex-end">
+        ${getThemeToggleMarkup()}
         <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
         <span class="muted" style="font-size:13px">Logged in as</span>
         <strong>${escapeHtml(login)}</strong>
         <a class="btn btn--sm btn--danger" href="/admin/logout">Logout</a>
       </div>
     `;
+    initThemeToggle();
     return;
   }
 
   if (els.adminLinkSlot) els.adminLinkSlot.innerHTML = "";
   els.right.innerHTML = `
     <div class="row" style="justify-content:flex-end">
+      ${getThemeToggleMarkup()}
       <a class="btn btn--sm btn--ghost" href="/swagger">Swagger</a>
       <a class="btn btn--sm" href="/admin/login">Login</a>
     </div>
   `;
+  initThemeToggle();
 }
 
 async function initTopbarSession() {
