@@ -64,6 +64,36 @@ function fmtUptime(ms) {
   return `${h}h ${m}m ${ss}s`;
 }
 
+function pad2(value) {
+  return String(Math.max(0, Number(value) || 0)).padStart(2, "0");
+}
+
+function formatCommitDate(value) {
+  const ts = Date.parse(String(value || ""));
+  if (!Number.isFinite(ts)) return "";
+  const d = new Date(ts);
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()] || "";
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()] || "";
+  const offsetMinutes = -d.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const offsetAbs = Math.abs(offsetMinutes);
+  const offsetHours = pad2(Math.floor(offsetAbs / 60));
+  const offsetMins = pad2(offsetAbs % 60);
+  return `${weekday} ${month} ${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())} ${d.getFullYear()} ${sign}${offsetHours}${offsetMins}`;
+}
+
+function formatBuildFooter(build) {
+  if (!build || typeof build !== "object") return "MainsBot";
+  const versionLabel = `${String(build.version || "dev")}${build.dirty ? " DEV" : ""}`;
+  const branch = String(build.branch || "unknown").trim() || "unknown";
+  const commit = String(build.commit || "unknown").trim().slice(0, 8) || "unknown";
+  const commitCount = Number.isFinite(Number(build.commitCount))
+    ? `, commit ${Math.max(0, Math.floor(Number(build.commitCount)))}`
+    : "";
+  const commitDate = formatCommitDate(build.commitDate);
+  return `Version: ${versionLabel} (${branch}, ${commit}${commitCount})${commitDate ? ` — Last commit: ${commitDate}` : ""}`;
+}
+
 function fmtDuration(ms) {
   const totalSec = Math.max(0, Math.round((Number(ms) || 0) / 1000));
   const mins = Math.floor(totalSec / 60);
@@ -358,24 +388,8 @@ async function refreshStatus() {
     }
 
     if (els.footer) {
-      const url = String(s.webPublicUrl || "").trim();
       const build = s.build && typeof s.build === "object" ? s.build : null;
-      const buildText = build
-        ? `${String(build.version || "dev")} | ${String(build.branch || "unknown")} @ ${String(
-            build.commit || "unknown"
-          )}${build.dirty ? " (dirty)" : ""}`
-        : "";
-      let left = "MainsBot";
-      if (url) {
-        try {
-          left = new URL(url).host;
-        } catch {
-          left = url;
-        }
-      } else if (channelLabel) {
-        left = channelLabel;
-      }
-      setText(els.footer, buildText ? `${left} • ${buildText}` : left);
+      setText(els.footer, formatBuildFooter(build));
     }
     setText(
       els.uptime,

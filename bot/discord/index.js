@@ -604,13 +604,8 @@ export function initDiscord({ logger = console } = {}) {
               : { name: authorName, url: authorUrl }
           )
           .setDescription(desc)
-          .setFooter(
-            profileImageUrl
-              ? { text: footerText, iconURL: profileImageUrl }
-              : { text: footerText }
-          )
+          .setFooter({ text: footerText })
           .setTimestamp(new Date());
-        if (profileImageUrl) embed.setThumbnail(profileImageUrl);
 
         try {
           await discordMessenger.send(chatChannelId, {

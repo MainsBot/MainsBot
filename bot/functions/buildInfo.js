@@ -45,6 +45,10 @@ export function getBuildInfo({
     "dev";
   const branch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd) || "unknown";
   const commit = runGit(["rev-parse", "--short=12", "HEAD"], cwd) || "unknown";
+  const commitCountRaw = runGit(["rev-list", "--count", "HEAD"], cwd);
+  const commitCount = Number.isFinite(Number(commitCountRaw))
+    ? Math.max(0, Math.floor(Number(commitCountRaw)))
+    : null;
   const describe =
     runGit(["describe", "--tags", "--always", "--dirty"], cwd) ||
     `${branch}-${commit}`;
@@ -59,6 +63,7 @@ export function getBuildInfo({
     describe,
     branch,
     commit,
+    commitCount,
     commitDate,
     dirty,
     summary,

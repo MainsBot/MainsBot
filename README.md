@@ -1,6 +1,10 @@
 # MainsBot
-### Current Version: managed in `package.json` (`version`)
+### Current Version: `v3.0.0`
 <!-- ![](https://cdn.7tv.app/emote/61a157c215b3ff4a5bb7dcc0/4x.avif) --> 
+
+Release notes:
+- [CHANGELOG.md](./CHANGELOG.md)
+- [RELEASING.md](./RELEASING.md)
 
 ## Bot Features
 
