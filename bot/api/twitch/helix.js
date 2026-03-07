@@ -27,14 +27,12 @@ const BOT_TOKEN = normalizeTwitchToken(TWITCH_BOT_STORE.access_token);
 const BOT_OAUTH = BOT_TOKEN; // legacy alias retained
 const COOKIE = process.env.COOKIE; // <--- change this to your cookie
 
-const BOT_NAME = process.env.BOT_NAME || String(TWITCH_BOT_STORE.login || "").trim(); // bot username
+const BOT_NAME = String(TWITCH_BOT_STORE.login || process.env.BOT_NAME || "").trim(); // bot username
 const CHANNEL_NAME =
-  process.env.CHANNEL_NAME ||
-  String(TWITCH_STREAMER_STORE.login || "").trim(); // name of the channel for the bot to be in
+  String(TWITCH_STREAMER_STORE.login || process.env.CHANNEL_NAME || "").trim(); // name of the channel for the bot to be in
 const CHANNEL_ID =
-  process.env.CHANNEL_ID ||
-  String(TWITCH_STREAMER_STORE.user_id || "").trim(); // id of channel for the bot to be in
-const BOT_ID = process.env.BOT_ID || String(TWITCH_BOT_STORE.user_id || "").trim();
+  String(TWITCH_STREAMER_STORE.user_id || process.env.CHANNEL_ID || "").trim(); // id of channel for the bot to be in
+const BOT_ID = String(TWITCH_BOT_STORE.user_id || process.env.BOT_ID || "").trim();
 const SPOTIFY_BOT_OAUTH = process.env.SPOTIFY_BOT_OAUTH;
 const SPOTIFY_BOT_NAME = process.env.SPOTIFY_BOT_NAME;
 const CLIENT_ID = String(

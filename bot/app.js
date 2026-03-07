@@ -163,21 +163,19 @@ const TWITCH_STREAMER_STORE = TWITCH_TOKEN_STORE?.streamer || {};
 
 const BOT_TOKEN = normalizeAuthToken(TWITCH_BOT_STORE.access_token);
 const BOT_OAUTH = BOT_TOKEN; // legacy alias kept to avoid rewriting the whole codebase
-const BOT_NAME = process.env.BOT_NAME || String(TWITCH_BOT_STORE.login || "").trim(); // bot username
-const BOT_ID = process.env.BOT_ID || String(TWITCH_BOT_STORE.user_id || "").trim(); // bot user-id
+const BOT_NAME = String(TWITCH_BOT_STORE.login || process.env.BOT_NAME || "").trim(); // bot username
+const BOT_ID = String(TWITCH_BOT_STORE.user_id || process.env.BOT_ID || "").trim(); // bot user-id
 const BOT_TOKEN_SCOPES = new Set(
   normalizeScopeList(TWITCH_BOT_STORE.scopes || TWITCH_BOT_STORE.scope || [])
 );
 
 const CHANNEL_NAME =
-  process.env.CHANNEL_NAME ||
-  String(TWITCH_STREAMER_STORE.login || "").trim(); // name of the channel for the bot to be in
+  String(TWITCH_STREAMER_STORE.login || process.env.CHANNEL_NAME || "").trim(); // name of the channel for the bot to be in
 const CHANNEL_NAME_DISPLAY = process.env.CHANNEL_NAME_DISPLAY;
 const STREAMER_DISPLAY_NAME =
   String(CHANNEL_NAME_DISPLAY || CHANNEL_NAME || "").trim() || "Streamer";
 const CHANNEL_ID =
-  process.env.CHANNEL_ID ||
-  String(TWITCH_STREAMER_STORE.user_id || "").trim(); // id of channel for the bot to be in
+  String(TWITCH_STREAMER_STORE.user_id || process.env.CHANNEL_ID || "").trim(); // id of channel for the bot to be in
 const WEB_PUBLIC_URL = String(process.env.WEB_PUBLIC_URL || "").trim();
 const REDDIT_RECAP_URL = String(process.env.REDDIT_RECAP_URL || "").trim();
 const DISCORD_TIMEZONE_DEFAULT = "EST";
@@ -1115,6 +1113,10 @@ if (!TWITCH_CHAT_CONNECT_IRC) {
 } else if (TWITCH_IRC_MISSING_SCOPES.length) {
   console.warn(
     `[TWITCH][IRC] bot token missing required IRC scopes: ${TWITCH_IRC_MISSING_SCOPES.join(", ")} (reauth /auth/twitch/bot). Skipping IRC login.`
+  );
+} else {
+  console.log(
+    `[TWITCH][IRC] connect requested as login=${BOT_NAME || "(missing)"} user_id=${BOT_ID || "(missing)"} channel=${CHANNEL_NAME || "(missing)"}`
   );
 }
 
