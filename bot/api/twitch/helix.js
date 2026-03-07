@@ -2110,13 +2110,17 @@ function normalizeRedemptionStatus(status) {
   return "UNFULFILLED";
 }
 
-export async function listCustomRewards({ onlyManageableRewards = true } = {}) {
+export async function listCustomRewards({ onlyManageableRewards = true, rewardId = "" } = {}) {
   const auth = await resolveRedemptionAuth({
     action: "list custom rewards",
     requiredAnyScopes: REWARD_READ_SCOPES,
   });
   const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards");
   url.searchParams.set("broadcaster_id", auth.broadcasterId);
+  const id = String(rewardId || "").trim();
+  if (id) {
+    url.searchParams.set("id", id);
+  }
   if (onlyManageableRewards != null) {
     url.searchParams.set("only_manageable_rewards", onlyManageableRewards ? "true" : "false");
   }
@@ -2131,6 +2135,42 @@ export async function listCustomRewards({ onlyManageableRewards = true } = {}) {
   } catch (error) {
     rethrowRewardError(error, { auth, action: "Listing custom rewards" });
   }
+}
+
+export async function getCustomRewardById({ rewardId } = {}) {
+  const id = String(rewardId || "").trim();
+  if (!id) throw new Error("Missing rewardId");
+  const payload = await listCustomRewards({
+    onlyManageableRewards: null,
+    rewardId: id,
+  });
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  return rows[0] || null;
+}
+
+async function ensureManageableRewardOrThrow({ rewardId, action = "manage" } = {}) {
+  const reward = await getCustomRewardById({ rewardId });
+  if (!reward) {
+    throw new Error(`Reward ${String(rewardId || "").trim() || "unknown"} was not found.`);
+  }
+  if (reward.is_manageable === false) {
+    throw new Error(
+      `This reward was created by a different Twitch app/client ID and Twitch will not let this app ${action} it. Recreate it in this app instead.`
+    );
+  }
+  return reward;
+}
+
+function isRewardTitleConflictError(error) {
+  const message = String(error?.message || error || "").trim();
+  return /^Helix HTTP 400:/i.test(message) && /\btitle\b/i.test(message);
+}
+
+function buildRecreatedRewardTitle(baseTitle, attempt = 0) {
+  const base = String(baseTitle || "").trim() || "Reward";
+  if (attempt <= 0) return base;
+  if (attempt === 1) return `${base} (MainsBot)`;
+  return `${base} (MainsBot ${attempt})`;
 }
 
 export async function createCustomReward({ reward = {} } = {}) {
@@ -2167,6 +2207,7 @@ export async function updateCustomReward({ rewardId, reward = {} } = {}) {
   });
   const id = String(rewardId || "").trim();
   if (!id) throw new Error("Missing rewardId");
+  await ensureManageableRewardOrThrow({ rewardId: id, action: "update" });
 
   const body = cleanRewardPatch(reward);
   if (!Object.keys(body).length) throw new Error("Missing reward update fields");
@@ -2199,6 +2240,7 @@ export async function deleteCustomReward({ rewardId } = {}) {
   });
   const id = String(rewardId || "").trim();
   if (!id) throw new Error("Missing rewardId");
+  await ensureManageableRewardOrThrow({ rewardId: id, action: "delete" });
 
   const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards");
   url.searchParams.set("broadcaster_id", auth.broadcasterId);
@@ -2219,6 +2261,48 @@ export async function deleteCustomReward({ rewardId } = {}) {
       sameClientIdHint: true,
     });
   }
+}
+
+export async function recreateCustomReward({ rewardId = "", reward = {} } = {}) {
+  const sourceRewardId = String(rewardId || "").trim();
+  if (sourceRewardId) {
+    await getCustomRewardById({ rewardId: sourceRewardId }).catch(() => null);
+  }
+
+  const body = cleanRewardPatch(reward);
+  if (!body.title) throw new Error("Missing reward.title");
+  if (!Number.isFinite(Number(body.cost)) || Number(body.cost) < 1) {
+    throw new Error("Missing reward.cost");
+  }
+
+  const originalTitle = String(body.title || "").trim();
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const candidateTitle = buildRecreatedRewardTitle(originalTitle, attempt);
+    try {
+      const created = await createCustomReward({
+        reward: {
+          ...body,
+          title: candidateTitle,
+        },
+      });
+      return {
+        ...(created && typeof created === "object" ? created : {}),
+        recreatedTitle: candidateTitle,
+        titleChanged: candidateTitle !== originalTitle,
+        sourceRewardId: sourceRewardId || null,
+      };
+    } catch (error) {
+      lastError = error;
+      if (attempt < 11 && isRewardTitleConflictError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new Error("Failed to recreate custom reward.");
 }
 
 export async function listRewardRedemptions({
@@ -2267,6 +2351,7 @@ export async function updateRewardRedemptionStatus({
   });
   const id = String(rewardId || "").trim();
   if (!id) throw new Error("Missing rewardId");
+  await ensureManageableRewardOrThrow({ rewardId: id, action: "update redemption status for" });
 
   const ids = Array.isArray(redemptionIds)
     ? redemptionIds.map((v) => String(v || "").trim()).filter(Boolean).slice(0, 50)

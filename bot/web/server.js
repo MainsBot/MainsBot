@@ -27,6 +27,7 @@ import {
   listCustomRewards,
   createCustomReward,
   updateCustomReward,
+  recreateCustomReward,
   deleteCustomReward,
   listRewardRedemptions,
   updateRewardRedemptionStatus,
@@ -4110,6 +4111,28 @@ const webServer = http.createServer(async (req, res) => {
             res,
             200,
             { ok: true, data: updated?.data || [] },
+            { "cache-control": "no-store" }
+          );
+        }
+
+        if (action === "recreate") {
+          const recreated = await recreateCustomReward({
+            rewardId: String(body?.rewardId || "").trim(),
+            reward:
+              body?.reward && typeof body.reward === "object" && !Array.isArray(body.reward)
+                ? body.reward
+                : {},
+          });
+          return sendJsonResponse(
+            res,
+            200,
+            {
+              ok: true,
+              data: recreated?.data || [],
+              recreatedTitle: String(recreated?.recreatedTitle || "").trim() || null,
+              titleChanged: Boolean(recreated?.titleChanged),
+              sourceRewardId: String(recreated?.sourceRewardId || "").trim() || null,
+            },
             { "cache-control": "no-store" }
           );
         }

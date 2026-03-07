@@ -162,7 +162,7 @@ function App() {
     is_user_input_required: false,
     should_redemptions_skip_request_queue: false,
   });
-  const [onlyManageable, setOnlyManageable] = useState(false);
+  const [onlyManageable, setOnlyManageable] = useState(true);
   const [redeemStatus, setRedeemStatus] = useState("UNFULFILLED");
   const [redemptions, setRedemptions] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -307,7 +307,7 @@ function App() {
   async function onUpdateReward() {
     if (!selectedRewardId) return;
     if (selectedReward && selectedReward.is_manageable === false) {
-      setStatus("This reward is not manageable by this Twitch app. Turn on 'Only manageable' or recreate it.");
+      setStatus("This reward is not manageable by this Twitch app. Recreate it in this app instead.");
       return;
     }
     setStatus("Saving reward...");
@@ -328,6 +328,41 @@ function App() {
       });
       await loadRewards();
       setStatus("Reward saved.");
+    } catch (e) {
+      setStatus(`Error: ${String(e?.message || e)}`);
+    }
+  }
+
+  async function onRecreateReward() {
+    if (!selectedRewardId) return;
+    setStatus("Recreating reward in this Twitch app...");
+    try {
+      const body = await apiPost("/api/admin/redemptions/rewards", {
+        action: "recreate",
+        rewardId: selectedRewardId,
+        reward: {
+          title: String(rewardDraft.title || "").trim(),
+          prompt: String(rewardDraft.prompt || "").trim(),
+          cost: Math.max(1, nint(rewardDraft.cost, 1)),
+          is_enabled: Boolean(rewardDraft.is_enabled),
+          is_user_input_required: Boolean(rewardDraft.is_user_input_required),
+          should_redemptions_skip_request_queue: Boolean(
+            rewardDraft.should_redemptions_skip_request_queue
+          ),
+        },
+      });
+      const createdReward = Array.isArray(body?.data) ? normalizeReward(body.data[0] || {}) : null;
+      setOnlyManageable(true);
+      await loadRewards({ keepSelection: false });
+      if (createdReward?.id) {
+        setSelectedRewardId(createdReward.id);
+      }
+      await loadLogs();
+      setStatus(
+        body?.titleChanged
+          ? `Reward recreated as "${body?.recreatedTitle || createdReward?.title || "new reward"}" because the original title was already taken by the old app-owned reward.`
+          : "Reward recreated in this Twitch app."
+      );
     } catch (e) {
       setStatus(`Error: ${String(e?.message || e)}`);
     }
@@ -357,6 +392,10 @@ function App() {
 
   async function onUpdateRedemptionStatus(redemptionId, nextStatus) {
     if (!selectedRewardId || !redemptionId) return;
+    if (selectedReward && selectedReward.is_manageable === false) {
+      setStatus("This reward is not manageable by this Twitch app. Recreate it here before fulfilling or canceling redemptions.");
+      return;
+    }
     setStatus(`Marking redemption ${nextStatus.toLowerCase()}...`);
     try {
       await apiPost("/api/admin/redemptions/status", {
@@ -434,7 +473,7 @@ function App() {
 
           ${selectedReward && selectedReward.is_manageable === false
             ? html`<div className="meta" style=${{ marginTop: "10px", color: "#ffb37b" }}>
-                This reward was created by a different Twitch app and is read-only here.
+                This reward was created by a different Twitch app/client ID. Twitch will not let this app update, delete, or fulfill it. Use <strong>Recreate Here</strong> to clone it into the current app.
               </div>`
             : null}
 
@@ -487,7 +526,16 @@ function App() {
           </div>
 
           <div className="row" style=${{ marginTop: "10px" }}>
-            <button className="btn btn--sm" onClick=${onUpdateReward} disabled=${!selectedRewardId}><${Icon} path="M20 6 9 17l-5-5" />Save Reward</button>
+            <button
+              className="btn btn--sm"
+              onClick=${onUpdateReward}
+              disabled=${!selectedRewardId || (selectedReward && selectedReward.is_manageable === false)}
+            ><${Icon} path="M20 6 9 17l-5-5" />Save Reward</button>
+            <button
+              className="btn btn--sm btn--ghost"
+              onClick=${onRecreateReward}
+              disabled=${!selectedRewardId}
+            ><${Icon} path="M12 5v14M5 12h14" />Recreate Here</button>
             <button className="btn btn--sm btn--ghost" onClick=${onCreateReward}><${Icon} path="M12 5v14M5 12h14" />Create New</button>
             <button
               className="btn btn--sm btn--danger"
@@ -516,8 +564,16 @@ function App() {
                       <div className="quote-card__head">
                         <span className="pill">${row.status || "?"}</span>
                         <div className="row">
-                          <button className="btn btn--sm" onClick=${() => onUpdateRedemptionStatus(row.id, "FULFILLED")}><${Icon} path="M20 6 9 17l-5-5" />Fulfill</button>
-                          <button className="btn btn--sm btn--danger" onClick=${() => onUpdateRedemptionStatus(row.id, "CANCELED")}><${Icon} path="M18 6 6 18M6 6l12 12" />Cancel</button>
+                          <button
+                            className="btn btn--sm"
+                            onClick=${() => onUpdateRedemptionStatus(row.id, "FULFILLED")}
+                            disabled=${selectedReward && selectedReward.is_manageable === false}
+                          ><${Icon} path="M20 6 9 17l-5-5" />Fulfill</button>
+                          <button
+                            className="btn btn--sm btn--danger"
+                            onClick=${() => onUpdateRedemptionStatus(row.id, "CANCELED")}
+                            disabled=${selectedReward && selectedReward.is_manageable === false}
+                          ><${Icon} path="M18 6 6 18M6 6l12 12" />Cancel</button>
                         </div>
                       </div>
                       <div><strong>${row.user_name || row.user_login || "unknown"}</strong> (${row.user_id || "-"})</div>
