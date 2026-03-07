@@ -2795,31 +2795,46 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
   streamNumber = Object.keys(STREAMS).length;
 
   if (isPermitted && !isBot) {
-    handleKillswitchToggle({
+    if (
+      handleKillswitchToggle({
       client,
       lowerMessage,
       channelName: CHANNEL_NAME,
       userstate,
       settings: SETTINGS,
+      settingsPath: SETTINGS_PATH,
       onActivity: (event) => void logActivity(event),
-    });
-    handleKeywordsToggle({
+      })
+    ) {
+      return;
+    }
+    if (
+      handleKeywordsToggle({
       client,
       lowerMessage,
       channelName: CHANNEL_NAME,
       userstate,
       settings: SETTINGS,
+      settingsPath: SETTINGS_PATH,
       onActivity: (event) => void logActivity(event),
-    });
-    handleTimersToggle({
+      })
+    ) {
+      return;
+    }
+    if (
+      handleTimersToggle({
       client,
       lowerMessage,
       channelName: CHANNEL_NAME,
       botPrefix: bot,
       userstate,
       settings: SETTINGS,
+      settingsPath: SETTINGS_PATH,
       onActivity: (event) => void logActivity(event),
-    });
+      })
+    ) {
+      return;
+    }
     // accountHandler(client, lowerMessage, twitchUsername, userstate);
     updateMode(client, message, twitchUsername, userstate);
     {
