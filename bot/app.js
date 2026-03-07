@@ -525,6 +525,13 @@ const DEFAULT_IGNORE_MODES = [
   "!sleep.on",
 ];
 const DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE = "{streamerDisplay} is now listening to {track}";
+const DEFAULT_POLL_ANNOUNCE_TEMPLATE = "New poll! {title} :: {options}{extraVotes}";
+const DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE =
+  "Poll has ended {winning} has won the poll! Nobody dumped any {channelPointsName} Sadge";
+const DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE =
+  "RIPBOZO @{user} just lost {channelPoints} {channelPointsName} thats {farmTime} of farming";
+const DEFAULT_POLL_COMPLETE_WIN_TEMPLATE =
+  "PogU @{user} just spent {channelPoints} {channelPointsName}";
 const SPOTIFY_STATUS_POLL_MS = 10_000;
 
 const BUILD_INFO = getBuildInfo();
@@ -702,6 +709,22 @@ function withSettingsDefaults(input = {}) {
     safeString(base.spotifyAnnounceTemplate || DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE) ||
     DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE;
   base.spotifyAnnounceEmote = safeString(base.spotifyAnnounceEmote || "");
+  base.pollAnnounceEnabled = Boolean(base.pollAnnounceEnabled);
+  base.pollAnnounceTemplate =
+    safeString(base.pollAnnounceTemplate || DEFAULT_POLL_ANNOUNCE_TEMPLATE) ||
+    DEFAULT_POLL_ANNOUNCE_TEMPLATE;
+  base.pollAnnounceChannelPointsName =
+    safeString(base.pollAnnounceChannelPointsName || "channel points") ||
+    "channel points";
+  base.pollCompleteNoPointsTemplate =
+    safeString(base.pollCompleteNoPointsTemplate || DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE) ||
+    DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE;
+  base.pollCompleteLossTemplate =
+    safeString(base.pollCompleteLossTemplate || DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE) ||
+    DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE;
+  base.pollCompleteWinTemplate =
+    safeString(base.pollCompleteWinTemplate || DEFAULT_POLL_COMPLETE_WIN_TEMPLATE) ||
+    DEFAULT_POLL_COMPLETE_WIN_TEMPLATE;
 
   return base;
 }
@@ -737,7 +760,15 @@ if (Object.keys(WORDS || {}).length === 0) {
 }
 try {
   const missingHandlers = Object.keys(WORDS || {}).filter(
-    (key) => typeof RESPONSES?.responses?.[key] !== "function"
+    (key) => {
+      const entry = WORDS?.[key];
+      const customResponse =
+        entry && typeof entry === "object" && !Array.isArray(entry)
+          ? String(entry.response || "").trim()
+          : "";
+      if (customResponse) return false;
+      return typeof RESPONSES?.responses?.[key] !== "function";
+    }
   );
   if (missingHandlers.length > 0) {
     console.warn(
@@ -753,6 +784,45 @@ async function persistKeywords(nextWords = {}, { writeFileFallback = true } = {}
   const normalized = await KEYWORDS_STORAGE.persistKeywords(nextWords, { writeFileFallback });
   WORDS = normalized;
   return WORDS;
+}
+
+function getKeywordEntry(keywordKey) {
+  const raw = WORDS?.[keywordKey];
+  if (Array.isArray(raw)) {
+    return {
+      phrases: raw
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean),
+      response: "",
+    };
+  }
+  if (raw && typeof raw === "object") {
+    return {
+      phrases: Array.isArray(raw.phrases)
+        ? raw.phrases
+            .map((value) => String(value || "").trim().toLowerCase())
+            .filter(Boolean)
+        : [],
+      response: String(raw.response || "").trim(),
+    };
+  }
+  return { phrases: [], response: "" };
+}
+
+function formatKeywordReplyTemplate(template = "", {
+  target = "",
+  streamerDisplay = STREAMER_DISPLAY_NAME,
+  channel = CHANNEL_NAME,
+  message = "",
+} = {}) {
+  return String(template || "")
+    .replaceAll("{user}", String(target || "").trim())
+    .replaceAll("{target}", String(target || "").trim())
+    .replaceAll("{streamer}", String(streamerDisplay || "").trim())
+    .replaceAll("{streamerDisplay}", String(streamerDisplay || "").trim())
+    .replaceAll("{channel}", String(channel || "").trim())
+    .replaceAll("{message}", String(message || "").trim())
+    .trim();
 }
 
 function loadSettings() {
@@ -2488,7 +2558,8 @@ async function joinHandler(
         break;
       }
 
-      const phraseList = Array.isArray(WORDS[wordSet]) ? WORDS[wordSet] : [];
+      const keywordEntry = getKeywordEntry(wordSet);
+      const phraseList = keywordEntry.phrases;
       if (
         !phraseList.some((word) => {
           return messageContainsKeywordPhrase(message, word, normalizedKeywordMessage);
@@ -2500,6 +2571,28 @@ async function joinHandler(
       // Only mods/broadcaster are exempt from "join" keyword auto-responses.
       if (wordSet === "join" && isModOrBroadcaster) {
         continue;
+      }
+
+      if (keywordEntry.response) {
+        try {
+          const text = formatKeywordReplyTemplate(keywordEntry.response, {
+            target: twitchUsername,
+            streamerDisplay: STREAMER_DISPLAY_NAME,
+            channel: CHANNEL_NAME,
+            message,
+          });
+          if (text) {
+            await client.say(CHANNEL_NAME, text);
+            responseLimit -= 1;
+            continue;
+          }
+        } catch (e) {
+          console.error(
+            `[KEYWORDS] custom response "${wordSet}" failed:`,
+            e?.message || e
+          );
+          continue;
+        }
       }
 
       const resolvedKeyword = keywordResponseResolver.resolve(wordSet);
@@ -3038,7 +3131,7 @@ client.on("message", async (channel, userstate, message, self, viewers, target) 
 
   if (!isBangCommand) {
     for (const wordSet in WORDS) {
-      const phraseList = Array.isArray(WORDS[wordSet]) ? WORDS[wordSet] : [];
+      const phraseList = getKeywordEntry(wordSet).phrases;
       if (phraseList.some((word) => {
         return messageContainsKeywordPhrase(message, word, normalizedKeywordMessage);
       })) {

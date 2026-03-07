@@ -40,6 +40,29 @@ function normalizeQuotesData(raw) {
   return { nextId, quotes };
 }
 
+function updateThemeToggleLabel() {
+  const button = document.getElementById("themeToggle");
+  if (!button) return;
+  const isLight = document.documentElement.dataset.theme === "light";
+  button.textContent = isLight ? "Dark" : "Light";
+}
+
+function initThemeToggle() {
+  const button = document.getElementById("themeToggle");
+  const saved = localStorage.getItem("theme");
+  document.documentElement.dataset.theme = saved === "light" ? "light" : "dark";
+  updateThemeToggleLabel();
+  if (!button || button.__themeInit) return;
+  button.__themeInit = true;
+  button.addEventListener("click", () => {
+    const isLight = document.documentElement.dataset.theme === "light";
+    const next = isLight ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("theme", next);
+    updateThemeToggleLabel();
+  });
+}
+
 async function initTopbarSession() {
   const right = document.getElementById("adminTopbarRight");
   if (!right) return;
@@ -308,6 +331,7 @@ function App() {
   `;
 }
 
+initThemeToggle();
 initTopbarSession();
 initStreamerTheme();
 

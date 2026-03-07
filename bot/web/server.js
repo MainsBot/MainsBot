@@ -966,13 +966,23 @@ function validateKeywordsForStorageOrThrow(keywords = {}) {
     if (!/^[a-z0-9_:-]+$/.test(key)) {
       errors.push(`Category ${key} contains invalid characters.`);
     }
-    const list = Array.isArray(rows) ? rows : [];
+    const list = Array.isArray(rows)
+      ? rows
+      : Array.isArray(rows?.phrases)
+        ? rows.phrases
+        : [];
+    const response = rows && typeof rows === "object" && !Array.isArray(rows)
+      ? String(rows.response || "").trim()
+      : "";
     if (list.length > 1500) errors.push(`Category ${key} has too many phrases (max 1500).`);
     for (const phraseRaw of list) {
       const phrase = String(phraseRaw || "").trim();
       if (!phrase) continue;
       phraseCount += 1;
       if (phrase.length > 280) errors.push(`Category ${key} has a phrase longer than 280 chars.`);
+    }
+    if (response.length > 500) {
+      errors.push(`Category ${key} has a response longer than 500 chars.`);
     }
   }
 
@@ -2388,7 +2398,21 @@ function buildOpenApiSpec({ requestOrigin = "" } = {}) {
                 schema: {
                   type: "object",
                   properties: {
-                    keywords: { type: "object", additionalProperties: { type: "array", items: { type: "string" } } },
+                    keywords: {
+                      type: "object",
+                      additionalProperties: {
+                        oneOf: [
+                          { type: "array", items: { type: "string" } },
+                          {
+                            type: "object",
+                            properties: {
+                              phrases: { type: "array", items: { type: "string" } },
+                              response: { type: "string" },
+                            },
+                          },
+                        ],
+                      },
+                    },
                   },
                   required: ["keywords"],
                 },

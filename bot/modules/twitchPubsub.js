@@ -39,6 +39,13 @@ function normalizeEventType(value) {
 }
 
 const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
+const DEFAULT_POLL_ANNOUNCE_TEMPLATE = "New poll! {title} :: {options}{extraVotes}";
+const DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE =
+  "Poll has ended {winning} has won the poll! Nobody dumped any {channelPointsName} Sadge";
+const DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE =
+  "RIPBOZO @{user} just lost {channelPoints} {channelPointsName} thats {farmTime} of farming";
+const DEFAULT_POLL_COMPLETE_WIN_TEMPLATE =
+  "PogU @{user} just spent {channelPoints} {channelPointsName}";
 
 function normalizeAutoFocOffDelayMs(value, fallback = MIN_AUTO_FOC_OFF_DELAY_MS) {
   const n = Number(value);
@@ -113,6 +120,7 @@ let reconnectTimer = null;
 let reconnectAttempt = 0;
 let pollFallbackTimer = null;
 let lastProcessedPollSignature = "";
+let lastAnnouncedPollCreateSignature = "";
 let lastProcessedPredictionResolutionId = "";
 const subTierCache = new Map();
 
@@ -267,6 +275,158 @@ async function processPredictionResolvedEvent(event = {}, source = "pubsub") {
   return true;
 }
 
+function normalizePollChoiceTitle(choice = {}) {
+  return String(
+    choice?.title ??
+      choice?.text ??
+      choice?.label ??
+      choice?.name ??
+      ""
+  ).trim();
+}
+
+function normalizePollPayload(raw = {}) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const choices = Array.isArray(src.choices)
+    ? src.choices.map((choice) => normalizePollChoiceTitle(choice)).filter(Boolean)
+    : [];
+  const cpVoteEnabled =
+    src.cpVoteEnabled != null
+      ? Boolean(src.cpVoteEnabled)
+      : src.channel_points_voting_enabled != null
+        ? Boolean(src.channel_points_voting_enabled)
+        : Boolean(src?.settings?.communityPointsVotes?.isEnabled);
+  const cpVote = Math.max(
+    0,
+    Math.floor(
+      Number(
+        src.cpVote ??
+          src.channel_points_per_vote ??
+          src?.settings?.communityPointsVotes?.cost ??
+          0
+      ) || 0
+    )
+  );
+
+  return {
+    id: String(src.id || "").trim(),
+    title: String(src.title || "").trim(),
+    choices,
+    cpVoteEnabled,
+    cpVote,
+    startedAt: String(src.startedAt || src.started_at || "").trim(),
+  };
+}
+
+function extractPollPayloadFromMessage(messageData = {}) {
+  const candidates = [
+    messageData?.data?.poll,
+    messageData?.data?.event?.poll,
+    messageData?.data?.event,
+    messageData?.event?.poll,
+    messageData?.event,
+    messageData?.poll,
+  ];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const poll = normalizePollPayload(candidate);
+    if (poll.id || poll.title || poll.choices.length) {
+      return poll;
+    }
+  }
+  return null;
+}
+
+function buildPollCreateSignature(poll = {}) {
+  const id = String(poll?.id || "").trim();
+  if (id) return id;
+  const title = String(poll?.title || "").trim().toLowerCase();
+  const startedAt = String(poll?.startedAt || "").trim();
+  const options = Array.isArray(poll?.choices)
+    ? poll.choices.map((choice) => String(choice || "").trim().toLowerCase()).filter(Boolean).join("|")
+    : "";
+  return [title, options, startedAt].filter(Boolean).join("::");
+}
+
+function renderPollCreateAnnouncementMessage(settings = {}, poll = {}) {
+  const template =
+    String(settings?.pollAnnounceTemplate || "").trim() || DEFAULT_POLL_ANNOUNCE_TEMPLATE;
+  const title = String(poll?.title || "").trim();
+  const options = Array.isArray(poll?.choices)
+    ? poll.choices.map((choice) => String(choice || "").trim()).filter(Boolean).join(" / ")
+    : "";
+  const channelPointsCost = Math.max(0, Math.floor(Number(poll?.cpVote || 0) || 0));
+  const channelPointsName =
+    String(settings?.pollAnnounceChannelPointsName || "").trim() || "channel points";
+  const extraVotes =
+    poll?.cpVoteEnabled && channelPointsCost > 0
+      ? ` You can get extra votes for ${channelPointsCost} ${channelPointsName}.`
+      : "";
+
+  return template
+    .replaceAll("{title}", title)
+    .replaceAll("{options}", options)
+    .replaceAll("{extraVotes}", extraVotes)
+    .replaceAll("{channelPoints}", String(channelPointsCost))
+    .replaceAll("{channelPointsCost}", String(channelPointsCost))
+    .replaceAll("{cpCost}", String(channelPointsCost))
+    .replaceAll("{channelPointsName}", channelPointsName)
+    .replaceAll("{streamerDisplay}", CHANNEL_NAME)
+    .replaceAll("{channel}", CHANNEL_NAME)
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;!?])/g, "$1")
+    .trim();
+}
+
+function formatPollCompletionTemplate(template = "", replacements = {}) {
+  let output = String(template || "").trim();
+  for (const [key, value] of Object.entries(replacements || {})) {
+    output = output.replaceAll(`{${key}}`, String(value ?? "").trim());
+  }
+  return output
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;!?])/g, "$1")
+    .trim();
+}
+
+async function maybeAnnouncePollCreated(pollData = null, source = "pubsub") {
+  if (!SETTINGS?.pollAnnounceEnabled || SETTINGS?.ks) return false;
+
+  let poll = normalizePollPayload(pollData || {});
+  if (!poll.title || !poll.choices.length) {
+    const latest = await TWITCH_FUNCTIONS.getLatestPollData().catch((e) => {
+      logger.warn?.(
+        `[pubsub][poll] getLatestPollData failed (${source} create): ${String(e?.message || e)}`
+      );
+      return null;
+    });
+    if (latest && latest !== "error") {
+      poll = normalizePollPayload(latest);
+    }
+  }
+
+  const signature = buildPollCreateSignature(poll);
+  if (!signature || signature === lastAnnouncedPollCreateSignature) return false;
+  if (!poll.title || !poll.choices.length) return false;
+
+  const message = renderPollCreateAnnouncementMessage(SETTINGS, poll);
+  if (!message) return false;
+
+  lastAnnouncedPollCreateSignature = signature;
+  try {
+    await client.say(CHANNEL_NAME, message);
+    logger.log?.(
+      `[pubsub][poll] created announcement sent source=${source} id=${String(poll.id || "unknown")}`
+    );
+    return true;
+  } catch (e) {
+    logger.warn?.(
+      `[pubsub][poll] created announcement failed (${source}): ${String(e?.message || e)}`
+    );
+    return false;
+  }
+}
+
 function readJsonFile(filePath, fallback) {
   try {
     const raw = fs.readFileSync(filePath, "utf8");
@@ -310,29 +470,26 @@ async function processPollTerminalPayload(pollData, pollType = "", source = "pub
 
   const choices = r.choices;
   const userNodes = r.userNodes;
+  const channelPointsName =
+    String(SETTINGS?.pollAnnounceChannelPointsName || "").trim() || "channel points";
+  const pollTitle = String(r.title || "").trim();
 
   let winnerId = "";
   let winnerVotes = 0;
+  let winnerTitle = "";
   for (const choice of choices) {
     const totalVotes = Number(choice?.votes?.total || 0);
     if (totalVotes > winnerVotes) {
       winnerVotes = totalVotes;
       winnerId = String(choice?.id || "");
+      winnerTitle = normalizePollChoiceTitle(choice);
     }
   }
   if (!winnerId) return false;
 
-  const maxUsers = Math.max(
-    1,
-    Math.min(10, Number(process.env.POLL_RIPBOZO_MAX_USERS || 5) || 5)
-  );
-  const minLoss = Math.max(
-    1,
-    Math.floor(Number(process.env.POLL_RIPBOZO_MIN_POINTS || 1) || 1)
-  );
-
-  const losingUsers = [];
   const analyticsRows = [];
+  let totalCommunityPointsSpent = 0;
+  let topChoiceSpend = null;
 
   for (const node of userNodes) {
     const userId = String(node?.user?.id || "");
@@ -345,22 +502,27 @@ async function processPollTerminalPayload(pollData, pollType = "", source = "pub
     for (const userChoice of Array.isArray(node?.choices) ? node.choices : []) {
       const choiceId = String(userChoice?.pollChoice?.id || "");
       if (!choiceId) continue;
-      if (choiceId === winnerId) continue;
       const amount = Math.max(
         0,
         Math.floor(Number(userChoice?.tokens?.communityPoints ?? 0) || 0)
       );
-      totalLoss += amount;
+      if (amount <= 0) continue;
+      totalCommunityPointsSpent += amount;
       totalSpent += amount;
-    }
-    for (const userChoice of Array.isArray(node?.choices) ? node.choices : []) {
-      const choiceId = String(userChoice?.pollChoice?.id || "");
-      if (!choiceId || choiceId !== winnerId) continue;
-      const amount = Math.max(
-        0,
-        Math.floor(Number(userChoice?.tokens?.communityPoints ?? 0) || 0)
-      );
-      totalSpent += amount;
+      if (choiceId !== winnerId) {
+        totalLoss += amount;
+      }
+      if (!topChoiceSpend || amount > Number(topChoiceSpend.pointsSpent || 0)) {
+        topChoiceSpend = {
+          userId,
+          username,
+          displayName,
+          choiceId,
+          choiceTitle: normalizePollChoiceTitle(userChoice?.pollChoice || {}),
+          pointsSpent: amount,
+          won: choiceId === winnerId,
+        };
+      }
     }
     if (totalSpent > 0) {
       analyticsRows.push({
@@ -371,31 +533,6 @@ async function processPollTerminalPayload(pollData, pollType = "", source = "pub
         pointsLost: totalLoss,
       });
     }
-    if (totalLoss < minLoss) continue;
-    losingUsers.push({
-      userId,
-      username,
-      displayName,
-      pointsLost: totalLoss,
-    });
-  }
-
-  if (!losingUsers.length) return false;
-
-  losingUsers.sort((a, b) => Number(b.pointsLost || 0) - Number(a.pointsLost || 0));
-  const selected = losingUsers.slice(0, maxUsers);
-  for (const row of selected) {
-    const pointsLost = Math.max(0, Math.floor(asNumber(row.pointsLost, 0)));
-    if (pointsLost <= 0) continue;
-    const tier = await getSubTierFromTwitch(row.userId);
-    const farmingRate = getFarmingRateForTier(tier);
-    const yearsFromPoints = pointsLost / farmingRate / (60 * 24 * 365);
-    const cpToHours = ROBLOX_FUNCTIONS.timeToAgo(yearsFromPoints);
-    const who = String(row.username || row.displayName || "user").trim();
-    client.say(
-      CHANNEL_NAME,
-      `RIPBOZO @${who} lost ${pointsLost} channel points, thats ${cpToHours.timeString} of farming.`
-    );
   }
 
   const analyticsEvents = await Promise.all(
@@ -421,12 +558,95 @@ async function processPollTerminalPayload(pollData, pollType = "", source = "pub
   );
   queueChannelPointEvents(analyticsEvents);
 
-  logger.log?.(
-    `[pubsub][poll] RIPBOZO sent (${selected.length} users) source=${source} id=${String(
-      r.id || "unknown"
-    )}`
-  );
-  return true;
+  const cpVoteEnabled = Boolean(r?.cpVoteEnabled);
+  if (!cpVoteEnabled) {
+    logger.log?.(
+      `[pubsub][poll] completed without channel-point extra votes source=${source} id=${String(
+        r.id || "unknown"
+      )}`
+    );
+    return analyticsRows.length > 0;
+  }
+
+  let completionMessage = "";
+  let completionKind = "";
+
+  if (totalCommunityPointsSpent <= 0) {
+    completionKind = "no_points";
+    completionMessage = formatPollCompletionTemplate(
+      String(SETTINGS?.pollCompleteNoPointsTemplate || "").trim() ||
+        DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE,
+      {
+        winning: winnerTitle || "The winning option",
+        title: pollTitle,
+        channelPointsName,
+        channel: CHANNEL_NAME,
+      }
+    );
+  } else if (topChoiceSpend && Number(topChoiceSpend.pointsSpent || 0) > 0) {
+    const who = String(topChoiceSpend.username || topChoiceSpend.displayName || "user").trim();
+    const pointsSpent = Math.max(0, Math.floor(asNumber(topChoiceSpend.pointsSpent, 0)));
+    if (topChoiceSpend.won) {
+      completionKind = "winning_spend";
+      completionMessage = formatPollCompletionTemplate(
+        String(SETTINGS?.pollCompleteWinTemplate || "").trim() ||
+          DEFAULT_POLL_COMPLETE_WIN_TEMPLATE,
+        {
+          user: who,
+          channelPoints: pointsSpent,
+          channelPointsName,
+          winning: winnerTitle || topChoiceSpend.choiceTitle || "",
+          title: pollTitle,
+          channel: CHANNEL_NAME,
+        }
+      );
+    } else {
+      const tier = await getSubTierFromTwitch(topChoiceSpend.userId);
+      const farmingRate = getFarmingRateForTier(tier);
+      const yearsFromPoints = pointsSpent / farmingRate / (60 * 24 * 365);
+      const cpToHours = ROBLOX_FUNCTIONS.timeToAgo(yearsFromPoints);
+      completionKind = "losing_spend";
+      completionMessage = formatPollCompletionTemplate(
+        String(SETTINGS?.pollCompleteLossTemplate || "").trim() ||
+          DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE,
+        {
+          user: who,
+          channelPoints: pointsSpent,
+          channelPointsName,
+          farmTime: String(cpToHours?.timeString || "").trim(),
+          winning: winnerTitle || "",
+          title: pollTitle,
+          channel: CHANNEL_NAME,
+        }
+      );
+    }
+  }
+
+  if (!completionMessage) {
+    logger.log?.(
+      `[pubsub][poll] completed without chat alert source=${source} id=${String(
+        r.id || "unknown"
+      )}`
+    );
+    return analyticsRows.length > 0;
+  }
+
+  try {
+    await client.say(CHANNEL_NAME, completionMessage);
+    logger.log?.(
+      `[pubsub][poll] completion message sent kind=${completionKind || "unknown"} source=${source} id=${String(
+        r.id || "unknown"
+      )}`
+    );
+    return true;
+  } catch (e) {
+    logger.warn?.(
+      `[pubsub][poll] completion message failed kind=${completionKind || "unknown"} source=${source} id=${String(
+        r.id || "unknown"
+      )}: ${String(e?.message || e)}`
+    );
+    return false;
+  }
 }
 
 async function processLatestTerminalPoll(triggerType = "", source = "pubsub") {
@@ -743,6 +963,17 @@ var StartListener = function () {
             client.say(CHANNEL_NAME, text);
           });
         }
+      } else if (
+        pubTopic == `polls.${CHANNEL_ID}` &&
+        (type === "POLL_CREATE" ||
+          type === "POLL_CREATED" ||
+          type === "EVENT_CREATED" ||
+          type === "CREATE")
+      ) {
+        void maybeAnnouncePollCreated(
+          extractPollPayloadFromMessage(messageData),
+          "pubsub_event"
+        );
       } else if (
         type === "POLL_COMPLETE" ||
         type === "POLL_TERMINATE" ||

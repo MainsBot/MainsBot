@@ -792,6 +792,310 @@ html {
 }
 
 /* =========================
+   DIRECTIONAL LAYOUT OVERRIDES
+   Keep the current visual language, but move the shell toward the cleaner
+   layout shown in the reference screenshots.
+   ========================= */
+
+body.site--public {
+  background:
+    radial-gradient(1100px 700px at 14% -6%, rgb(var(--accent-rgb) / 0.13), transparent 60%),
+    radial-gradient(900px 620px at 88% 0%, rgb(var(--accent3-rgb) / 0.10), transparent 58%),
+    linear-gradient(180deg, var(--bg1), var(--bg0));
+}
+
+:root[data-theme="light"] body.site--public {
+  background:
+    radial-gradient(780px 420px at 10% 0%, rgb(var(--accent-rgb) / 0.10), transparent 60%),
+    linear-gradient(180deg, #f2f3f6, #e7e9ee);
+}
+
+:root[data-theme="light"] body.site--admin {
+  background:
+    radial-gradient(920px 460px at 8% 0%, rgb(var(--accent-rgb) / 0.08), transparent 60%),
+    linear-gradient(180deg, #eff2f7, #e8ebf1);
+}
+
+body.site--admin::before,
+body.site--admin::after {
+  opacity: 0.35;
+}
+
+.site--public .page {
+  max-width: 1260px;
+  margin-top: 12px;
+}
+
+.site--public .app {
+  max-width: 960px;
+  margin-top: 24px;
+  padding-bottom: 88px;
+}
+
+.site--public .topbar {
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.site--public .topbar__brand {
+  min-width: 140px;
+}
+
+.site--public .topbar__links {
+  gap: 0;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  border: 1px solid var(--border2);
+  border-radius: 14px;
+  background: var(--surface-5);
+}
+
+.site--public .topbar__links .btn {
+  border: 0;
+  border-right: 1px solid var(--border2);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  white-space: nowrap;
+  padding: 10px 14px;
+  color: var(--text);
+}
+
+.site--public .topbar__links .btn:last-child {
+  border-right: 0;
+}
+
+.site--public .topbar__links .btn:not(.btn--ghost) {
+  background: rgb(var(--accent-rgb) / 0.14);
+  color: var(--accent-text);
+}
+
+.site--public .topbar__right {
+  min-width: auto;
+}
+
+.site--public .hero-card {
+  padding: 18px 0 16px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border2);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.site--public .hero-title {
+  font-size: 34px;
+}
+
+.site--public .hero-sub {
+  max-width: none;
+}
+
+.site--public .header {
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 22px;
+}
+
+.site--public .status,
+.site--public .left-status,
+.site--public .quick-card,
+.site--public .home-stat,
+.site--public .input,
+.site--public .select,
+.site--public .cmdcard {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.site--public .quick-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.site--public .quick-card,
+.site--public .home-stat,
+.site--public .status,
+.site--public .left-status,
+.site--public .cmdcard,
+.site--public .status-json-wrap {
+  box-shadow: 0 10px 26px rgba(7, 10, 16, 0.14);
+}
+
+.site--public .quick-card h2 {
+  font-size: 18px;
+}
+
+.site--public .controls {
+  margin-top: 22px;
+}
+
+.site--public .commands__title {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+}
+
+.site--public .cmdcard {
+  min-height: 96px;
+  padding: 16px 18px;
+}
+
+.site--public .cmdcard::before {
+  display: none;
+}
+
+.site--public .cmdcard:hover {
+  transform: translate3d(0, -1px, 0);
+}
+
+.site--public .cmdcard.mod-only::after {
+  opacity: 0.18;
+  animation-duration: 10s;
+}
+
+.site--public .footer {
+  margin-top: 56px;
+  padding: 22px 24px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(13, 14, 20, 0.90), rgba(9, 10, 14, 0.98));
+  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.28);
+  text-align: left;
+  color: rgba(239, 244, 252, 0.82);
+  opacity: 1;
+}
+
+.site--public .footer::before {
+  content: "MainsBot release";
+  display: block;
+  margin-bottom: 8px;
+  color: rgba(239, 244, 252, 0.96);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.site--admin .page {
+  max-width: 1280px;
+  margin-top: 0;
+}
+
+.site--admin .page .app {
+  max-width: 960px;
+  margin: 20px auto 0;
+}
+
+.site--admin .topbar {
+  top: 0;
+  margin-inline: -18px;
+  padding: 10px 22px;
+  border-radius: 0 0 18px 18px;
+  border: 0;
+  background:
+    linear-gradient(90deg, rgb(var(--accent-rgb) / 0.92), rgb(var(--accent3-rgb) / 0.86));
+  box-shadow: 0 14px 32px rgba(10, 12, 18, 0.18);
+}
+
+.site--admin .topbar__brand a,
+.site--admin .topbar__brand .muted,
+.site--admin .topbar__right,
+.site--admin .topbar__right strong,
+.site--admin .topbar__right .muted {
+  color: #f5f9ff;
+}
+
+.site--admin .topbar__links {
+  gap: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  justify-content: center;
+}
+
+.site--admin .topbar__links .btn,
+.site--admin .topbar__right .btn {
+  border-radius: 0;
+  border: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+}
+
+.site--admin .topbar__links .btn:last-child,
+.site--admin .topbar__right .btn:last-child {
+  border-right: 0;
+}
+
+.site--admin .topbar__links .btn:not(.btn--ghost) {
+  background: rgba(0, 0, 0, 0.12);
+  color: #ffffff;
+}
+
+.site--admin .topbar__right {
+  min-width: auto;
+  gap: 0;
+}
+
+.site--admin .card,
+.site--admin .panel,
+.site--admin .table-wrap,
+.site--admin .field,
+.site--admin .details,
+.site--admin .settings-actions,
+.site--admin .quote-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 12px 26px rgba(16, 20, 30, 0.12);
+}
+
+.site--admin .card {
+  margin-top: 22px;
+}
+
+.site--admin .card__bd {
+  padding: 20px 22px 22px;
+}
+
+.site--admin .panel {
+  padding: 16px;
+}
+
+.site--admin .table-wrap th {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+}
+
+.site--admin .table-wrap tr:hover td {
+  background: rgb(var(--accent-rgb) / 0.08);
+}
+
+.site--admin .pill {
+  box-shadow: none;
+}
+
+.site--admin .btn--danger {
+  background: rgba(124, 21, 21, 0.18);
+  color: #ffe2e2;
+}
+
+@media (max-width: 980px) {
+  .site--public .header {
+    grid-template-columns: 1fr;
+  }
+
+  .site--public .quick-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .site--admin .page .app {
+    max-width: none;
+  }
+}
+
+/* =========================
    ACCESSIBILITY
    ========================= */
 

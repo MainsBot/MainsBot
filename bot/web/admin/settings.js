@@ -39,6 +39,13 @@ export const DEFAULT_MODE_DEFINITIONS = {
 
 const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
 const DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE = "{streamerDisplay} is now listening to {track}";
+const DEFAULT_POLL_ANNOUNCE_TEMPLATE = "New poll! {title} :: {options}{extraVotes}";
+const DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE =
+  "Poll has ended {winning} has won the poll! Nobody dumped any {channelPointsName} Sadge";
+const DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE =
+  "RIPBOZO @{user} just lost {channelPoints} {channelPointsName} thats {farmTime} of farming";
+const DEFAULT_POLL_COMPLETE_WIN_TEMPLATE =
+  "PogU @{user} just spent {channelPoints} {channelPointsName}";
 
 export function normalizeModeCommand(value) {
   let out = String(value || "").trim().toLowerCase();
@@ -87,6 +94,42 @@ export function sanitizeSettingsForStorage(input = {}) {
     out.spotifyAnnounceTemplate = DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE;
   }
   out.spotifyAnnounceEmote = str(out.spotifyAnnounceEmote, "");
+  out.pollAnnounceEnabled = bool(out.pollAnnounceEnabled, false);
+  out.pollAnnounceTemplate = str(
+    out.pollAnnounceTemplate,
+    DEFAULT_POLL_ANNOUNCE_TEMPLATE
+  );
+  if (!out.pollAnnounceTemplate) {
+    out.pollAnnounceTemplate = DEFAULT_POLL_ANNOUNCE_TEMPLATE;
+  }
+  out.pollAnnounceChannelPointsName = str(
+    out.pollAnnounceChannelPointsName,
+    "channel points"
+  );
+  if (!out.pollAnnounceChannelPointsName) {
+    out.pollAnnounceChannelPointsName = "channel points";
+  }
+  out.pollCompleteNoPointsTemplate = str(
+    out.pollCompleteNoPointsTemplate,
+    DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE
+  );
+  if (!out.pollCompleteNoPointsTemplate) {
+    out.pollCompleteNoPointsTemplate = DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE;
+  }
+  out.pollCompleteLossTemplate = str(
+    out.pollCompleteLossTemplate,
+    DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE
+  );
+  if (!out.pollCompleteLossTemplate) {
+    out.pollCompleteLossTemplate = DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE;
+  }
+  out.pollCompleteWinTemplate = str(
+    out.pollCompleteWinTemplate,
+    DEFAULT_POLL_COMPLETE_WIN_TEMPLATE
+  );
+  if (!out.pollCompleteWinTemplate) {
+    out.pollCompleteWinTemplate = DEFAULT_POLL_COMPLETE_WIN_TEMPLATE;
+  }
 
   out.filterExemptions = arrStr(out.filterExemptions);
   out.bots = arrStr(out.bots);

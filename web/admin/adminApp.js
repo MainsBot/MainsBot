@@ -53,6 +53,13 @@ const FILTER_DEFAULTS = {
   },
 };
 const DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE = "{streamerDisplay} is now listening to {track}";
+const DEFAULT_POLL_ANNOUNCE_TEMPLATE = "New poll! {title} :: {options}{extraVotes}";
+const DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE =
+  "Poll has ended {winning} has won the poll! Nobody dumped any {channelPointsName} Sadge";
+const DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE =
+  "RIPBOZO @{user} just lost {channelPoints} {channelPointsName} thats {farmTime} of farming";
+const DEFAULT_POLL_COMPLETE_WIN_TEMPLATE =
+  "PogU @{user} just spent {channelPoints} {channelPointsName}";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => {
@@ -270,6 +277,22 @@ function normalizeSettings(raw) {
     String(src.spotifyAnnounceTemplate || DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE).trim() ||
     DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE;
   src.spotifyAnnounceEmote = String(src.spotifyAnnounceEmote || "").trim();
+  src.pollAnnounceEnabled = Boolean(src.pollAnnounceEnabled);
+  src.pollAnnounceTemplate =
+    String(src.pollAnnounceTemplate || DEFAULT_POLL_ANNOUNCE_TEMPLATE).trim() ||
+    DEFAULT_POLL_ANNOUNCE_TEMPLATE;
+  src.pollAnnounceChannelPointsName =
+    String(src.pollAnnounceChannelPointsName || "channel points").trim() ||
+    "channel points";
+  src.pollCompleteNoPointsTemplate =
+    String(src.pollCompleteNoPointsTemplate || DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE).trim() ||
+    DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE;
+  src.pollCompleteLossTemplate =
+    String(src.pollCompleteLossTemplate || DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE).trim() ||
+    DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE;
+  src.pollCompleteWinTemplate =
+    String(src.pollCompleteWinTemplate || DEFAULT_POLL_COMPLETE_WIN_TEMPLATE).trim() ||
+    DEFAULT_POLL_COMPLETE_WIN_TEMPLATE;
 
   src.linkAllowlist = asArray(src.linkAllowlist);
   src.linkAllowlistText = String(src.linkAllowlistText || toCsv(src.linkAllowlist));
@@ -351,6 +374,40 @@ function normalizeSettings(raw) {
   return src;
 }
 
+function updateThemeToggleLabel() {
+  const button = document.getElementById("themeToggle");
+  if (!button) return;
+  const isLight = document.documentElement.dataset.theme === "light";
+  button.textContent = isLight ? "Dark" : "Light";
+}
+
+function initThemeToggle() {
+  const button = document.getElementById("themeToggle");
+  const saved = localStorage.getItem("theme");
+  document.documentElement.dataset.theme = saved === "light" ? "light" : "dark";
+  updateThemeToggleLabel();
+  if (!button || button.__themeInit) return;
+  button.__themeInit = true;
+  button.addEventListener("click", () => {
+    const isLight = document.documentElement.dataset.theme === "light";
+    const next = isLight ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("theme", next);
+    updateThemeToggleLabel();
+  });
+}
+
+async function initStreamerTheme() {
+  try {
+    const res = await fetch("/api/status", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const status = res.ok ? await res.json().catch(() => null) : null;
+    applyStreamerThemeFromStatus(status);
+  } catch {}
+}
+
 async function initTopbarSession() {
   const right = document.getElementById("adminTopbarRight");
   if (!right) return;
@@ -378,10 +435,10 @@ async function initTopbarSession() {
   `;
 }
 
-function ToggleSwitch({ checked, onChange }) {
+function ToggleSwitch({ checked, onChange, disabled = false }) {
   return html`
     <label className="switch">
-      <input type="checkbox" checked=${Boolean(checked)} onChange=${onChange} />
+      <input type="checkbox" checked=${Boolean(checked)} onChange=${onChange} disabled=${Boolean(disabled)} />
       <span className="switch__track"></span>
       <span className="switch__label">${checked ? "ON" : "OFF"}</span>
     </label>
@@ -1320,7 +1377,7 @@ function App() {
 
               <div className="grid grid--3">
                 <div className="panel">
-                  <h3>Spotify Announcer</h3>
+                  <h3>Chat Announcers</h3>
                   <div className="fieldlist">
                     <div className="field">
                       <div className="field__meta">
@@ -1342,6 +1399,48 @@ function App() {
                         <div className="field__hint">Optional. Enter the emote text you want around the song title.</div>
                       </div>
                       <input className="in in--sm" value=${String(settings.spotifyAnnounceEmote || "")} onChange=${(e) => setField("spotifyAnnounceEmote", e.target.value)} placeholder="channelJam" />
+                    </div>
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Enable Poll Created Message</div>
+                        <div className="field__hint">Announce newly created polls in chat with the title, options, and extra-vote info.</div>
+                      </div>
+                      <${ToggleSwitch} checked=${settings.pollAnnounceEnabled} onChange=${(e) => setField("pollAnnounceEnabled", e.target.checked)} />
+                    </div>
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Poll Announcement Template</div>
+                        <div className="field__hint">Placeholders: <code>{"{title}"}</code>, <code>{"{options}"}</code>, <code>{"{extraVotes}"}</code>, <code>{"{channelPoints}"}</code>, <code>{"{cpCost}"}</code>, <code>{"{channelPointsName}"}</code>, <code>{"{streamerDisplay}"}</code>.</div>
+                      </div>
+                      <input className="in in--sm" value=${String(settings.pollAnnounceTemplate || "")} onChange=${(e) => setField("pollAnnounceTemplate", e.target.value)} placeholder="${DEFAULT_POLL_ANNOUNCE_TEMPLATE}" />
+                    </div>
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Poll Channel Points Name</div>
+                        <div className="field__hint">Used in the extra-votes text, for example sand, grass, or channel points.</div>
+                      </div>
+                      <input className="in in--sm" value=${String(settings.pollAnnounceChannelPointsName || "")} onChange=${(e) => setField("pollAnnounceChannelPointsName", e.target.value)} placeholder="channel points" />
+                    </div>
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Poll Complete: No Extra Votes</div>
+                        <div className="field__hint">Shown when channel-point extra votes were available but nobody used them. Placeholders: <code>{"{winning}"}</code>, <code>{"{title}"}</code>, <code>{"{channelPointsName}"}</code>.</div>
+                      </div>
+                      <input className="in in--sm" value=${String(settings.pollCompleteNoPointsTemplate || "")} onChange=${(e) => setField("pollCompleteNoPointsTemplate", e.target.value)} placeholder="${DEFAULT_POLL_COMPLETE_NO_POINTS_TEMPLATE}" />
+                    </div>
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Poll Complete: Losing Top Spend</div>
+                        <div className="field__hint">Shown when the biggest channel-point dump landed on a losing option. Placeholders: <code>{"{user}"}</code>, <code>{"{channelPoints}"}</code>, <code>{"{channelPointsName}"}</code>, <code>{"{farmTime}"}</code>, <code>{"{winning}"}</code>.</div>
+                      </div>
+                      <input className="in in--sm" value=${String(settings.pollCompleteLossTemplate || "")} onChange=${(e) => setField("pollCompleteLossTemplate", e.target.value)} placeholder="${DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE}" />
+                    </div>
+                    <div className="field">
+                      <div className="field__meta">
+                        <div className="field__label">Poll Complete: Winning Top Spend</div>
+                        <div className="field__hint">Shown when the biggest channel-point dump landed on the winning option. Placeholders: <code>{"{user}"}</code>, <code>{"{channelPoints}"}</code>, <code>{"{channelPointsName}"}</code>, <code>{"{winning}"}</code>.</div>
+                      </div>
+                      <input className="in in--sm" value=${String(settings.pollCompleteWinTemplate || "")} onChange=${(e) => setField("pollCompleteWinTemplate", e.target.value)} placeholder="${DEFAULT_POLL_COMPLETE_WIN_TEMPLATE}" />
                     </div>
                   </div>
                 </div>
@@ -1499,16 +1598,14 @@ function App() {
                               />
                             </td>
                             <td>
-                              <input
-                                type="checkbox"
+                              <${ToggleSwitch}
                                 checked=${row?.enabled !== false}
                                 onChange=${(e) => updateCustomCommandRow(idx, { enabled: e.target.checked })}
                                 disabled=${!canEditCommands || deleted}
                               />
                             </td>
                             <td>
-                              <input
-                                type="checkbox"
+                              <${ToggleSwitch}
                                 checked=${platforms.includes("twitch")}
                                 onChange=${(e) => {
                                   const next = new Set(platforms);
@@ -1520,8 +1617,7 @@ function App() {
                               />
                             </td>
                             <td>
-                              <input
-                                type="checkbox"
+                              <${ToggleSwitch}
                                 checked=${platforms.includes("discord")}
                                 onChange=${(e) => {
                                   const next = new Set(platforms);
@@ -1782,7 +1878,9 @@ function App() {
   }
 }
 
+initThemeToggle();
 initTopbarSession();
+initStreamerTheme();
 
 const rootEl = document.getElementById("adminRoot");
 if (rootEl) {

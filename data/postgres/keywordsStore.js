@@ -15,26 +15,54 @@ function normalizePhrase(value) {
     .toLowerCase();
 }
 
+function normalizeResponse(value) {
+  return String(value || "")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+}
+
+export function normalizeKeywordEntry(input) {
+  const raw =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? input
+      : { phrases: Array.isArray(input) ? input : [] };
+
+  const sourceList = Array.isArray(raw.phrases)
+    ? raw.phrases
+    : Array.isArray(raw.keywords)
+      ? raw.keywords
+      : Array.isArray(raw.list)
+        ? raw.list
+        : Array.isArray(input)
+          ? input
+          : [];
+
+  const seen = new Set();
+  const phrases = [];
+
+  for (const rawPhrase of sourceList) {
+    const phrase = normalizePhrase(rawPhrase);
+    if (!phrase || seen.has(phrase)) continue;
+    seen.add(phrase);
+    phrases.push(phrase);
+  }
+
+  return {
+    phrases,
+    response: normalizeResponse(raw.response),
+  };
+}
+
 export function normalizeKeywordsObject(input = {}) {
   const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   const out = {};
 
-  for (const [rawCategory, rawList] of Object.entries(src)) {
+  for (const [rawCategory, rawValue] of Object.entries(src)) {
     const category = normalizeCategory(rawCategory);
     if (!category) continue;
-    if (!Array.isArray(rawList)) continue;
-
-    const seen = new Set();
-    const phrases = [];
-
-    for (const rawPhrase of rawList) {
-      const phrase = normalizePhrase(rawPhrase);
-      if (!phrase || seen.has(phrase)) continue;
-      seen.add(phrase);
-      phrases.push(phrase);
-    }
-
-    out[category] = phrases;
+    const normalized = normalizeKeywordEntry(rawValue);
+    if (!normalized.phrases.length && !normalized.response) continue;
+    out[category] = normalized;
   }
 
   return out;
@@ -127,12 +155,16 @@ export async function addKeywordPhraseState({ schema, instance, category, phrase
   const current = await readKeywordsState({ schema, instance, fallbackWords: {}, migrateFallback: false });
   const next = normalizeKeywordsObject(current.keywords || {});
 
-  if (!Array.isArray(next[normalizedCategory])) {
-    next[normalizedCategory] = [];
+  if (!next[normalizedCategory] || typeof next[normalizedCategory] !== "object") {
+    next[normalizedCategory] = { phrases: [], response: "" };
   }
 
-  const exists = next[normalizedCategory].includes(normalizedPhrase);
-  if (!exists) next[normalizedCategory].push(normalizedPhrase);
+  if (!Array.isArray(next[normalizedCategory].phrases)) {
+    next[normalizedCategory].phrases = [];
+  }
+
+  const exists = next[normalizedCategory].phrases.includes(normalizedPhrase);
+  if (!exists) next[normalizedCategory].phrases.push(normalizedPhrase);
 
   await writeKeywordsState({ schema, instance, keywords: next });
   return {

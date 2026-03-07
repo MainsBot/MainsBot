@@ -151,6 +151,22 @@ function authHasRequiredScopes(auth, requiredScopes = []) {
   return hasAllScopes(auth?.scopes || [], requiredScopes);
 }
 
+function authHasAnyRequiredScope(auth, requiredScopes = []) {
+  const required = Array.isArray(requiredScopes)
+    ? requiredScopes.map((s) => String(s || "").trim()).filter(Boolean)
+    : [];
+  if (!required.length) return true;
+  const have = new Set(normalizeScopes(auth?.scopes || []).map((s) => s.toLowerCase()));
+  return required.some((scope) => have.has(String(scope || "").trim().toLowerCase()));
+}
+
+function getMissingScopes(auth, requiredScopes = []) {
+  const have = new Set(normalizeScopes(auth?.scopes || []).map((s) => s.toLowerCase()));
+  return (Array.isArray(requiredScopes) ? requiredScopes : []).filter(
+    (scope) => !have.has(String(scope || "").trim().toLowerCase())
+  );
+}
+
 function getStaticAppAccessToken() {
   return normalizeTwitchToken(process.env.APP_ACCESS_TOKEN || APP_ACCESS_TOKEN || "");
 }
@@ -1960,18 +1976,92 @@ async function resolveStreamerBroadcasterAuth({ minTtlSec = 120 } = {}) {
     );
   }
 
-  const broadcasterId = String(
-    process.env.TWITCH_CHAT_BROADCASTER_ID || CHANNEL_ID || auth?.userId || ""
+  const tokenUserId = String(auth?.userId || "").trim();
+  if (!tokenUserId) {
+    throw new Error(
+      "Streamer token missing user id. Re-link streamer via /auth/twitch/streamer."
+    );
+  }
+
+  const configuredBroadcasterId = String(
+    process.env.TWITCH_CHAT_BROADCASTER_ID || CHANNEL_ID || ""
   ).trim();
+  const broadcasterId = tokenUserId || configuredBroadcasterId;
   if (!broadcasterId) {
     throw new Error("Missing broadcaster id (set CHANNEL_ID / TWITCH_CHAT_BROADCASTER_ID).");
+  }
+
+  if (configuredBroadcasterId && configuredBroadcasterId !== tokenUserId) {
+    console.warn(
+      `[TWITCH][REDEMPTIONS] configured broadcaster id ${configuredBroadcasterId} does not match streamer token user ${tokenUserId}; using streamer token user id for channel point APIs.`
+    );
   }
 
   return {
     accessToken: String(auth.accessToken || "").trim(),
     clientId: String(auth.clientId || "").trim(),
+    userId: tokenUserId,
+    login: String(auth.login || "").trim(),
+    scopes: Array.isArray(auth.scopes) ? auth.scopes : [],
+    configuredBroadcasterId,
     broadcasterId,
   };
+}
+
+const REWARD_READ_SCOPES = Object.freeze([
+  "channel:read:redemptions",
+  "channel:manage:redemptions",
+]);
+
+const REWARD_MANAGE_SCOPES = Object.freeze(["channel:manage:redemptions"]);
+
+async function resolveRedemptionAuth({
+  minTtlSec = 120,
+  action = "manage rewards",
+  requiredAnyScopes = [],
+  requiredAllScopes = [],
+} = {}) {
+  const auth = await resolveStreamerBroadcasterAuth({ minTtlSec });
+  if (requiredAllScopes.length && !authHasRequiredScopes(auth, requiredAllScopes)) {
+    const missing = getMissingScopes(auth, requiredAllScopes);
+    throw new Error(
+      `Streamer token missing required scopes for ${action}: ${missing.join(", ")} (reauth /auth/twitch/streamer).`
+    );
+  }
+  if (requiredAnyScopes.length && !authHasAnyRequiredScope(auth, requiredAnyScopes)) {
+    throw new Error(
+      `Streamer token missing one of required scopes for ${action}: ${requiredAnyScopes.join(", ")} (reauth /auth/twitch/streamer).`
+    );
+  }
+  return auth;
+}
+
+function formatReward403Hint({ auth, action = "manage rewards", sameClientIdHint = false } = {}) {
+  const scopeList = normalizeScopes(auth?.scopes || []);
+  const tokenUserId = String(auth?.userId || "").trim() || "?";
+  const broadcasterId = String(auth?.broadcasterId || "").trim() || "?";
+  const login = String(auth?.login || "").trim() || "?";
+  const parts = [
+    `${action} failed with broadcaster/token mismatch or insufficient reward permissions.`,
+    `streamer_login=${login}`,
+    `token_user_id=${tokenUserId}`,
+    `broadcaster_id=${broadcasterId}`,
+    `scopes=${scopeList.join(",") || "none"}`,
+  ];
+  if (sameClientIdHint) {
+    parts.push(
+      "Existing rewards can only be updated, deleted, or fulfilled by the same Twitch client ID that created them."
+    );
+  }
+  return parts.join(" ");
+}
+
+function rethrowRewardError(error, { auth, action, sameClientIdHint = false } = {}) {
+  const message = String(error?.message || error || "").trim();
+  if (!/^Helix HTTP 403:/i.test(message)) {
+    throw error;
+  }
+  throw new Error(`${message} ${formatReward403Hint({ auth, action, sameClientIdHint })}`.trim());
 }
 
 function cleanRewardPatch(input = {}) {
@@ -2021,23 +2111,33 @@ function normalizeRedemptionStatus(status) {
 }
 
 export async function listCustomRewards({ onlyManageableRewards = true } = {}) {
-  const auth = await resolveStreamerBroadcasterAuth();
+  const auth = await resolveRedemptionAuth({
+    action: "list custom rewards",
+    requiredAnyScopes: REWARD_READ_SCOPES,
+  });
   const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards");
   url.searchParams.set("broadcaster_id", auth.broadcasterId);
   if (onlyManageableRewards != null) {
     url.searchParams.set("only_manageable_rewards", onlyManageableRewards ? "true" : "false");
   }
 
-  return fetchHelixJson({
-    url: url.toString(),
-    method: "GET",
-    clientId: auth.clientId,
-    accessToken: auth.accessToken,
-  });
+  try {
+    return await fetchHelixJson({
+      url: url.toString(),
+      method: "GET",
+      clientId: auth.clientId,
+      accessToken: auth.accessToken,
+    });
+  } catch (error) {
+    rethrowRewardError(error, { auth, action: "Listing custom rewards" });
+  }
 }
 
 export async function createCustomReward({ reward = {} } = {}) {
-  const auth = await resolveStreamerBroadcasterAuth();
+  const auth = await resolveRedemptionAuth({
+    action: "create custom reward",
+    requiredAllScopes: REWARD_MANAGE_SCOPES,
+  });
   const body = cleanRewardPatch(reward);
   if (!body.title) throw new Error("Missing reward.title");
   if (!Number.isFinite(Number(body.cost)) || Number(body.cost) < 1) {
@@ -2047,17 +2147,24 @@ export async function createCustomReward({ reward = {} } = {}) {
   const url = new URL("https://api.twitch.tv/helix/channel_points/custom_rewards");
   url.searchParams.set("broadcaster_id", auth.broadcasterId);
 
-  return fetchHelixJson({
-    url: url.toString(),
-    method: "POST",
-    clientId: auth.clientId,
-    accessToken: auth.accessToken,
-    body,
-  });
+  try {
+    return await fetchHelixJson({
+      url: url.toString(),
+      method: "POST",
+      clientId: auth.clientId,
+      accessToken: auth.accessToken,
+      body,
+    });
+  } catch (error) {
+    rethrowRewardError(error, { auth, action: "Creating custom reward" });
+  }
 }
 
 export async function updateCustomReward({ rewardId, reward = {} } = {}) {
-  const auth = await resolveStreamerBroadcasterAuth();
+  const auth = await resolveRedemptionAuth({
+    action: "update custom reward",
+    requiredAllScopes: REWARD_MANAGE_SCOPES,
+  });
   const id = String(rewardId || "").trim();
   if (!id) throw new Error("Missing rewardId");
 
@@ -2068,17 +2175,28 @@ export async function updateCustomReward({ rewardId, reward = {} } = {}) {
   url.searchParams.set("broadcaster_id", auth.broadcasterId);
   url.searchParams.set("id", id);
 
-  return fetchHelixJson({
-    url: url.toString(),
-    method: "PATCH",
-    clientId: auth.clientId,
-    accessToken: auth.accessToken,
-    body,
-  });
+  try {
+    return await fetchHelixJson({
+      url: url.toString(),
+      method: "PATCH",
+      clientId: auth.clientId,
+      accessToken: auth.accessToken,
+      body,
+    });
+  } catch (error) {
+    rethrowRewardError(error, {
+      auth,
+      action: "Updating custom reward",
+      sameClientIdHint: true,
+    });
+  }
 }
 
 export async function deleteCustomReward({ rewardId } = {}) {
-  const auth = await resolveStreamerBroadcasterAuth();
+  const auth = await resolveRedemptionAuth({
+    action: "delete custom reward",
+    requiredAllScopes: REWARD_MANAGE_SCOPES,
+  });
   const id = String(rewardId || "").trim();
   if (!id) throw new Error("Missing rewardId");
 
@@ -2086,13 +2204,21 @@ export async function deleteCustomReward({ rewardId } = {}) {
   url.searchParams.set("broadcaster_id", auth.broadcasterId);
   url.searchParams.set("id", id);
 
-  await fetchHelixJson({
-    url: url.toString(),
-    method: "DELETE",
-    clientId: auth.clientId,
-    accessToken: auth.accessToken,
-  });
-  return { ok: true };
+  try {
+    await fetchHelixJson({
+      url: url.toString(),
+      method: "DELETE",
+      clientId: auth.clientId,
+      accessToken: auth.accessToken,
+    });
+    return { ok: true };
+  } catch (error) {
+    rethrowRewardError(error, {
+      auth,
+      action: "Deleting custom reward",
+      sameClientIdHint: true,
+    });
+  }
 }
 
 export async function listRewardRedemptions({
@@ -2102,7 +2228,10 @@ export async function listRewardRedemptions({
   first = 50,
   after = "",
 } = {}) {
-  const auth = await resolveStreamerBroadcasterAuth();
+  const auth = await resolveRedemptionAuth({
+    action: "list reward redemptions",
+    requiredAnyScopes: REWARD_READ_SCOPES,
+  });
   const id = String(rewardId || "").trim();
   if (!id) throw new Error("Missing rewardId");
 
@@ -2115,12 +2244,16 @@ export async function listRewardRedemptions({
   url.searchParams.set("first", String(limit));
   if (String(after || "").trim()) url.searchParams.set("after", String(after).trim());
 
-  return fetchHelixJson({
-    url: url.toString(),
-    method: "GET",
-    clientId: auth.clientId,
-    accessToken: auth.accessToken,
-  });
+  try {
+    return await fetchHelixJson({
+      url: url.toString(),
+      method: "GET",
+      clientId: auth.clientId,
+      accessToken: auth.accessToken,
+    });
+  } catch (error) {
+    rethrowRewardError(error, { auth, action: "Listing reward redemptions" });
+  }
 }
 
 export async function updateRewardRedemptionStatus({
@@ -2128,7 +2261,10 @@ export async function updateRewardRedemptionStatus({
   redemptionIds = [],
   status = "FULFILLED",
 } = {}) {
-  const auth = await resolveStreamerBroadcasterAuth();
+  const auth = await resolveRedemptionAuth({
+    action: "update redemption status",
+    requiredAllScopes: REWARD_MANAGE_SCOPES,
+  });
   const id = String(rewardId || "").trim();
   if (!id) throw new Error("Missing rewardId");
 
@@ -2149,13 +2285,21 @@ export async function updateRewardRedemptionStatus({
     url.searchParams.append("id", redemptionId);
   }
 
-  return fetchHelixJson({
-    url: url.toString(),
-    method: "PATCH",
-    clientId: auth.clientId,
-    accessToken: auth.accessToken,
-    body: { status: normalizedStatus },
-  });
+  try {
+    return await fetchHelixJson({
+      url: url.toString(),
+      method: "PATCH",
+      clientId: auth.clientId,
+      accessToken: auth.accessToken,
+      body: { status: normalizedStatus },
+    });
+  } catch (error) {
+    rethrowRewardError(error, {
+      auth,
+      action: "Updating redemption status",
+      sameClientIdHint: true,
+    });
+  }
 }
 
 export const getLatestPredictionData = async () => {

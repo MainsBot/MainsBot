@@ -51,6 +51,39 @@ function Icon({ path, label = "" }) {
   `;
 }
 
+function ToggleSwitch({ checked, onChange, label = "" }) {
+  return html`
+    <label className="switch">
+      <input type="checkbox" checked=${Boolean(checked)} onChange=${onChange} />
+      <span className="switch__track"></span>
+      <span className="switch__label">${label || (checked ? "ON" : "OFF")}</span>
+    </label>
+  `;
+}
+
+function updateThemeToggleLabel() {
+  const button = document.getElementById("themeToggle");
+  if (!button) return;
+  const isLight = document.documentElement.dataset.theme === "light";
+  button.textContent = isLight ? "Dark" : "Light";
+}
+
+function initThemeToggle() {
+  const button = document.getElementById("themeToggle");
+  const saved = localStorage.getItem("theme");
+  document.documentElement.dataset.theme = saved === "light" ? "light" : "dark";
+  updateThemeToggleLabel();
+  if (!button || button.__themeInit) return;
+  button.__themeInit = true;
+  button.addEventListener("click", () => {
+    const isLight = document.documentElement.dataset.theme === "light";
+    const next = isLight ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("theme", next);
+    updateThemeToggleLabel();
+  });
+}
+
 async function initTopbarSession() {
   const right = document.getElementById("adminTopbarRight");
   if (!right) return;
@@ -384,14 +417,11 @@ function App() {
               `)}
             </select>
             <button className="btn btn--sm btn--ghost" onClick=${() => loadRewards()}><${Icon} path="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />Refresh</button>
-            <label className="row" style=${{ gap: "6px" }}>
-              <input
-                type="checkbox"
-                checked=${onlyManageable}
-                onChange=${(e) => setOnlyManageable(Boolean(e.target.checked))}
-              />
-              <span className="muted">Only manageable</span>
-            </label>
+            <${ToggleSwitch}
+              checked=${onlyManageable}
+              onChange=${(e) => setOnlyManageable(Boolean(e.target.checked))}
+              label="Manageable"
+            />
           </div>
 
           ${selectedReward && selectedReward.is_manageable === false
@@ -431,9 +461,21 @@ function App() {
           </div>
 
           <div className="row" style=${{ marginTop: "8px" }}>
-            <label><input type="checkbox" checked=${rewardDraft.is_enabled} onChange=${(e) => setRewardDraft((prev) => ({ ...prev, is_enabled: e.target.checked }))} /> Enabled</label>
-            <label><input type="checkbox" checked=${rewardDraft.is_user_input_required} onChange=${(e) => setRewardDraft((prev) => ({ ...prev, is_user_input_required: e.target.checked }))} /> User Input Required</label>
-            <label><input type="checkbox" checked=${rewardDraft.should_redemptions_skip_request_queue} onChange=${(e) => setRewardDraft((prev) => ({ ...prev, should_redemptions_skip_request_queue: e.target.checked }))} /> Auto-Fulfill</label>
+            <${ToggleSwitch}
+              checked=${rewardDraft.is_enabled}
+              onChange=${(e) => setRewardDraft((prev) => ({ ...prev, is_enabled: e.target.checked }))}
+              label="Enabled"
+            />
+            <${ToggleSwitch}
+              checked=${rewardDraft.is_user_input_required}
+              onChange=${(e) => setRewardDraft((prev) => ({ ...prev, is_user_input_required: e.target.checked }))}
+              label="User Input"
+            />
+            <${ToggleSwitch}
+              checked=${rewardDraft.should_redemptions_skip_request_queue}
+              onChange=${(e) => setRewardDraft((prev) => ({ ...prev, should_redemptions_skip_request_queue: e.target.checked }))}
+              label="Auto-Fulfill"
+            />
           </div>
 
           <div className="row" style=${{ marginTop: "10px" }}>
@@ -512,6 +554,7 @@ function App() {
   `;
 }
 
+initThemeToggle();
 initTopbarSession();
 initStreamerTheme();
 

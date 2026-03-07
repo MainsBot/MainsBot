@@ -64,6 +64,19 @@ function fmtUptime(ms) {
   return `${h}h ${m}m ${ss}s`;
 }
 
+function hasExplicitBotField(status = {}) {
+  if (!status || typeof status !== "object") return false;
+  return (
+    Number.isFinite(Number(status.startedAt)) ||
+    typeof status.ks === "boolean" ||
+    typeof status.timers === "boolean" ||
+    typeof status.keywords === "boolean" ||
+    typeof status.online === "boolean" ||
+    Boolean(String(status.currentMode || "").trim()) ||
+    Boolean(String(status.lastError || "").trim())
+  );
+}
+
 function pad2(value) {
   return String(Math.max(0, Number(value) || 0)).padStart(2, "0");
 }
@@ -370,13 +383,18 @@ async function refreshStatus() {
     const s = await r.json();
     applyStreamerThemeFromStatus(s);
 
-    const online = !!s.online;
+    const hasBotRuntime = hasExplicitBotField(s) && s.statusSource !== "web";
+    const online =
+      hasBotRuntime && typeof s.online === "boolean" ? s.online : true;
+    const pillText = hasBotRuntime ? (online ? "ONLINE" : "OFFLINE") : "READY";
 
     setClass(
       els.pill,
-      `status__pill ${online ? "status__pill--ok" : "status__pill--bad"}`
+      `status__pill ${
+        pillText === "OFFLINE" ? "status__pill--bad" : "status__pill--ok"
+      }`
     );
-    setText(els.pill, online ? "ONLINE" : "OFFLINE");
+    setText(els.pill, pillText);
 
     LAST_STATUS = s;
 
@@ -407,7 +425,12 @@ async function refreshStatus() {
       }, 1000);
     }
 
-    const ksOn = !!s.ks;
+    const ksKnown = typeof s.ks === "boolean";
+    const ksOn = ksKnown ? !!s.ks : null;
+    const timersKnown =
+      typeof s.timers === "boolean" ||
+      Array.isArray(s.timers) ||
+      (s.timers && typeof s.timers === "object");
     const timersOn =
       typeof s.timers === "boolean"
         ? s.timers
@@ -415,6 +438,10 @@ async function refreshStatus() {
         ? s.timers.length > 0
         : Object.keys(s.timers || {}).length > 0;
 
+    const keywordsKnown =
+      typeof s.keywords === "boolean" ||
+      Array.isArray(s.keywords) ||
+      (s.keywords && typeof s.keywords === "object");
     const keywordsOn =
       typeof s.keywords === "boolean"
         ? s.keywords
@@ -431,9 +458,9 @@ async function refreshStatus() {
         ? modePretty.charAt(0).toUpperCase() + modePretty.slice(1)
         : "-";
 
-    setText(els.ks, ksOn ? "ON" : "OFF");
-    setText(els.timers, timersOn ? "ON" : "OFF");
-    setText(els.keywords, keywordsOn ? "ON" : "OFF");
+    setText(els.ks, ksKnown ? (ksOn ? "ON" : "OFF") : "-");
+    setText(els.timers, timersKnown ? (timersOn ? "ON" : "OFF") : "-");
+    setText(els.keywords, keywordsKnown ? (keywordsOn ? "ON" : "OFF") : "-");
     setText(els.mode, modeLabel);
 
     setLastErrorDisplay(s.lastError);
