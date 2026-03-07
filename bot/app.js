@@ -916,6 +916,18 @@ async function maybeAnnounceSpotifyTrack(snapshot = {}) {
   const isActivelyPlaying = Boolean(snapshot?.playing && snapshot?.isPlaying);
   if (!isActivelyPlaying || !nextKey || !changed) return;
 
+  let streamIsLive = false;
+  try {
+    streamIsLive = await TWITCH_FUNCTIONS.isLive();
+  } catch (e) {
+    console.warn(
+      "[spotify] skipped song-change announcement: failed to verify live status:",
+      String(e?.message || e)
+    );
+    return;
+  }
+  if (!streamIsLive) return;
+
   const message = renderSpotifyAnnouncementMessage(settings, snapshot);
   if (!message) return;
 
