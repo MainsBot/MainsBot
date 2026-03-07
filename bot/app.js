@@ -165,10 +165,6 @@ const BOT_TOKEN = normalizeAuthToken(TWITCH_BOT_STORE.access_token);
 const BOT_OAUTH = BOT_TOKEN; // legacy alias kept to avoid rewriting the whole codebase
 const BOT_NAME = String(TWITCH_BOT_STORE.login || process.env.BOT_NAME || "").trim(); // bot username
 const BOT_ID = String(TWITCH_BOT_STORE.user_id || process.env.BOT_ID || "").trim(); // bot user-id
-const BOT_TOKEN_SCOPES = new Set(
-  normalizeScopeList(TWITCH_BOT_STORE.scopes || TWITCH_BOT_STORE.scope || [])
-);
-
 const CHANNEL_NAME =
   String(TWITCH_STREAMER_STORE.login || process.env.CHANNEL_NAME || "").trim(); // name of the channel for the bot to be in
 const CHANNEL_NAME_DISPLAY = process.env.CHANNEL_NAME_DISPLAY;
@@ -308,16 +304,9 @@ const STREAMER_TOKEN =
 const TWITCH_CHAT_CONNECT_IRC = flagFromEnv(
   process.env.TWITCH_CHAT_CONNECT_IRC ?? "true"
 );
-const HAS_BOT_IRC_AUTH = Boolean(normalizeAuthToken(BOT_OAUTH));
 const TWITCH_CHAT_CAN_USE_IRC_FALLBACK = false;
-const TWITCH_IRC_REQUIRED_SCOPES = ["chat:read"];
-const TWITCH_IRC_MISSING_SCOPES = TWITCH_IRC_REQUIRED_SCOPES.filter(
-  (scope) => !BOT_TOKEN_SCOPES.has(String(scope || "").trim().toLowerCase())
-);
 const TWITCH_CHAT_CAN_CONNECT_IRC =
-  TWITCH_CHAT_CONNECT_IRC &&
-  HAS_BOT_IRC_AUTH &&
-  TWITCH_IRC_MISSING_SCOPES.length === 0;
+  TWITCH_CHAT_CONNECT_IRC && Boolean(String(CHANNEL_NAME || "").trim());
 
 const WAIT_REGISTER = 5 * 60 * 1000; // number of milliseconds, to wait before starting to get stream information
 const PLAYTIME_TICK_MS = 60 * 1000; // how often to persist playtime and check game changes
@@ -1104,25 +1093,21 @@ var streamNumber = Object.keys(STREAMS).length;
 // ---------- TWITCH / IRC (tmi.js) ----------
 if (!TWITCH_CHAT_CONNECT_IRC) {
   console.log(
-    "[TWITCH][IRC] login disabled; Twitch chat intake, Twitch chat logging, and Twitch-side commands are off."
+    "[TWITCH][IRC] intake disabled; Twitch chat intake, Twitch chat logging, and Twitch-side commands are off."
   );
-} else if (!HAS_BOT_IRC_AUTH) {
+} else if (!CHANNEL_NAME) {
   console.warn(
-    "[TWITCH][IRC] bot token missing from Redis token store; skipping IRC login. Link /auth/twitch/bot."
-  );
-} else if (TWITCH_IRC_MISSING_SCOPES.length) {
-  console.warn(
-    `[TWITCH][IRC] bot token missing required IRC scopes: ${TWITCH_IRC_MISSING_SCOPES.join(", ")} (reauth /auth/twitch/bot). Skipping IRC login.`
+    "[TWITCH][IRC] channel login is missing; cannot join Twitch chat."
   );
 } else {
   console.log(
-    `[TWITCH][IRC] connect requested as login=${BOT_NAME || "(missing)"} user_id=${BOT_ID || "(missing)"} channel=${CHANNEL_NAME || "(missing)"}`
+    `[TWITCH][IRC] connect requested as anonymous read-only TMI client for #${CHANNEL_NAME}; outbound chat stays on Helix.`
   );
 }
 
 const client = createTmiClient({
-  username: BOT_NAME,
-  oauthToken: BOT_OAUTH,
+  username: "",
+  oauthToken: "",
   channelName: CHANNEL_NAME,
   debug: false,
 });
@@ -1645,6 +1630,23 @@ attachClientEventLogs({
   appendLog,
   logRecentCommandResponse,
   defaultChannelName: CHANNEL_NAME,
+});
+
+client.on("connected", (addr, port) => {
+  console.log(
+    `[TWITCH][IRC] connected ${String(addr || "").trim() || "?"}:${String(port || "").trim() || "?"} channel=#${CHANNEL_NAME || "?"} mode=read-only`
+  );
+});
+
+client.on("disconnected", (reason) => {
+  console.warn(`[TWITCH][IRC] disconnected: ${String(reason || "unknown")}`);
+});
+
+client.on("join", (channel, username, self) => {
+  if (!self) return;
+  console.log(
+    `[TWITCH][IRC] joined ${String(channel || "").trim() || "#?"} as ${client.__mainsbotAnonymous ? "anonymous" : String(username || "").trim() || "unknown"}`
+  );
 });
 
 if (TWITCH_CHAT_CAN_CONNECT_IRC) {
@@ -3235,14 +3237,14 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       if (isAdmin || isBroadcaster) {
         if (lowerMessage == "!part" || lowerMessage == "!disconnect") {
           if (!TWITCH_CHAT_CAN_CONNECT_IRC) {
-            client.say(CHANNEL_NAME, "IRC login is disabled for this instance.");
+            client.say(CHANNEL_NAME, "IRC intake is disabled for this instance.");
             return;
           }
           client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}.`);
           client.disconnect()
         } else if (lowerMessage == "!joinchannel") {
           if (!TWITCH_CHAT_CAN_CONNECT_IRC) {
-            client.say(CHANNEL_NAME, "IRC login is disabled for this instance.");
+            client.say(CHANNEL_NAME, "IRC intake is disabled for this instance.");
             return;
           }
           client.connect()
