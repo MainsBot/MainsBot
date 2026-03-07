@@ -453,21 +453,8 @@ function applyTwitchSection(ini) {
     setEnvOverride("CHANNEL_NAME_DISPLAY", tw.channel_name_display || tw.channelNameDisplay);
   }
 
-  // Optional legacy IRC credentials (prefer token store via /auth/*).
-  // These map to the historical env var names used throughout the bot.
-  if (tw.bot_token || tw.botToken) setEnvOverride("BOT_TOKEN", tw.bot_token || tw.botToken);
-  if (tw.bot_oauth || tw.botOauth || tw.bot_oauth_token || tw.botOauthToken) {
-    setEnvOverride(
-      "BOT_OAUTH",
-      tw.bot_oauth || tw.botOauth || tw.bot_oauth_token || tw.botOauthToken
-    );
-  }
-  if (tw.streamer_token || tw.streamerToken || tw.stramer_token || tw.stramerToken) {
-    setEnvOverride(
-      "STREAMER_TOKEN",
-      tw.streamer_token || tw.streamerToken || tw.stramer_token || tw.stramerToken
-    );
-  }
+  // Legacy direct OAuth tokens are intentionally ignored.
+  // Twitch bot/streamer tokens must come from the Redis token store via /auth/*.
 
   if (tw.client_id || tw.clientId) setEnvOverride("CLIENT_ID", tw.client_id || tw.clientId);
   if (tw.client_secret || tw.clientSecret) setEnvOverride("CLIENT_SECRET", tw.client_secret || tw.clientSecret);

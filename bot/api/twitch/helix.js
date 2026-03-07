@@ -23,10 +23,7 @@ const TWITCH_TOKEN_STORE = readTokenStore();
 const TWITCH_BOT_STORE = TWITCH_TOKEN_STORE?.bot || {};
 const TWITCH_STREAMER_STORE = TWITCH_TOKEN_STORE?.streamer || {};
 
-const BOT_TOKEN =
-  process.env.BOT_TOKEN ||
-  process.env.BOT_OAUTH ||
-  normalizeTwitchToken(TWITCH_BOT_STORE.access_token); // legacy/auth token used by non-Helix helpers
+const BOT_TOKEN = normalizeTwitchToken(TWITCH_BOT_STORE.access_token);
 const BOT_OAUTH = BOT_TOKEN; // legacy alias retained
 const COOKIE = process.env.COOKIE; // <--- change this to your cookie
 
@@ -85,10 +82,7 @@ const TWITCH_CHAT_CLIENT_ID =
   String(TWITCH_BOT_STORE.client_id || "").trim() ||
   String(TWITCH_STREAMER_STORE.client_id || "").trim() ||
   CLIENT_ID;
-const TWITCH_CHAT_TOKEN =
-  process.env.TWITCH_CHAT_TOKEN ||
-  BOT_TOKEN ||
-  "";
+const TWITCH_CHAT_TOKEN = BOT_TOKEN || "";
 const TWITCH_CHAT_SENDER_ID =
   process.env.TWITCH_CHAT_SENDER_ID || BOT_ID || "";
 const TWITCH_CHAT_BROADCASTER_ID =
@@ -302,10 +296,6 @@ export function getHelixChatConfig(overrides = {}) {
   const botScopesOk = hasAllScopes(runtimeBotScopes, requiredBotScopes);
   const streamerScopesOk = hasAllScopes(runtimeStreamerScopes, requiredStreamerScopes);
 
-  const allowLegacyTokenFallback =
-    !TWITCH_CHAT_REQUIRE_TOKEN_STORE &&
-    /^(1|true|yes|on)$/i.test(String(process.env.TWITCH_CHAT_ALLOW_LEGACY_TOKENS ?? "true").trim());
-
   return {
     useHelix:
       typeof overrides.useHelix === "boolean"
@@ -329,9 +319,7 @@ export function getHelixChatConfig(overrides = {}) {
         CLIENT_SECRET
     ).trim(),
     token: normalizeTwitchToken(
-      overrides.token ||
-        (TWITCH_CHAT_REQUIRE_TOKEN_STORE ? runtimeToken : runtimeToken || (allowLegacyTokenFallback ? (process.env.TWITCH_CHAT_TOKEN || TWITCH_CHAT_TOKEN) : "")) ||
-        ""
+      overrides.token || runtimeToken || ""
     ),
     senderId: String(
       overrides.senderId ||

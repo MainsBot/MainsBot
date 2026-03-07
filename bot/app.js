@@ -152,10 +152,7 @@ const TWITCH_TOKEN_STORE = readTokenStore();
 const TWITCH_BOT_STORE = TWITCH_TOKEN_STORE?.bot || {};
 const TWITCH_STREAMER_STORE = TWITCH_TOKEN_STORE?.streamer || {};
 
-const BOT_TOKEN =
-  process.env.BOT_TOKEN ||
-  process.env.BOT_OAUTH ||
-  normalizeAuthToken(TWITCH_BOT_STORE.access_token); // keep IRC auth stable, fallback to token store if env is missing
+const BOT_TOKEN = normalizeAuthToken(TWITCH_BOT_STORE.access_token);
 const BOT_OAUTH = BOT_TOKEN; // legacy alias kept to avoid rewriting the whole codebase
 const BOT_NAME = process.env.BOT_NAME || String(TWITCH_BOT_STORE.login || "").trim(); // bot username
 const BOT_ID = process.env.BOT_ID || String(TWITCH_BOT_STORE.user_id || "").trim(); // bot user-id

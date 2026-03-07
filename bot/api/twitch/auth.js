@@ -380,9 +380,7 @@ export function buildTwitchAuthSettings(env = process.env) {
             ""
         ).trim(),
         scopes: parseScopes(env.TWITCH_BOT_SCOPES, DEFAULT_BOT_SCOPES),
-        fallbackAccessToken: normalizeToken(
-          env.BOT_TOKEN || env.TWITCH_CHAT_TOKEN || env.BOT_OAUTH || ""
-        ),
+        fallbackAccessToken: "",
         fallbackUserId: String(
           env.TWITCH_CHAT_SENDER_ID || env.BOT_ID || ""
         ).trim(),
@@ -403,12 +401,7 @@ export function buildTwitchAuthSettings(env = process.env) {
             ""
         ).trim(),
         scopes: parseScopes(env.TWITCH_STREAMER_SCOPES, DEFAULT_STREAMER_SCOPES),
-        fallbackAccessToken: normalizeToken(
-          env.STRAMER_TOKEN ||
-            env.STREAMER_TOKEN ||
-            env.TWITCH_STREAMER_TOKEN ||
-            ""
-        ),
+        fallbackAccessToken: "",
         fallbackUserId: String(
           env.TWITCH_CHAT_BROADCASTER_ID || env.CHANNEL_ID || ""
         ).trim(),
