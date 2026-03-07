@@ -337,6 +337,8 @@ const keywordResponseResolver = createKeywordResponseResolver(RESPONSES?.respons
 
 const INSTANCE_NAME = resolveInstanceName();
 const STATE_SCHEMA = resolveStateSchema();
+const STATE_BACKEND = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
+const SETTINGS_STATE_KEY = "settings";
 const BOT_STARTUP_MESSAGE = String(process.env.BOT_STARTUP_MESSAGE || "").trim();
 const BOT_SHUTDOWN_MESSAGE = String(process.env.BOT_SHUTDOWN_MESSAGE || "").trim();
 
@@ -829,12 +831,76 @@ function loadSettings() {
   return withSettingsDefaults(SETTINGS);
 }
 
+function applySettingsRuntime(next) {
+  if (!next || typeof next !== "object") return withSettingsDefaults(SETTINGS);
+  SETTINGS = withSettingsDefaults(next);
+  try {
+    if (BOT_STATUS && typeof BOT_STATUS === "object") {
+      BOT_STATUS.ks = SETTINGS?.ks;
+      BOT_STATUS.currentMode = SETTINGS?.currentMode;
+      BOT_STATUS.timers = SETTINGS?.timers;
+      BOT_STATUS.keywords = SETTINGS?.keywords;
+    }
+  } catch {}
+  return SETTINGS;
+}
+
 function saveSettings(next) {
   if (!next || typeof next !== "object") return;
-  SETTINGS = withSettingsDefaults(next);
+  applySettingsRuntime(next);
   try {
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2), "utf8");
   } catch {}
+}
+
+function isPostgresStateBackend() {
+  return STATE_BACKEND === "postgres" || STATE_BACKEND === "pg";
+}
+
+async function readSettingsFromSharedState() {
+  if (!isPostgresStateBackend()) {
+    return readSettingsFromDisk();
+  }
+
+  try {
+    await ensureStateTable({ schema: STATE_SCHEMA });
+    const raw = await readStateValue({
+      schema: STATE_SCHEMA,
+      instance: INSTANCE_NAME,
+      key: SETTINGS_STATE_KEY,
+      fallback: null,
+    });
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      return withSettingsDefaults(raw);
+    }
+  } catch {}
+
+  return readSettingsFromDisk();
+}
+
+let settingsSharedSyncInFlight = null;
+async function syncSettingsFromSharedState({ force = false } = {}) {
+  if (!isPostgresStateBackend()) return withSettingsDefaults(SETTINGS);
+  if (!force && settingsSharedSyncInFlight) return settingsSharedSyncInFlight;
+
+  settingsSharedSyncInFlight = (async () => {
+    const fresh = await readSettingsFromSharedState();
+    const nextJson = JSON.stringify(withSettingsDefaults(fresh));
+    const prevJson = JSON.stringify(withSettingsDefaults(SETTINGS));
+    if (nextJson !== prevJson) {
+      applySettingsRuntime(fresh);
+      try {
+        fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2), "utf8");
+      } catch {}
+    }
+    return SETTINGS;
+  })();
+
+  try {
+    return await settingsSharedSyncInFlight;
+  } finally {
+    settingsSharedSyncInFlight = null;
+  }
 }
 
 let EXTERNAL_STATUS = {
@@ -1030,9 +1096,19 @@ function logSettingsChanges(prev, next) {
 startSettingsWatcher({
   filePath: SETTINGS_PATH,
   readSnapshot: readSettingsSnapshot,
-  onChange: logSettingsChanges,
+  onChange: (prev, next) => {
+    applySettingsRuntime(readSettingsFromDisk());
+    logSettingsChanges(prev, next);
+  },
   intervalMs: 2000,
 });
+
+if (isPostgresStateBackend()) {
+  void syncSettingsFromSharedState({ force: true }).catch(() => {});
+  setInterval(() => {
+    void syncSettingsFromSharedState().catch(() => {});
+  }, 2000);
+}
 
 async function refreshExternalStatus() {
   const previousStatus =

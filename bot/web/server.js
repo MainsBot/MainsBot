@@ -556,6 +556,7 @@ async function getStatusSnapshot() {
   }
 
   const base = snapshot && typeof snapshot === "object" ? { ...snapshot } : {};
+  const sharedSettings = await loadSettingsStateDirect().catch(() => ({}));
   let themeColor = String(
     base.twitchThemeColor || base.themeColor || base.streamerColor || ""
   )
@@ -601,6 +602,11 @@ async function getStatusSnapshot() {
     themeColor: themeColor || null,
     twitchThemeColor: themeColor || null,
     ...base,
+    ks: sharedSettings?.ks ?? base.ks ?? null,
+    timers: sharedSettings?.timers ?? base.timers ?? null,
+    keywords: sharedSettings?.keywords ?? base.keywords ?? null,
+    currentMode: String(sharedSettings?.currentMode || base.currentMode || "").trim() || null,
+    currentGame: String(sharedSettings?.currentGame || base.currentGame || "").trim() || null,
     ...(themeColor ? { themeColor, twitchThemeColor: themeColor } : {}),
   };
 }
@@ -870,11 +876,64 @@ function resolveEnvPath(envName, fallbackRel) {
 const SETTINGS_FILE_PATH = resolveEnvPath("SETTINGS_PATH", "./SETTINGS.json");
 const WORDS_FILE_PATH = resolveEnvPath("WORDS_PATH", "./WORDS.json");
 const QUOTES_FILE_PATH = resolveEnvPath("QUOTES_PATH", "./QUOTES.json");
-const REDEMPTIONS_LOG_PATH =
-  abs(String(process.env.REDEMPTIONS_LOG_PATH || "").trim()) ||
-  abs(DATA_DIR ? path.join(DATA_DIR, "d", "REDEMPTIONS_LOG.json") : "./data/REDEMPTIONS_LOG.json");
-const CUSTOM_COMMANDS_SCHEMA = resolveStateSchema();
-const CUSTOM_COMMANDS_STATE_KEY = "custom_commands";
+  const REDEMPTIONS_LOG_PATH =
+    abs(String(process.env.REDEMPTIONS_LOG_PATH || "").trim()) ||
+    abs(DATA_DIR ? path.join(DATA_DIR, "d", "REDEMPTIONS_LOG.json") : "./data/REDEMPTIONS_LOG.json");
+  const STATE_BACKEND = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
+  const CUSTOM_COMMANDS_SCHEMA = resolveStateSchema();
+  const CUSTOM_COMMANDS_STATE_KEY = "custom_commands";
+  const SETTINGS_STATE_KEY = "settings";
+
+  function isPostgresStateBackend() {
+    return STATE_BACKEND === "postgres" || STATE_BACKEND === "pg";
+  }
+
+  async function loadSettingsStateDirect() {
+    if (isPostgresStateBackend()) {
+      try {
+        await ensureStateTable({ schema: CUSTOM_COMMANDS_SCHEMA });
+        const raw = await readStateValue({
+          schema: CUSTOM_COMMANDS_SCHEMA,
+          instance: CUSTOM_COMMANDS_INSTANCE,
+          key: SETTINGS_STATE_KEY,
+          fallback: null,
+        });
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          return sanitizeSettingsForStorage(raw);
+        }
+      } catch {}
+    }
+
+    let settingsObj = {};
+    try {
+      const raw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
+      const parsed = safeJsonParse(raw, null);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        settingsObj = parsed;
+      }
+    } catch {}
+
+    return sanitizeSettingsForStorage(settingsObj);
+  }
+
+  async function saveSettingsStateDirect(nextSettings = {}) {
+    const sanitized = sanitizeSettingsForStorage(nextSettings);
+
+    if (isPostgresStateBackend()) {
+      await ensureStateTable({ schema: CUSTOM_COMMANDS_SCHEMA });
+      await writeStateValue({
+        schema: CUSTOM_COMMANDS_SCHEMA,
+        instance: CUSTOM_COMMANDS_INSTANCE,
+        key: SETTINGS_STATE_KEY,
+        value: sanitized,
+      });
+      return sanitized;
+    }
+
+    fs.mkdirSync(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(sanitized, null, 2), "utf8");
+    return sanitized;
+  }
 
 function normalizeCustomCommandName(value) {
   const raw = String(value || "").trim().toLowerCase();
@@ -4421,16 +4480,7 @@ const webServer = http.createServer(async (req, res) => {
     const adminRole = getAdminSessionRole(adminSession);
 
     if (method === "GET") {
-      let settingsObj = {};
-      try {
-        const raw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
-        const parsed = safeJsonParse(raw, null);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          settingsObj = parsed;
-        }
-      } catch {}
-
-      const sanitizedSettingsObj = sanitizeSettingsForStorage(settingsObj);
+      const sanitizedSettingsObj = await loadSettingsStateDirect();
       const backendRaw = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
       const backend = backendRaw === "pg" ? "postgres" : (backendRaw || "file");
       return sendJsonResponse(
@@ -4470,19 +4520,14 @@ const webServer = http.createServer(async (req, res) => {
         const sanitized = sanitizeSettingsForStorage(nextForSanitize);
         validateSettingsForStorageOrThrow(sanitized);
 
-        let existingParsed = null;
-        try {
-          const existingRaw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
-          existingParsed = safeJsonParse(existingRaw, null);
-          if (existingParsed && typeof existingParsed === "object" && !Array.isArray(existingParsed)) {
-            const existingGame = String(existingParsed.currentGame || "").trim();
-            if (existingGame) sanitized.currentGame = existingGame;
-          }
-        } catch {}
+        const existingParsed = await loadSettingsStateDirect().catch(() => null);
+        if (existingParsed && typeof existingParsed === "object" && !Array.isArray(existingParsed)) {
+          const existingGame = String(existingParsed.currentGame || "").trim();
+          if (existingGame) sanitized.currentGame = existingGame;
+        }
 
-        fs.mkdirSync(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
-        fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(sanitized, null, 2), "utf8");
-        await flushStateNow();
+        await saveSettingsStateDirect(sanitized);
+        if (isPostgresStateBackend()) await flushStateNow();
         queueActivityLog({
           action: "admin_save_settings",
           source: "web",
@@ -5164,19 +5209,14 @@ const webServer = http.createServer(async (req, res) => {
         delete nextForSanitize.currentGame;
         const sanitized = sanitizeSettingsForStorage(nextForSanitize);
 
-        let existingParsed = null;
-        try {
-          const existingRaw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
-          existingParsed = safeJsonParse(existingRaw, null);
-          if (existingParsed && typeof existingParsed === "object" && !Array.isArray(existingParsed)) {
-            const existingGame = String(existingParsed.currentGame || "").trim();
-            if (existingGame) sanitized.currentGame = existingGame;
-          }
-        } catch {}
+        const existingParsed = await loadSettingsStateDirect().catch(() => null);
+        if (existingParsed && typeof existingParsed === "object" && !Array.isArray(existingParsed)) {
+          const existingGame = String(existingParsed.currentGame || "").trim();
+          if (existingGame) sanitized.currentGame = existingGame;
+        }
 
-        fs.mkdirSync(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
-        fs.writeFileSync(SETTINGS_FILE_PATH, JSON.stringify(sanitized, null, 2), "utf8");
-        await flushStateNow();
+        await saveSettingsStateDirect(sanitized);
+        if (isPostgresStateBackend()) await flushStateNow();
         queueActivityLog({
           action: "admin_save_settings",
           source: "web",
@@ -5272,14 +5312,7 @@ const webServer = http.createServer(async (req, res) => {
         );
       }
 
-      let settingsObj = {};
-      try {
-        const raw = fs.readFileSync(SETTINGS_FILE_PATH, "utf8");
-        const parsed = safeJsonParse(raw, null);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          settingsObj = parsed;
-        }
-      } catch {}
+      let settingsObj = await loadSettingsStateDirect();
 
       settingsObj = sanitizeSettingsForStorage({
         ...settingsObj,
