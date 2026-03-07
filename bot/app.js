@@ -148,6 +148,15 @@ function normalizeAuthToken(value) {
     .replace(/^bearer\s+/i, "");
 }
 
+function normalizeScopeList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry || "").trim().toLowerCase())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 const TWITCH_TOKEN_STORE = readTokenStore();
 const TWITCH_BOT_STORE = TWITCH_TOKEN_STORE?.bot || {};
 const TWITCH_STREAMER_STORE = TWITCH_TOKEN_STORE?.streamer || {};
@@ -156,6 +165,9 @@ const BOT_TOKEN = normalizeAuthToken(TWITCH_BOT_STORE.access_token);
 const BOT_OAUTH = BOT_TOKEN; // legacy alias kept to avoid rewriting the whole codebase
 const BOT_NAME = process.env.BOT_NAME || String(TWITCH_BOT_STORE.login || "").trim(); // bot username
 const BOT_ID = process.env.BOT_ID || String(TWITCH_BOT_STORE.user_id || "").trim(); // bot user-id
+const BOT_TOKEN_SCOPES = new Set(
+  normalizeScopeList(TWITCH_BOT_STORE.scopes || TWITCH_BOT_STORE.scope || [])
+);
 
 const CHANNEL_NAME =
   process.env.CHANNEL_NAME ||
@@ -300,6 +312,14 @@ const TWITCH_CHAT_CONNECT_IRC = flagFromEnv(
 );
 const HAS_BOT_IRC_AUTH = Boolean(normalizeAuthToken(BOT_OAUTH));
 const TWITCH_CHAT_CAN_USE_IRC_FALLBACK = false;
+const TWITCH_IRC_REQUIRED_SCOPES = ["chat:read"];
+const TWITCH_IRC_MISSING_SCOPES = TWITCH_IRC_REQUIRED_SCOPES.filter(
+  (scope) => !BOT_TOKEN_SCOPES.has(String(scope || "").trim().toLowerCase())
+);
+const TWITCH_CHAT_CAN_CONNECT_IRC =
+  TWITCH_CHAT_CONNECT_IRC &&
+  HAS_BOT_IRC_AUTH &&
+  TWITCH_IRC_MISSING_SCOPES.length === 0;
 
 const WAIT_REGISTER = 5 * 60 * 1000; // number of milliseconds, to wait before starting to get stream information
 const PLAYTIME_TICK_MS = 60 * 1000; // how often to persist playtime and check game changes
@@ -1090,7 +1110,11 @@ if (!TWITCH_CHAT_CONNECT_IRC) {
   );
 } else if (!HAS_BOT_IRC_AUTH) {
   console.warn(
-    "[TWITCH][IRC] BOT_OAUTH missing; starting anonymous read-only IRC client. Outbound chat will require Helix auth and IRC fallback is disabled until /auth/twitch/bot is linked."
+    "[TWITCH][IRC] bot token missing from Redis token store; skipping IRC login. Link /auth/twitch/bot."
+  );
+} else if (TWITCH_IRC_MISSING_SCOPES.length) {
+  console.warn(
+    `[TWITCH][IRC] bot token missing required IRC scopes: ${TWITCH_IRC_MISSING_SCOPES.join(", ")} (reauth /auth/twitch/bot). Skipping IRC login.`
   );
 }
 
@@ -1621,7 +1645,7 @@ attachClientEventLogs({
   defaultChannelName: CHANNEL_NAME,
 });
 
-if (TWITCH_CHAT_CONNECT_IRC) {
+if (TWITCH_CHAT_CAN_CONNECT_IRC) {
   client.once("connected", () => {
     if (!BOT_STARTUP_MESSAGE) return;
     void sendLifecycleChatMessage(BOT_STARTUP_MESSAGE, { signal: "startup" });
@@ -3208,14 +3232,14 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       }
       if (isAdmin || isBroadcaster) {
         if (lowerMessage == "!part" || lowerMessage == "!disconnect") {
-          if (!TWITCH_CHAT_CONNECT_IRC) {
+          if (!TWITCH_CHAT_CAN_CONNECT_IRC) {
             client.say(CHANNEL_NAME, "IRC login is disabled for this instance.");
             return;
           }
           client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}.`);
           client.disconnect()
         } else if (lowerMessage == "!joinchannel") {
-          if (!TWITCH_CHAT_CONNECT_IRC) {
+          if (!TWITCH_CHAT_CAN_CONNECT_IRC) {
             client.say(CHANNEL_NAME, "IRC login is disabled for this instance.");
             return;
           }
@@ -3279,7 +3303,7 @@ function setStatus(patch) {
 function getStatusSnapshot() {
   let settings;
   try {
-    settings = JSON.parse(fs.readFileSync("./SETTINGS.json"));
+    settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
   } catch {}
   const now = Date.now();
 

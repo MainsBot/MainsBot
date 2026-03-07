@@ -15,6 +15,8 @@ export const TWITCH_ROLES = Object.freeze({
 });
 
 const DEFAULT_BOT_SCOPES = [
+  "chat:read",
+  "chat:edit",
   "user:read:chat",
   "user:write:chat",
   "user:bot",

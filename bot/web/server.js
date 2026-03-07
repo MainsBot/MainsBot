@@ -581,6 +581,8 @@ async function getStatusSnapshot() {
   }
 
   return {
+    online: typeof base.online === "boolean" ? base.online : true,
+    statusSource: typeof base.online === "boolean" ? "bot" : "web",
     instance: String(base.instance || resolveInstanceName() || "").trim() || null,
     botName: String(base.botName || TWITCH_BOT_NAME || "").trim() || null,
     botDisplayName:
