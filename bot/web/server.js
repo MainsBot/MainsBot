@@ -12,7 +12,11 @@ import { minify as terserMinify } from "terser";
 import CleanCSS from "clean-css";
 
 import { flushStateNow } from "../../data/postgres/stateInterceptor.js";
-import { normalizeKeywordsObject } from "../../data/postgres/keywordsStore.js";
+import {
+  normalizeKeywordsObject,
+  readKeywordsState,
+  writeKeywordsState,
+} from "../../data/postgres/keywordsStore.js";
 import { appendActivityLogEntryState, readActivityLogState } from "../../data/postgres/activityLogStore.js";
 import { getTopCommandsState } from "../../data/postgres/commandUsageStore.js";
 import { ensureStateTable, readStateValue, writeStateValue } from "../../data/postgres/stateStore.js";
@@ -555,8 +559,19 @@ async function getStatusSnapshot() {
     snapshot = {};
   }
 
-  const base = snapshot && typeof snapshot === "object" ? { ...snapshot } : {};
+  const runtimeState = await loadRuntimeStatusStateDirect().catch(() => null);
+  const base = {
+    ...(runtimeState && typeof runtimeState === "object" && !Array.isArray(runtimeState)
+      ? runtimeState
+      : {}),
+    ...(snapshot && typeof snapshot === "object" ? snapshot : {}),
+  };
   const sharedSettings = await loadSettingsStateDirect().catch(() => ({}));
+  const hasBotRuntime =
+    Number.isFinite(Number(base.startedAt)) ||
+    typeof base.online === "boolean" ||
+    Number.isFinite(Number(base.runtimeUpdatedAt)) ||
+    typeof base.twitchLive === "boolean";
   let themeColor = String(
     base.twitchThemeColor || base.themeColor || base.streamerColor || ""
   )
@@ -590,7 +605,7 @@ async function getStatusSnapshot() {
 
   return {
     online: typeof base.online === "boolean" ? base.online : true,
-    statusSource: typeof base.online === "boolean" ? "bot" : "web",
+    statusSource: hasBotRuntime ? "bot" : "web",
     instance: String(base.instance || resolveInstanceName() || "").trim() || null,
     botName: String(base.botName || TWITCH_BOT_NAME || "").trim() || null,
     botDisplayName:
@@ -880,9 +895,10 @@ const QUOTES_FILE_PATH = resolveEnvPath("QUOTES_PATH", "./QUOTES.json");
     abs(String(process.env.REDEMPTIONS_LOG_PATH || "").trim()) ||
     abs(DATA_DIR ? path.join(DATA_DIR, "d", "REDEMPTIONS_LOG.json") : "./data/REDEMPTIONS_LOG.json");
   const STATE_BACKEND = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
-  const CUSTOM_COMMANDS_SCHEMA = resolveStateSchema();
-  const CUSTOM_COMMANDS_STATE_KEY = "custom_commands";
-  const SETTINGS_STATE_KEY = "settings";
+const CUSTOM_COMMANDS_SCHEMA = resolveStateSchema();
+const CUSTOM_COMMANDS_STATE_KEY = "custom_commands";
+const SETTINGS_STATE_KEY = "settings";
+const RUNTIME_STATUS_STATE_KEY = "runtime_status";
 
   function isPostgresStateBackend() {
     return STATE_BACKEND === "postgres" || STATE_BACKEND === "pg";
@@ -914,6 +930,63 @@ const QUOTES_FILE_PATH = resolveEnvPath("QUOTES_PATH", "./QUOTES.json");
     } catch {}
 
     return sanitizeSettingsForStorage(settingsObj);
+  }
+
+  async function loadRuntimeStatusStateDirect() {
+    if (!isPostgresStateBackend()) return null;
+
+    try {
+      await ensureStateTable({ schema: CUSTOM_COMMANDS_SCHEMA });
+      const raw = await readStateValue({
+        schema: CUSTOM_COMMANDS_SCHEMA,
+        instance: CUSTOM_COMMANDS_INSTANCE,
+        key: RUNTIME_STATUS_STATE_KEY,
+        fallback: null,
+      });
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        return raw;
+      }
+    } catch {}
+
+    return null;
+  }
+
+  async function loadKeywordsStateDirect() {
+    if (isPostgresStateBackend()) {
+      try {
+        const loaded = await readKeywordsState({
+          schema: CUSTOM_COMMANDS_SCHEMA,
+          instance: CUSTOM_COMMANDS_INSTANCE,
+          fallbackWords: {},
+          migrateFallback: false,
+        });
+        return normalizeKeywordsObject(loaded?.keywords || {});
+      } catch {}
+    }
+
+    let keywords = {};
+    try {
+      const raw = fs.readFileSync(WORDS_FILE_PATH, "utf8");
+      keywords = normalizeKeywordsObject(safeJsonParse(raw, {}));
+    } catch {}
+    return keywords;
+  }
+
+  async function saveKeywordsStateDirect(nextKeywords = {}) {
+    const normalized = normalizeKeywordsObject(nextKeywords || {});
+
+    if (isPostgresStateBackend()) {
+      await writeKeywordsState({
+        schema: CUSTOM_COMMANDS_SCHEMA,
+        instance: CUSTOM_COMMANDS_INSTANCE,
+        keywords: normalized,
+      });
+      return normalized;
+    }
+
+    fs.mkdirSync(path.dirname(WORDS_FILE_PATH), { recursive: true });
+    fs.writeFileSync(WORDS_FILE_PATH, JSON.stringify(normalized, null, 2), "utf8");
+    return normalized;
   }
 
   async function saveSettingsStateDirect(nextSettings = {}) {
@@ -4616,11 +4689,7 @@ const webServer = http.createServer(async (req, res) => {
           );
         }
 
-        let keywords = {};
-        try {
-          const raw = fs.readFileSync(WORDS_FILE_PATH, "utf8");
-          keywords = normalizeKeywordsObject(safeJsonParse(raw, {}));
-        } catch {}
+        const keywords = await loadKeywordsStateDirect();
 
         return sendJsonResponse(
           res,
@@ -4630,7 +4699,7 @@ const webServer = http.createServer(async (req, res) => {
             keywords: projectKeywordsForWebsite(keywords),
             catalog: getWebsiteKeywordCatalog(),
             hiddenCategoryCount: countHiddenWebsiteKeywordCategories(keywords),
-            backend: "file",
+            backend: isPostgresStateBackend() ? "postgres" : "file",
           },
           { "cache-control": "no-store" }
         );
@@ -4662,16 +4731,10 @@ const webServer = http.createServer(async (req, res) => {
         let existingKeywords = fromDeps || {};
 
         if (!fromDeps) {
-          try {
-            const raw = fs.readFileSync(WORDS_FILE_PATH, "utf8");
-            existingKeywords = normalizeKeywordsObject(safeJsonParse(raw, {}));
-          } catch {
-            existingKeywords = {};
-          }
+          existingKeywords = await loadKeywordsStateDirect().catch(() => ({}));
         }
 
         const merged = mergeWebsiteKeywordsForStorage(existingKeywords, normalized);
-        const projected = projectKeywordsForWebsite(merged);
         validateKeywordsForStorageOrThrow(merged);
 
         if (fromDeps) {
@@ -4697,14 +4760,13 @@ const webServer = http.createServer(async (req, res) => {
           );
         }
 
-        fs.mkdirSync(path.dirname(WORDS_FILE_PATH), { recursive: true });
-        fs.writeFileSync(WORDS_FILE_PATH, JSON.stringify(merged, null, 2), "utf8");
+        const saved = await saveKeywordsStateDirect(merged);
         queueActivityLog({
           action: "admin_save_keywords",
           source: "web",
           actor: getActivityActor(adminSession),
           detail: "Updated keyword categories",
-          meta: { categories: Object.keys(projected || {}).length },
+          meta: { categories: Object.keys(projectKeywordsForWebsite(saved || {})).length },
         });
 
         return sendJsonResponse(
@@ -4712,10 +4774,10 @@ const webServer = http.createServer(async (req, res) => {
           200,
           {
             ok: true,
-            keywords: projected,
+            keywords: projectKeywordsForWebsite(saved),
             catalog: getWebsiteKeywordCatalog(),
-            hiddenCategoryCount: countHiddenWebsiteKeywordCategories(merged),
-            backend: "file",
+            hiddenCategoryCount: countHiddenWebsiteKeywordCategories(saved),
+            backend: isPostgresStateBackend() ? "postgres" : "file",
           },
           { "cache-control": "no-store" }
         );

@@ -339,6 +339,7 @@ const INSTANCE_NAME = resolveInstanceName();
 const STATE_SCHEMA = resolveStateSchema();
 const STATE_BACKEND = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
 const SETTINGS_STATE_KEY = "settings";
+const RUNTIME_STATUS_STATE_KEY = "runtime_status";
 const BOT_STARTUP_MESSAGE = String(process.env.BOT_STARTUP_MESSAGE || "").trim();
 const BOT_SHUTDOWN_MESSAGE = String(process.env.BOT_SHUTDOWN_MESSAGE || "").trim();
 
@@ -878,6 +879,84 @@ async function readSettingsFromSharedState() {
   return readSettingsFromDisk();
 }
 
+function buildRuntimeStatusStateSnapshot() {
+  let baseStatus = null;
+  try {
+    baseStatus = BOT_STATUS && typeof BOT_STATUS === "object" ? BOT_STATUS : null;
+  } catch {
+    return null;
+  }
+  if (!baseStatus) return null;
+
+  const now = Date.now();
+  return {
+    ...baseStatus,
+    instance: INSTANCE_NAME,
+    botName: BOT_NAME || null,
+    botDisplayName: BOT_NAME || null,
+    channelName: CHANNEL_NAME || null,
+    channelDisplayName: STREAMER_DISPLAY_NAME,
+    webPublicUrl: WEB_PUBLIC_URL || null,
+    themeColor: EXTERNAL_STATUS.themeColor || null,
+    twitchThemeColor: EXTERNAL_STATUS.themeColor || null,
+    twitchLive: EXTERNAL_STATUS.twitchLive,
+    twitchUptime: EXTERNAL_STATUS.twitchUptime,
+    errors:
+      EXTERNAL_STATUS?.errors && typeof EXTERNAL_STATUS.errors === "object"
+        ? { ...EXTERNAL_STATUS.errors }
+        : {},
+    roblox: EXTERNAL_STATUS.roblox,
+    robloxLinked: Boolean(getTrackedRobloxUserId()),
+    spotify: EXTERNAL_STATUS.spotify,
+    externalUpdatedAt: EXTERNAL_STATUS.updatedAt,
+    runtimeUpdatedAt: now,
+    build: BUILD_INFO,
+    cooldowns: {
+      commandGlobalMs: COMMAND_GLOBAL_COOLDOWN_MS,
+      commandUserMs: COMMAND_USER_COOLDOWN_MS,
+      gamesPlayedChatMs: GAMES_PLAYED_CHAT_COOLDOWN_MS,
+      friendCommandMs: getRobloxFriendCooldownMs(),
+      keywordReplyMs: Math.max(0, Number(COOLDOWN) || 0),
+      activeCommandGlobalRemainingMs: sharedCommandCooldown.getGlobalRemainingMs(now),
+      activeGamesPlayedRemainingMs: getRobloxGamesPlayedCooldownRemainingMs(now),
+      activeFriendRemainingMs: getRobloxFriendCooldownRemainingMs(now),
+    },
+  };
+}
+
+let runtimeStatusPersistInFlight = null;
+let runtimeStatusPersistPending = false;
+async function persistRuntimeStatusState() {
+  if (!isPostgresStateBackend()) return;
+  const snapshot = buildRuntimeStatusStateSnapshot();
+  if (!snapshot) return;
+  runtimeStatusPersistPending = true;
+  if (runtimeStatusPersistInFlight) return runtimeStatusPersistInFlight;
+
+  runtimeStatusPersistInFlight = (async () => {
+    while (runtimeStatusPersistPending) {
+      runtimeStatusPersistPending = false;
+      try {
+        const nextSnapshot = buildRuntimeStatusStateSnapshot();
+        if (!nextSnapshot) return;
+        await ensureStateTable({ schema: STATE_SCHEMA });
+        await writeStateValue({
+          schema: STATE_SCHEMA,
+          instance: INSTANCE_NAME,
+          key: RUNTIME_STATUS_STATE_KEY,
+          value: nextSnapshot,
+        });
+      } catch {}
+    }
+  })();
+
+  try {
+    await runtimeStatusPersistInFlight;
+  } finally {
+    runtimeStatusPersistInFlight = null;
+  }
+}
+
 let settingsSharedSyncInFlight = null;
 async function syncSettingsFromSharedState({ force = false } = {}) {
   if (!isPostgresStateBackend()) return withSettingsDefaults(SETTINGS);
@@ -900,6 +979,46 @@ async function syncSettingsFromSharedState({ force = false } = {}) {
     return await settingsSharedSyncInFlight;
   } finally {
     settingsSharedSyncInFlight = null;
+  }
+}
+
+async function readKeywordsFromSharedState() {
+  if (!isPostgresStateBackend()) {
+    return normalizeKeywordsObject(WORDS || {});
+  }
+
+  try {
+    const loaded = await readKeywordsState({
+      schema: STATE_SCHEMA,
+      instance: INSTANCE_NAME,
+      fallbackWords: WORDS || {},
+      migrateFallback: false,
+    });
+    return normalizeKeywordsObject(loaded?.keywords || {});
+  } catch {}
+
+  return normalizeKeywordsObject(WORDS || {});
+}
+
+let keywordsSharedSyncInFlight = null;
+async function syncKeywordsFromSharedState({ force = false } = {}) {
+  if (!isPostgresStateBackend()) return normalizeKeywordsObject(WORDS || {});
+  if (!force && keywordsSharedSyncInFlight) return keywordsSharedSyncInFlight;
+
+  keywordsSharedSyncInFlight = (async () => {
+    const fresh = await readKeywordsFromSharedState();
+    const nextJson = JSON.stringify(normalizeKeywordsObject(fresh || {}));
+    const prevJson = JSON.stringify(normalizeKeywordsObject(WORDS || {}));
+    if (nextJson !== prevJson) {
+      WORDS = normalizeKeywordsObject(fresh || {});
+    }
+    return WORDS;
+  })();
+
+  try {
+    return await keywordsSharedSyncInFlight;
+  } finally {
+    keywordsSharedSyncInFlight = null;
   }
 }
 
@@ -1048,6 +1167,7 @@ async function refreshSpotifyExternalStatus({ announce = false } = {}) {
       errors: nextErrors,
       updatedAt: Date.now(),
     };
+    void persistRuntimeStatusState().catch(() => {});
 
     if (!announce) {
       spotifyAnnouncePrimed = true;
@@ -1105,9 +1225,17 @@ startSettingsWatcher({
 
 if (isPostgresStateBackend()) {
   void syncSettingsFromSharedState({ force: true }).catch(() => {});
+  void syncKeywordsFromSharedState({ force: true }).catch(() => {});
+  void persistRuntimeStatusState().catch(() => {});
   setInterval(() => {
     void syncSettingsFromSharedState().catch(() => {});
   }, 2000);
+  setInterval(() => {
+    void syncKeywordsFromSharedState().catch(() => {});
+  }, 2000);
+  setInterval(() => {
+    void persistRuntimeStatusState().catch(() => {});
+  }, 15000);
 }
 
 async function refreshExternalStatus() {
@@ -1179,6 +1307,7 @@ async function refreshExternalStatus() {
 
   next.updatedAt = Date.now();
   EXTERNAL_STATUS = next;
+  void persistRuntimeStatusState().catch(() => {});
 }
 
 refreshExternalStatus();
@@ -3481,8 +3610,11 @@ const BOT_STATUS = {
   build: BUILD_INFO,
 };
 
+void persistRuntimeStatusState().catch(() => {});
+
 function setStatus(patch) {
   Object.assign(BOT_STATUS, patch);
+  void persistRuntimeStatusState().catch(() => {});
 }
 
 function getStatusSnapshot() {
@@ -3509,7 +3641,12 @@ function getStatusSnapshot() {
     keywords: settings?.keywords ?? BOT_STATUS.keywords,
     twitchLive: EXTERNAL_STATUS.twitchLive,
     twitchUptime: EXTERNAL_STATUS.twitchUptime,
+    errors:
+      EXTERNAL_STATUS?.errors && typeof EXTERNAL_STATUS.errors === "object"
+        ? { ...EXTERNAL_STATUS.errors }
+        : {},
     roblox: EXTERNAL_STATUS.roblox,
+    robloxLinked: Boolean(getTrackedRobloxUserId()),
     spotify: EXTERNAL_STATUS.spotify,
     externalUpdatedAt: EXTERNAL_STATUS.updatedAt,
     cooldowns: {

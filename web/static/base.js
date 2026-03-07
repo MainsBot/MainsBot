@@ -474,8 +474,15 @@ async function refreshStatus() {
 
     setLastErrorDisplay(s.lastError);
 
+    const twitchError = String(s?.errors?.twitch || "").trim();
     const twitchLiveText =
-      s.twitchLive === true ? "LIVE" : s.twitchLive === false ? "OFFLINE" : "-";
+      s.twitchLive === true
+        ? "LIVE"
+        : s.twitchLive === false
+        ? "OFFLINE"
+        : twitchError
+        ? "UNAVAILABLE"
+        : "-";
     let twitchLeftText = twitchLiveText;
     if (s.twitchLive === true && s.twitchUptime) {
       twitchLeftText = `LIVE • ${s.twitchUptime}`;
@@ -492,7 +499,7 @@ async function refreshStatus() {
     }
     setText(els.leftTwitch, twitchLeftText);
 
-    let robloxText = "-";
+    let robloxText = s.robloxLinked === false ? "Not linked" : "-";
     if (s.roblox) {
       if (s.roblox.game && s.roblox.game !== "Website") {
         robloxText = s.roblox.game;
@@ -500,7 +507,13 @@ async function refreshStatus() {
         robloxText = "Offline";
       } else if (s.roblox.game === "Website") {
         robloxText = "In Menus";
+      } else if (String(s?.errors?.roblox || "").trim()) {
+        robloxText = "Unavailable";
+      } else if (s.robloxLinked === true) {
+        robloxText = "Linked";
       }
+    } else if (String(s?.errors?.roblox || "").trim()) {
+      robloxText = "Unavailable";
     }
     setText(els.leftRoblox, robloxText);
 
