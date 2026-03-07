@@ -12,8 +12,8 @@ ExecStart=/usr/bin/node /opt/MainsBot/main.js --config /opt/MainsBot/config/%i.i
 Restart=always
 RestartSec=3
 
-# If web is split into mainsbot-web@.service, this unit is bot-only.
-RuntimeDirectory=mainsbot
+# Bot-only unit. Do not own the shared /run/mainsbot socket directory here,
+# otherwise stopping one bot instance can unlink another instance's web socket.
 
 [Install]
 WantedBy=multi-user.target

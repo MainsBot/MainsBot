@@ -295,11 +295,11 @@ const STREAMER_TOKEN =
   normalizeAuthToken(TWITCH_STREAMER_STORE.access_token) ||
   process.env.STRAMER_TOKEN ||
   process.env.STREAMER_TOKEN;
-const TWITCH_CHAT_ALLOW_IRC_FALLBACK = flagFromEnv(
-  process.env.TWITCH_CHAT_ALLOW_IRC_FALLBACK ?? "false"
+const TWITCH_CHAT_CONNECT_IRC = flagFromEnv(
+  process.env.TWITCH_CHAT_CONNECT_IRC ?? "true"
 );
 const HAS_BOT_IRC_AUTH = Boolean(normalizeAuthToken(BOT_OAUTH));
-const TWITCH_CHAT_CAN_USE_IRC_FALLBACK = TWITCH_CHAT_ALLOW_IRC_FALLBACK && HAS_BOT_IRC_AUTH;
+const TWITCH_CHAT_CAN_USE_IRC_FALLBACK = false;
 
 const WAIT_REGISTER = 5 * 60 * 1000; // number of milliseconds, to wait before starting to get stream information
 const PLAYTIME_TICK_MS = 60 * 1000; // how often to persist playtime and check game changes
@@ -1084,7 +1084,11 @@ const lastEventSentAt = {
 var streamNumber = Object.keys(STREAMS).length;
 
 // ---------- TWITCH / IRC (tmi.js) ----------
-if (!HAS_BOT_IRC_AUTH) {
+if (!TWITCH_CHAT_CONNECT_IRC) {
+  console.log(
+    "[TWITCH][IRC] login disabled; Twitch chat intake, Twitch chat logging, and Twitch-side commands are off."
+  );
+} else if (!HAS_BOT_IRC_AUTH) {
   console.warn(
     "[TWITCH][IRC] BOT_OAUTH missing; starting anonymous read-only IRC client. Outbound chat will require Helix auth and IRC fallback is disabled until /auth/twitch/bot is linked."
   );
@@ -1437,7 +1441,7 @@ TWITCH_FUNCTIONS.installHelixChatTransport({
   },
   onError: ({ source, error }) => {
     console.warn(
-      `[TWITCH][HELIX_CHAT] ${source} send failed (${TWITCH_CHAT_CAN_USE_IRC_FALLBACK ? "IRC fallback on" : "IRC fallback off"}): ${String(error?.message || error)}`
+      `[TWITCH][HELIX_CHAT] ${source} send failed (IRC fallback disabled): ${String(error?.message || error)}`
     );
   },
   allowIrcFallback: TWITCH_CHAT_CAN_USE_IRC_FALLBACK,
@@ -1449,7 +1453,7 @@ try {
     const status = diag.missingConfig?.length ? "NOT READY" : "READY";
     const extra = diag.missingConfig?.length ? ` missing: ${diag.missingConfig.join(", ")}` : "";
     console.log(
-      `[TWITCH][HELIX_CHAT] ${status} (app_token=${diag.useAppToken ? "on" : "off"} fallback=${diag.allowIrcFallback ? "on" : "off"}) broadcaster=${diag.broadcasterLogin || "?"} senderId=${diag.senderId || "?"}.${extra}`
+      `[TWITCH][HELIX_CHAT] ${status} (app_token=${diag.useAppToken ? "on" : "off"} fallback=off) broadcaster=${diag.broadcasterLogin || "?"} senderId=${diag.senderId || "?"}.${extra}`
     );
   }
 } catch {}
@@ -1617,12 +1621,16 @@ attachClientEventLogs({
   defaultChannelName: CHANNEL_NAME,
 });
 
-client.once("connected", () => {
-  if (!BOT_STARTUP_MESSAGE) return;
-  void sendLifecycleChatMessage(BOT_STARTUP_MESSAGE, { signal: "startup" });
-});
+if (TWITCH_CHAT_CONNECT_IRC) {
+  client.once("connected", () => {
+    if (!BOT_STARTUP_MESSAGE) return;
+    void sendLifecycleChatMessage(BOT_STARTUP_MESSAGE, { signal: "startup" });
+  });
 
-client.connect();
+  client.connect();
+} else if (BOT_STARTUP_MESSAGE) {
+  void sendLifecycleChatMessage(BOT_STARTUP_MESSAGE, { signal: "startup" });
+}
 
 client.on("message", (channel, userstate, message, self) => {
   if (self) return;
@@ -3200,9 +3208,17 @@ client.on("message", async (channel, userstate, message, self, viewers) => {
       }
       if (isAdmin || isBroadcaster) {
         if (lowerMessage == "!part" || lowerMessage == "!disconnect") {
+          if (!TWITCH_CHAT_CONNECT_IRC) {
+            client.say(CHANNEL_NAME, "IRC login is disabled for this instance.");
+            return;
+          }
           client.say(CHANNEL_NAME, `Left channel ${CHANNEL_NAME}.`);
           client.disconnect()
         } else if (lowerMessage == "!joinchannel") {
+          if (!TWITCH_CHAT_CONNECT_IRC) {
+            client.say(CHANNEL_NAME, "IRC login is disabled for this instance.");
+            return;
+          }
           client.connect()
           client.say(CHANNEL_NAME, `Joined channel ${CHANNEL_NAME}.`)
         }

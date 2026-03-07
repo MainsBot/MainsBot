@@ -472,8 +472,8 @@ function applyTwitchSection(ini) {
   if (tw.chat_use_helix != null || tw.chatUseHelix != null) {
     setEnvOverride("TWITCH_CHAT_USE_HELIX", tw.chat_use_helix ?? tw.chatUseHelix);
   }
-  if (tw.chat_allow_irc_fallback != null || tw.chatAllowIrcFallback != null) {
-    setEnvOverride("TWITCH_CHAT_ALLOW_IRC_FALLBACK", tw.chat_allow_irc_fallback ?? tw.chatAllowIrcFallback);
+  if (tw.chat_connect_irc != null || tw.chatConnectIrc != null) {
+    setEnvOverride("TWITCH_CHAT_CONNECT_IRC", tw.chat_connect_irc ?? tw.chatConnectIrc);
   }
   if (tw.chat_use_app_token != null || tw.chatUseAppToken != null) {
     setEnvOverride("TWITCH_CHAT_USE_APP_TOKEN", tw.chat_use_app_token ?? tw.chatUseAppToken);

@@ -57,9 +57,7 @@ const STREAMER_TOKEN =
 const TWITCH_CHAT_USE_HELIX = /^(1|true|yes|on)$/i.test(
   String(process.env.TWITCH_CHAT_USE_HELIX ?? "true").trim()
 );
-const TWITCH_CHAT_ALLOW_IRC_FALLBACK = /^(1|true|yes|on)$/i.test(
-  String(process.env.TWITCH_CHAT_ALLOW_IRC_FALLBACK ?? "true").trim()
-);
+const TWITCH_CHAT_ALLOW_IRC_FALLBACK = false;
 const TWITCH_CHAT_REQUIRE_TOKEN_STORE = /^(1|true|yes|on)$/i.test(
   String(
     process.env.TWITCH_CHAT_REQUIRE_TOKEN_STORE ??
@@ -523,7 +521,7 @@ export function installHelixChatTransport({
   onAction,
   onRaw,
   onError,
-  allowIrcFallback = true,
+  allowIrcFallback = false,
 } = {}) {
   if (!client || typeof client.say !== "function") {
     throw new Error("installHelixChatTransport requires a valid tmi client");

@@ -11,8 +11,9 @@ ExecStart=/usr/bin/node /opt/MainsBot/main-web.js --config /opt/MainsBot/config/
 Restart=always
 RestartSec=3
 
-# If you use unix sockets, systemd can manage the runtime dir:
-RuntimeDirectory=mainsbot
+# Per-instance runtime dir for unix sockets:
+RuntimeDirectory=mainsbot/%i
+RuntimeDirectoryMode=0775
 
 [Install]
 WantedBy=multi-user.target
