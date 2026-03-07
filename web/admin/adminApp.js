@@ -1748,7 +1748,7 @@ function App() {
                     </select>
                     <button className="btn btn--sm btn--ghost" onClick=${refreshAnalytics}>Load</button>
                   </div>
-                  <div className="table-wrap" style=${{ marginTop: "8px" }}>
+                  <div className="table-wrap table-wrap--analytics" style=${{ marginTop: "8px" }}>
                     <table>
                       <thead><tr><th>Command</th><th>Uses</th></tr></thead>
                       <tbody>
@@ -1760,7 +1760,7 @@ function App() {
                 <div className="panel">
                   <h3>Health</h3>
                   <div className="meta">Overall: <strong>${health?.ok ? "OK" : "Issues"}</strong></div>
-                  <div className="table-wrap" style=${{ marginTop: "8px" }}>
+                  <div className="table-wrap table-wrap--health" style=${{ marginTop: "8px" }}>
                     <table>
                       <thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>
                       <tbody>

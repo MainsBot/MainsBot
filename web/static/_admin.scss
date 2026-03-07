@@ -503,6 +503,53 @@
   opacity: 0.8;
 }
 
+.table-wrap--analytics,
+.table-wrap--health {
+  overflow-x: hidden;
+}
+
+.table-wrap--analytics table,
+.table-wrap--health table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.table-wrap--analytics th,
+.table-wrap--analytics td,
+.table-wrap--health th,
+.table-wrap--health td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.table-wrap--analytics th:nth-child(1),
+.table-wrap--analytics td:nth-child(1) {
+  width: 72%;
+}
+
+.table-wrap--analytics th:nth-child(2),
+.table-wrap--analytics td:nth-child(2) {
+  width: 28%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.table-wrap--health th:nth-child(1),
+.table-wrap--health td:nth-child(1) {
+  width: 22%;
+}
+
+.table-wrap--health th:nth-child(2),
+.table-wrap--health td:nth-child(2) {
+  width: 18%;
+  white-space: nowrap;
+}
+
+.table-wrap--health th:nth-child(3),
+.table-wrap--health td:nth-child(3) {
+  width: 60%;
+}
+
 .quotes-list {
   display: grid;
   gap: 12px;
