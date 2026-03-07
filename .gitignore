@@ -1,6 +1,7 @@
 # junk
 /archive/
 /chat.log
+.nvm/
 
 # secrets (keep only an example if you want)
 secrets/*
