@@ -1647,7 +1647,10 @@ function App() {
                                   className="in in--sm"
                                   value=${String(def.responseCommand || deriveModeResponseCommand(mode))}
                                   onChange=${(e) => setModeField(mode, "responseCommand", e.target.value)}
-                                  placeholder={String(MODE_TO_TWITCH[mode]?.responseCommand || deriveModeResponseCommand(mode))}
+                                  placeholder=${String(
+                                    MODE_TO_TWITCH[mode]?.responseCommand ||
+                                      deriveModeResponseCommand(mode)
+                                  )}
                                 />
                               </div>
 
@@ -1761,7 +1764,7 @@ function App() {
                                         className="in in--sm"
                                         value=${String(def.responseCommand || deriveModeResponseCommand(mode))}
                                         onChange=${(e) => setModeField(mode, "responseCommand", e.target.value)}
-                                        placeholder={String(deriveModeResponseCommand(mode))}
+                                        placeholder=${String(deriveModeResponseCommand(mode))}
                                       />
                                     </div>
 
