@@ -20,6 +20,7 @@ import { normalizeKeywordsObject, readKeywordsState, writeKeywordsState } from "
 import { readActivityLogState, appendActivityLogEntryState } from "../data/postgres/activityLogStore.js";
 import { bumpCommandUsageState } from "../data/postgres/commandUsageStore.js";
 import { appendChannelPointsEventsState, getChannelPointsAnalyticsState } from "../data/postgres/channelPointsStore.js";
+import { appendDonationContributionState, readDonationSummaryState } from "../data/postgres/donationTotalsStore.js";
 import { resolveStateSchema } from "../data/postgres/db.js";
 import { ensureStateTable, readStateValue, writeStateValue } from "../data/postgres/stateStore.js";
 import { normalizeKeywordText, messageContainsKeywordPhrase } from "./keywords/match.js";
@@ -42,6 +43,7 @@ import {
 } from "./functions/filterPermit.js";
 import * as PLAYTIME from "./functions/playtime.js";
 import * as SPOTIFY from "./api/spotify/index.js";
+import { getStreamlabsDonationTotalByName } from "./api/streamlabs/index.js";
 import { getChatPerms } from "./functions/permissions.js";
 import {
   formatSpotifyTrackLabel,
@@ -466,7 +468,6 @@ const WORDS_PATH = path.resolve(
         : LEGACY_ARCHIVE_WORDS_PATH)
   ).trim()
 );
-const DEFAULT_VALID_MODES = ["!join.on", "!ticket.on", "!link.on", "!1v1.on"];
 const DEFAULT_MODE_DEFINITIONS = {
   "!join.on": {
     responseCommand: "!join",
@@ -504,7 +505,18 @@ const DEFAULT_MODE_DEFINITIONS = {
     recapSpamCount: 0,
     recapMessage: "",
   },
+  "!reddit.on": {
+    responseCommand: "!reddit",
+    timerMessage: "type !reddit for the recap",
+    title: "REDDIT RECAP",
+    gameName: "",
+    keywordKey: "reddit",
+    recapSpamCount: 3,
+    recapMessage: "REDDIT RECAP TIME: {url}",
+  },
 };
+const HARD_CODED_MODE_COMMANDS = Object.freeze(Object.keys(DEFAULT_MODE_DEFINITIONS));
+const DEFAULT_VALID_MODES = [...HARD_CODED_MODE_COMMANDS];
 const DEFAULT_SPECIAL_MODES = [
   "!ks.on",
   "!ks.off",
@@ -514,6 +526,12 @@ const DEFAULT_SPECIAL_MODES = [
   "!keywords.off",
   "!timers.off",
   "!timers.on",
+  "!autofoc.on",
+  "!autofoc.off",
+  "!follower.on",
+  "!follower.off",
+  "!followers.on",
+  "!followers.off",
   "!sleep.on",
   "!sleep.off",
 ];
@@ -606,6 +624,12 @@ function withSettingsDefaults(input = {}) {
   const modeKeyFromCommand = (command) =>
     normalizeModeCommand(command).replace(/^!/, "").replace(/\.on$/i, "");
   const safeString = (value) => String(value || "").trim();
+  const deriveModeResponseCommand = (modeCommand, fallback = "") => {
+    const existing = safeString(fallback);
+    if (existing) return existing;
+    const modeKey = modeKeyFromCommand(modeCommand);
+    return modeKey ? `!${modeKey}` : "";
+  };
   const safeInt = (value, fallback = 0) => {
     const n = Number(value);
     if (!Number.isFinite(n)) return Math.max(0, Math.floor(fallback));
@@ -615,7 +639,7 @@ function withSettingsDefaults(input = {}) {
   const modesInput =
     base.modes && typeof base.modes === "object" && !Array.isArray(base.modes) ? base.modes : {};
   const modeCommandsSeed = new Set([
-    ...Object.keys(DEFAULT_MODE_DEFINITIONS),
+    ...HARD_CODED_MODE_COMMANDS,
     ...arr(base.validModes).map((m) => normalizeModeCommand(m)).filter(Boolean),
     ...Object.keys(modesInput).map((m) => normalizeModeCommand(m)).filter(Boolean),
   ]);
@@ -624,6 +648,7 @@ function withSettingsDefaults(input = {}) {
   for (const modeCommand of modeCommandsSeed) {
     const cmd = normalizeModeCommand(modeCommand);
     if (!cmd) continue;
+    const isHardcoded = HARD_CODED_MODE_COMMANDS.includes(cmd);
     const key = modeKeyFromCommand(cmd);
     const defaults = DEFAULT_MODE_DEFINITIONS[cmd] || {};
     const raw =
@@ -633,14 +658,18 @@ function withSettingsDefaults(input = {}) {
       (modesInput[cmd] && typeof modesInput[cmd] === "object" ? modesInput[cmd] : null) ||
       {};
 
-    const responseCommand =
-      safeString(raw.responseCommand || raw.command || base?.main?.[key] || defaults.responseCommand) || "";
+    const responseCommand = deriveModeResponseCommand(
+      cmd,
+      raw.responseCommand || raw.command || base?.main?.[key] || defaults.responseCommand
+    );
     const timerMessage =
       safeString(raw.timerMessage || raw.timer || base?.timer?.[key] || defaults.timerMessage) || "";
     const title = safeString(raw.title || base?.titles?.[key] || defaults.title) || "";
     const gameName =
       safeString(raw.gameName || raw.game || base?.modeGames?.[cmd] || defaults.gameName) || "";
-    const keywordKey = safeString(raw.keywordKey || raw.keyword || key) || key;
+    const keywordKey = isHardcoded
+      ? safeString(defaults.keywordKey || key) || key
+      : safeString(defaults.keywordKey || raw.keywordKey || raw.keyword || key) || key;
     const recapSpamCount = safeInt(
       raw.recapSpamCount != null ? raw.recapSpamCount : defaults.recapSpamCount,
       0
@@ -661,17 +690,26 @@ function withSettingsDefaults(input = {}) {
   }
 
   base.modes = normalizedModes;
-  base.validModes = Object.keys(normalizedModes);
+  base.validModes = [
+    ...HARD_CODED_MODE_COMMANDS,
+    ...Object.keys(normalizedModes).filter((mode) => !HARD_CODED_MODE_COMMANDS.includes(mode)),
+  ].filter((mode, index, arr) => arr.indexOf(mode) === index && normalizedModes[mode]);
   if (!base.validModes.length) base.validModes = [...DEFAULT_VALID_MODES];
 
-  base.specialModes = arr(base.specialModes);
-  if (!base.specialModes.length) base.specialModes = [...DEFAULT_SPECIAL_MODES];
+  base.specialModes = [
+    ...DEFAULT_SPECIAL_MODES,
+    ...arr(base.specialModes),
+  ].filter((mode, index, list) => list.indexOf(mode) === index);
 
-  base.customModes = arr(base.customModes);
-  if (!base.customModes.length) base.customModes = [...DEFAULT_CUSTOM_MODES];
+  base.customModes = [
+    ...DEFAULT_CUSTOM_MODES,
+    ...arr(base.customModes),
+  ].filter((mode, index, list) => list.indexOf(mode) === index);
 
-  base.ignoreModes = arr(base.ignoreModes);
-  if (!base.ignoreModes.length) base.ignoreModes = [...DEFAULT_IGNORE_MODES];
+  base.ignoreModes = [
+    ...DEFAULT_IGNORE_MODES,
+    ...arr(base.ignoreModes),
+  ].filter((mode, index, list) => list.indexOf(mode) === index);
 
   const derivedTimer = {};
   const derivedMain = {};
@@ -743,6 +781,63 @@ function readSettingsFromDisk() {
 
 let SETTINGS = readSettingsFromDisk();
 let STREAMS = JSON.parse(fs.readFileSync(STREAMS_PATH));
+const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
+let autoFocOffTimer = null;
+let autoFocOffTimerGeneration = 0;
+
+function normalizeAutoFocOffDelayMs(value, fallback = MIN_AUTO_FOC_OFF_DELAY_MS) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.max(MIN_AUTO_FOC_OFF_DELAY_MS, Math.floor(n));
+}
+
+function clearAutoFocOffTimer(reason = "") {
+  if (autoFocOffTimer) {
+    clearTimeout(autoFocOffTimer);
+    autoFocOffTimer = null;
+    if (reason) {
+      console.log(`[foc] cleared auto FOC OFF timer (${reason})`);
+    }
+  }
+  autoFocOffTimerGeneration += 1;
+}
+
+function scheduleAutoFocOff(reason = "manual") {
+  const enabled = SETTINGS?.autoFocOffEnabled !== false;
+  if (!enabled) {
+    clearAutoFocOffTimer("disabled");
+    console.log("[foc] auto FOC OFF is disabled; followers-only will stay enabled");
+    return false;
+  }
+
+  const delayMs = normalizeAutoFocOffDelayMs(
+    SETTINGS?.autoFocOffDelayMs,
+    normalizeAutoFocOffDelayMs(process.env.WAIT_UNTIL_FOC_OFF)
+  );
+
+  clearAutoFocOffTimer("reschedule");
+  const generation = autoFocOffTimerGeneration;
+  console.log(
+    `[foc] scheduling auto FOC OFF in ${Math.round(delayMs / 1000)}s (${reason})`
+  );
+
+  autoFocOffTimer = setTimeout(async () => {
+    if (generation !== autoFocOffTimerGeneration) return;
+    autoFocOffTimer = null;
+    try {
+      await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, { preferredRole: "bot" });
+      console.log(`[foc] auto FOC OFF disabled followers-only (${reason})`);
+    } catch (e) {
+      console.warn(
+        "[helix] failed to disable followers-only (auto FOC OFF):",
+        String(e?.message || e)
+      );
+    }
+  }, delayMs);
+
+  return true;
+}
+
 const KEYWORDS_STORAGE = createKeywordStorage({
   wordsPath: WORDS_PATH,
   defaultGlobalWordsPath: DEFAULT_GLOBAL_WORDS_PATH,
@@ -1902,6 +1997,7 @@ try {
       loadSettings,
       saveSettings,
       getContextKillswitchState,
+      onDonationContribution: (contribution) => recordDonationContribution(contribution),
     });
     console.log("[modules] alerts=on");
   } else {
@@ -2110,12 +2206,6 @@ async function logHandler(
 
 async function customModFunctions(client, message, twitchUsername, userstate) {
   var messageArray = ([] = message.toLowerCase().split(" "));
-  const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
-  const normalizeAutoFocOffDelayMs = (value, fallback = MIN_AUTO_FOC_OFF_DELAY_MS) => {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0) return fallback;
-    return Math.max(MIN_AUTO_FOC_OFF_DELAY_MS, Math.floor(n));
-  };
 
   const reply = (text) =>
     client.raw(
@@ -2162,6 +2252,7 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
   if (trimmedMessage.toLowerCase() === "!autofoc.off") {
     SETTINGS.autoFocOffEnabled = false;
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2));
+    clearAutoFocOffTimer("autofoc.off");
     return reply("Auto FOC OFF is now OFF.");
   }
 
@@ -2175,6 +2266,9 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
     }
     SETTINGS.autoFocOffDelayMs = delayMs;
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(SETTINGS, null, 2));
+    if (autoFocOffTimer) {
+      scheduleAutoFocOff("interval_update");
+    }
     return reply(`Auto FOC OFF delay set to ${Math.round(delayMs / 1000)}s (${delayMs}ms).`);
   }
 
@@ -2312,16 +2406,21 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
     message.toLowerCase() == "!foc on" ||
     message.toLowerCase() == "!focon"
   ) {
-    await TWITCH_FUNCTIONS.setFollowersOnlyMode(true).catch((e) => {
+    const enabledFollowersOnly = await TWITCH_FUNCTIONS.setFollowersOnlyMode(true).then(() => true).catch((e) => {
       console.warn(
         "[helix] failed to enable followers-only:",
         String(e?.message || e)
       );
+      return false;
     });
+    if (enabledFollowersOnly) {
+      scheduleAutoFocOff("manual_foc_on");
+    }
   } else if (
     message.toLowerCase() == "!foc off" ||
     message.toLowerCase() == "!focoff"
   ) {
+    clearAutoFocOffTimer("manual_foc_off");
     await TWITCH_FUNCTIONS.setFollowersOnlyMode(false).catch((e) => {
       console.warn(
         "[helix] failed to disable followers-only:",
@@ -2376,6 +2475,170 @@ async function customModFunctions(client, message, twitchUsername, userstate) {
 
 
 
+function formatUsd(amount = 0) {
+  const safeAmount = Number.isFinite(Number(amount)) ? Number(amount) : 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(safeAmount);
+}
+
+function normalizeDonatedPlatform(value = "") {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (!raw) return "combined";
+  if (raw === "combined" || raw === "all" || raw === "total" || raw === "overall") return "combined";
+  if (raw === "streamlabs" || raw === "sl" || raw === "donation" || raw === "donations") {
+    return "streamlabs";
+  }
+  if (raw === "twitch" || raw === "tw") return "twitch";
+  if (raw === "bits" || raw === "bit" || raw === "cheer" || raw === "cheers") {
+    return "bits";
+  }
+  if (raw === "subs" || raw === "sub" || raw === "subscription" || raw === "subscriptions") {
+    return "subs";
+  }
+  if (
+    raw === "gifts" ||
+    raw === "gift" ||
+    raw === "giftsubs" ||
+    raw === "gift_subs" ||
+    raw === "subgifts"
+  ) {
+    return "gifts";
+  }
+  return "";
+}
+
+function getDonationTotalsByPlatform(totals = {}, platform = "combined") {
+  const safe = {
+    streamlabsUsd: Math.max(0, Number(totals?.streamlabsUsd) || 0),
+    twitchBitsUsd: Math.max(0, Number(totals?.twitchBitsUsd) || 0),
+    twitchSubsUsd: Math.max(0, Number(totals?.twitchSubsUsd) || 0),
+    twitchGiftSubsUsd: Math.max(0, Number(totals?.twitchGiftSubsUsd) || 0),
+  };
+
+  if (platform === "streamlabs") return safe.streamlabsUsd;
+  if (platform === "twitch") {
+    return safe.twitchBitsUsd + safe.twitchSubsUsd + safe.twitchGiftSubsUsd;
+  }
+  if (platform === "bits") return safe.twitchBitsUsd;
+  if (platform === "subs") return safe.twitchSubsUsd;
+  if (platform === "gifts") return safe.twitchGiftSubsUsd;
+  return (
+    safe.streamlabsUsd +
+    safe.twitchBitsUsd +
+    safe.twitchSubsUsd +
+    safe.twitchGiftSubsUsd
+  );
+}
+
+async function buildDonatedCommandReply({
+  targetUser,
+  platform = "combined",
+} = {}) {
+  const lookup = String(targetUser || "").trim().replace(/^@+/, "");
+  if (!lookup) return "Please provide a username, for example: !donated mr_cheeezz";
+
+  const normalizedPlatform = normalizeDonatedPlatform(platform);
+  if (!normalizedPlatform) {
+    return "Platform must be one of: combined, streamlabs, twitch, bits, subs, gifts.";
+  }
+
+  const localSummary = await readDonationSummaryState({
+    schema: STATE_SCHEMA,
+    instance: INSTANCE_NAME,
+    lookup,
+  }).catch(() => ({
+    found: false,
+    record: null,
+    totals: {
+      streamlabsUsd: 0,
+      twitchBitsUsd: 0,
+      twitchSubsUsd: 0,
+      twitchGiftSubsUsd: 0,
+    },
+  }));
+
+  const totals = {
+    streamlabsUsd: Math.max(0, Number(localSummary?.totals?.streamlabsUsd) || 0),
+    twitchBitsUsd: Math.max(0, Number(localSummary?.totals?.twitchBitsUsd) || 0),
+    twitchSubsUsd: Math.max(0, Number(localSummary?.totals?.twitchSubsUsd) || 0),
+    twitchGiftSubsUsd: Math.max(0, Number(localSummary?.totals?.twitchGiftSubsUsd) || 0),
+  };
+
+  if (normalizedPlatform === "combined" || normalizedPlatform === "streamlabs") {
+    const streamlabsApi = await getStreamlabsDonationTotalByName({ lookup }).catch(() => null);
+    if (streamlabsApi?.enabled) {
+      totals.streamlabsUsd = Math.max(
+        totals.streamlabsUsd,
+        Math.max(0, Number(streamlabsApi.totalUsd) || 0)
+      );
+    }
+  }
+
+  if (
+    normalizedPlatform === "combined" ||
+    normalizedPlatform === "twitch" ||
+    normalizedPlatform === "bits"
+  ) {
+    const knownUserId = String(localSummary?.record?.userId || "").trim();
+    const bitsUserId =
+      knownUserId || (await TWITCH_FUNCTIONS.getTwitchIdFromUsername(lookup).catch(() => null));
+    if (bitsUserId) {
+      const bitsEntry = await TWITCH_FUNCTIONS
+        .getBitsLeaderboardEntryByUser({
+          userId: bitsUserId,
+          login: localSummary?.record?.login || lookup,
+        })
+        .catch(() => null);
+      if (bitsEntry?.score != null) {
+        totals.twitchBitsUsd = Math.max(
+          totals.twitchBitsUsd,
+          Math.max(0, Number(bitsEntry.score) || 0) / 100
+        );
+      }
+    }
+  }
+
+  const totalUsd = getDonationTotalsByPlatform(totals, normalizedPlatform);
+  const displayTarget =
+    String(localSummary?.record?.displayName || localSummary?.record?.login || lookup).trim() ||
+    lookup;
+
+  if (totalUsd <= 0) {
+    return `I don't have any donation totals for ${displayTarget} yet.`;
+  }
+
+  if (normalizedPlatform === "streamlabs") {
+    return `${displayTarget} has donated about ${formatUsd(totals.streamlabsUsd)} through Streamlabs.`;
+  }
+  if (normalizedPlatform === "bits") {
+    return `${displayTarget} has donated about ${formatUsd(totals.twitchBitsUsd)} in Twitch bits.`;
+  }
+  if (normalizedPlatform === "subs") {
+    return `${displayTarget} has donated about ${formatUsd(totals.twitchSubsUsd)} in Twitch subs.`;
+  }
+  if (normalizedPlatform === "gifts") {
+    return `${displayTarget} has donated about ${formatUsd(totals.twitchGiftSubsUsd)} in gifted Twitch subs.`;
+  }
+  if (normalizedPlatform === "twitch") {
+    return (
+      `${displayTarget} has donated about ${formatUsd(totalUsd)} on Twitch ` +
+      `(bits ${formatUsd(totals.twitchBitsUsd)} | subs ${formatUsd(totals.twitchSubsUsd)} | gifts ${formatUsd(totals.twitchGiftSubsUsd)}).`
+    );
+  }
+
+  return (
+    `${displayTarget} has donated about ${formatUsd(totalUsd)} total ` +
+    `(Streamlabs ${formatUsd(totals.streamlabsUsd)} | bits ${formatUsd(totals.twitchBitsUsd)} | subs ${formatUsd(totals.twitchSubsUsd)} | gifts ${formatUsd(totals.twitchGiftSubsUsd)}).`
+  );
+}
+
 async function customUserFunctions(client, message, twitchUsername, userid, userstate) {
   var messageArray = ([] = message.toLowerCase().split(" "));
 
@@ -2391,6 +2654,15 @@ async function customUserFunctions(client, message, twitchUsername, userid, user
     })
   ) {
     return;
+  }
+
+  if (messageArray[0] === "!donated") {
+    if (isSharedCommandCooldownActive(userstate)) return;
+    const replyText = await buildDonatedCommandReply({
+      targetUser: messageArray[1],
+      platform: messageArray[2] || "",
+    });
+    return client.say(CHANNEL_NAME, `${bot}@${twitchUsername}, ${replyText}`);
   }
 
   if (messageArray[0] == "!cptotime") {
@@ -3691,6 +3963,16 @@ async function recordChannelPointsEvent(event = {}) {
       schema: STATE_SCHEMA,
       instance: INSTANCE_NAME,
       events: [event],
+    });
+  } catch {}
+}
+
+async function recordDonationContribution(contribution = {}) {
+  try {
+    await appendDonationContributionState({
+      schema: STATE_SCHEMA,
+      instance: INSTANCE_NAME,
+      contribution,
     });
   } catch {}
 }

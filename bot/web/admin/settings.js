@@ -35,7 +35,18 @@ export const DEFAULT_MODE_DEFINITIONS = {
     recapSpamCount: 0,
     recapMessage: "",
   },
+  "!reddit.on": {
+    responseCommand: "!reddit",
+    timerMessage: "type !reddit for the recap",
+    title: "REDDIT RECAP",
+    gameName: "",
+    keywordKey: "reddit",
+    recapSpamCount: 3,
+    recapMessage: "REDDIT RECAP TIME: {url}",
+  },
 };
+
+export const HARD_CODED_MODE_COMMANDS = Object.freeze(Object.keys(DEFAULT_MODE_DEFINITIONS));
 
 const MIN_AUTO_FOC_OFF_DELAY_MS = 60_000;
 const DEFAULT_SPOTIFY_ANNOUNCE_TEMPLATE = "{streamerDisplay} is now listening to {track}";
@@ -46,6 +57,34 @@ const DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE =
   "RIPBOZO @{user} just lost {channelPoints} {channelPointsName} thats {farmTime} of farming";
 const DEFAULT_POLL_COMPLETE_WIN_TEMPLATE =
   "PogU @{user} just spent {channelPoints} {channelPointsName}";
+const DEFAULT_SPECIAL_MODES = [
+  "!ks.on",
+  "!ks.off",
+  "!timer.on",
+  "!timer.off",
+  "!keywords.on",
+  "!keywords.off",
+  "!timers.off",
+  "!timers.on",
+  "!autofoc.on",
+  "!autofoc.off",
+  "!follower.on",
+  "!follower.off",
+  "!followers.on",
+  "!followers.off",
+  "!sleep.on",
+  "!sleep.off",
+];
+const DEFAULT_CUSTOM_MODES = ["!xqcchat.on", "!xqcchat.off"];
+const DEFAULT_IGNORE_MODES = [
+  "!spamfilter.on",
+  "!spamfilter.off",
+  "!lengthfilter.on",
+  "!lengthfilter.off",
+  "!linkfilter.on",
+  "!linkfilter.off",
+  "!sleep.on",
+];
 
 export function normalizeModeCommand(value) {
   let out = String(value || "").trim().toLowerCase();
@@ -57,6 +96,13 @@ export function normalizeModeCommand(value) {
 
 export function modeKeyFromCommand(modeCommand) {
   return normalizeModeCommand(modeCommand).replace(/^!/, "").replace(/\.on$/i, "");
+}
+
+function deriveModeResponseCommand(modeCommand, fallback = "") {
+  const existing = String(fallback == null ? "" : fallback).trim();
+  if (existing) return existing;
+  const modeKey = modeKeyFromCommand(modeCommand);
+  return modeKey ? `!${modeKey}` : "";
 }
 
 export function sanitizeSettingsForStorage(input = {}) {
@@ -150,14 +196,23 @@ export function sanitizeSettingsForStorage(input = {}) {
   out.validModes = arrStr(out.validModes)
     .map((mode) => normalizeModeCommand(mode))
     .filter(Boolean);
-  out.specialModes = arrStr(out.specialModes);
-  out.customModes = arrStr(out.customModes);
-  out.ignoreModes = arrStr(out.ignoreModes);
+  out.specialModes = [
+    ...DEFAULT_SPECIAL_MODES,
+    ...arrStr(out.specialModes),
+  ].filter((mode, index, list) => list.indexOf(mode) === index);
+  out.customModes = [
+    ...DEFAULT_CUSTOM_MODES,
+    ...arrStr(out.customModes),
+  ].filter((mode, index, list) => list.indexOf(mode) === index);
+  out.ignoreModes = [
+    ...DEFAULT_IGNORE_MODES,
+    ...arrStr(out.ignoreModes),
+  ].filter((mode, index, list) => list.indexOf(mode) === index);
 
   const modesInput =
     out.modes && typeof out.modes === "object" && !Array.isArray(out.modes) ? out.modes : {};
   const modeCommandSeed = new Set([
-    ...Object.keys(DEFAULT_MODE_DEFINITIONS),
+    ...HARD_CODED_MODE_COMMANDS,
     ...out.validModes,
     ...Object.keys(modesInput)
       .map((mode) => normalizeModeCommand(mode))
@@ -168,6 +223,7 @@ export function sanitizeSettingsForStorage(input = {}) {
   for (const rawModeCommand of modeCommandSeed) {
     const modeCommand = normalizeModeCommand(rawModeCommand);
     if (!modeCommand) continue;
+    const isHardcoded = HARD_CODED_MODE_COMMANDS.includes(modeCommand);
     const modeKey = modeKeyFromCommand(modeCommand);
     const defaults = DEFAULT_MODE_DEFINITIONS[modeCommand] || {};
     const raw =
@@ -183,9 +239,9 @@ export function sanitizeSettingsForStorage(input = {}) {
         : null) ||
       {};
 
-    const responseCommand = str(
-      raw.responseCommand || raw.command || out?.main?.[modeKey] || defaults.responseCommand,
-      ""
+    const responseCommand = deriveModeResponseCommand(
+      modeCommand,
+      raw.responseCommand || raw.command || out?.main?.[modeKey] || defaults.responseCommand
     );
     const timerMessage = str(
       raw.timerMessage || raw.timer || out?.timer?.[modeKey] || defaults.timerMessage,
@@ -196,7 +252,9 @@ export function sanitizeSettingsForStorage(input = {}) {
       raw.gameName || raw.game || out?.modeGames?.[modeCommand] || defaults.gameName,
       ""
     );
-    const keywordKey = str(raw.keywordKey || raw.keyword || modeKey, modeKey);
+    const keywordKey = isHardcoded
+      ? str(defaults.keywordKey || modeKey, modeKey)
+      : str(defaults.keywordKey || raw.keywordKey || raw.keyword || modeKey, modeKey);
     const recapSpamCount = int(
       raw.recapSpamCount != null ? raw.recapSpamCount : defaults.recapSpamCount,
       0
@@ -217,40 +275,14 @@ export function sanitizeSettingsForStorage(input = {}) {
   }
 
   out.modes = normalizedModes;
-  out.validModes = Object.keys(normalizedModes);
-  if (!out.validModes.length) out.validModes = Object.keys(DEFAULT_MODE_DEFINITIONS);
+  out.validModes = [
+    ...HARD_CODED_MODE_COMMANDS,
+    ...Object.keys(normalizedModes).filter((mode) => !HARD_CODED_MODE_COMMANDS.includes(mode)),
+  ].filter((mode, index, arr) => arr.indexOf(mode) === index && normalizedModes[mode]);
+  if (!out.validModes.length) out.validModes = [...HARD_CODED_MODE_COMMANDS];
   if (!out.validModes.includes(out.currentMode)) {
     out.currentMode = out.validModes[0] || "!join.on";
   }
-  if (!out.specialModes.length) {
-    out.specialModes = [
-      "!ks.on",
-      "!ks.off",
-      "!timer.on",
-      "!timer.off",
-      "!keywords.on",
-      "!keywords.off",
-      "!timers.off",
-      "!timers.on",
-      "!sleep.on",
-      "!sleep.off",
-    ];
-  }
-  if (!out.customModes.length) {
-    out.customModes = ["!xqcchat.on", "!xqcchat.off"];
-  }
-  if (!out.ignoreModes.length) {
-    out.ignoreModes = [
-      "!spamfilter.on",
-      "!spamfilter.off",
-      "!lengthfilter.on",
-      "!lengthfilter.off",
-      "!linkfilter.on",
-      "!linkfilter.off",
-      "!sleep.on",
-    ];
-  }
-
   out.corrections = obj(out.corrections, {});
   out.titles = obj(out.titles, {});
   out.modeGames = obj(out.modeGames, {});

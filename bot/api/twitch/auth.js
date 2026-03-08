@@ -31,6 +31,7 @@ const DEFAULT_BOT_SCOPES = [
 ];
 
 const DEFAULT_STREAMER_SCOPES = [
+  "bits:read",
   "channel:bot",
   "channel:manage:broadcast",
   "channel:manage:polls",

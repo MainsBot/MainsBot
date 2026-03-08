@@ -117,6 +117,30 @@ function normalizeDonationAlertMode(value) {
   return "message";
 }
 
+function normalizeSubPlan(methods, tags) {
+  const plan = String(
+    methods?.plan ||
+      methods?.prime ||
+      tags?.["msg-param-sub-plan"] ||
+      tags?.["msg-param-gift-months"] ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (!plan) return "";
+  if (plan === "prime") return "prime";
+  if (plan === "1000" || plan === "2000" || plan === "3000") return plan;
+  return "";
+}
+
+function subPlanToUsd(methods, tags) {
+  const plan = normalizeSubPlan(methods, tags);
+  if (plan === "2000") return 9.99;
+  if (plan === "3000") return 24.99;
+  return 4.99;
+}
+
 export function registerAlertsModule({
   client,
   channelName,
@@ -127,6 +151,7 @@ export function registerAlertsModule({
   modlogUser = "sister_avanti",
   streamlabsSocketToken = process.env.STREAMLABS_SOCKET_TOKEN,
   donationAlertMode = process.env.STREAMLABS_DONATION_ALERT_MODE,
+  onDonationContribution = null,
   logger = console,
 } = {}) {
   if (!client || typeof client.on !== "function") {
@@ -151,6 +176,15 @@ export function registerAlertsModule({
       : Boolean(settings?.ks);
 
   const sleep = (ms) => delay(Math.max(0, Number(ms) || 0));
+  const recordContribution =
+    typeof onDonationContribution === "function" ? onDonationContribution : null;
+
+  function queueContribution(contribution) {
+    if (!recordContribution) return;
+    Promise.resolve(recordContribution(contribution)).catch((e) => {
+      logger?.warn?.("[alerts] donation contribution persist failed:", String(e?.message || e));
+    });
+  }
 
   async function modActionsLog(channel, targetUser, text) {
     const reason = String(text || "")
@@ -241,9 +275,18 @@ export function registerAlertsModule({
   const randomEmote = () => EMOTES[Math.floor(Math.random() * EMOTES.length)];
 
   const handlers = {
-    subscription: (channel, username) => {
+    subscription: (channel, username, methods, _msg, tags) => {
       const s = loadSettings();
       if (isKs(s)) return;
+      queueContribution({
+        platform: "twitch_subs",
+        login: username,
+        displayName: tags?.["display-name"] || username,
+        userId: tags?.["user-id"] || "",
+        amountUsd: subPlanToUsd(methods, tags),
+        count: 1,
+        rawUnits: 1,
+      });
       client.say(CHANNEL_NAME, "tibb12Subhype tibb12Subhype tibb12Subhype");
       client.say(CHANNEL_NAME, "tibb12Subhype tibb12Subhype tibb12Subhype");
       client.say(CHANNEL_NAME, "tibb12Subhype tibb12Subhype tibb12Subhype");
@@ -252,6 +295,14 @@ export function registerAlertsModule({
     giftpaidupgrade: async (channel, username) => {
       const s = loadSettings();
       if (isKs(s)) return;
+      queueContribution({
+        platform: "twitch_subs",
+        login: username,
+        displayName: username,
+        amountUsd: 4.99,
+        count: 1,
+        rawUnits: 1,
+      });
 
       const text = `${username} just continued their gifted sub. Thank you so much, ${username}!`;
       await twitchFunctions.sendHelixAnnouncement(text).catch((e) => {
@@ -260,9 +311,18 @@ export function registerAlertsModule({
       });
     },
 
-    resub: async (channel, username) => {
+    resub: async (channel, username, _streakMonths, _msg, tags, methods) => {
       const s = loadSettings();
       if (isKs(s)) return;
+      queueContribution({
+        platform: "twitch_subs",
+        login: username,
+        displayName: tags?.["display-name"] || username,
+        userId: tags?.["user-id"] || "",
+        amountUsd: subPlanToUsd(methods, tags),
+        count: 1,
+        rawUnits: 1,
+      });
 
       const e = "tibb12Subhype tibb12Imback tibb12Subhype"
       await sleep(1500);
@@ -317,6 +377,15 @@ export function registerAlertsModule({
 
       const bits = Number(userstate?.bits || 0);
       if (bits < 100) return;
+      queueContribution({
+        platform: "twitch_bits",
+        login: userstate?.username || "",
+        displayName: userstate?.["display-name"] || userstate?.username || "",
+        userId: userstate?.["user-id"] || "",
+        amountUsd: bits / 100,
+        count: 1,
+        rawUnits: bits,
+      });
 
       const msgPool = ["tibb12Bits tibb12Bits tibb12Bits"];
       const randomMsg = msgPool[Math.floor(Math.random() * msgPool.length)];
@@ -347,6 +416,36 @@ export function registerAlertsModule({
 
       await spamBits(channel, count, randomMsg, 250);
     },
+
+    subgift: async (channel, username, _streakMonths, _recipient, methods, tags) => {
+      const s = loadSettings();
+      if (isKs(s)) return;
+      queueContribution({
+        platform: "twitch_gifts",
+        login: username,
+        displayName: tags?.["display-name"] || username,
+        userId: tags?.["user-id"] || "",
+        amountUsd: subPlanToUsd(methods, tags),
+        count: 1,
+        rawUnits: 1,
+      });
+    },
+
+    submysterygift: async (channel, username, giftSubCount, methods, tags) => {
+      const s = loadSettings();
+      if (isKs(s)) return;
+      const count = Math.max(1, Math.floor(Number(giftSubCount) || 0));
+      const perGiftUsd = subPlanToUsd(methods, tags);
+      queueContribution({
+        platform: "twitch_gifts",
+        login: username,
+        displayName: tags?.["display-name"] || username,
+        userId: tags?.["user-id"] || "",
+        amountUsd: perGiftUsd * count,
+        count,
+        rawUnits: count,
+      });
+    },
   };
 
   client.on("subscription", handlers.subscription);
@@ -355,6 +454,8 @@ export function registerAlertsModule({
   client.on("raided", handlers.raided);
   client.on("clearchat", handlers.clearchat);
   client.on("cheer", handlers.cheer);
+  client.on("subgift", handlers.subgift);
+  client.on("submysterygift", handlers.submysterygift);
 
   let streamlabsSocket = null;
   try {
@@ -369,6 +470,8 @@ export function registerAlertsModule({
           const amount = getDonationAmount(d);
           const { code, symbol } = getCurrencyInfo(d);
           const amountText = formatMoney(amount, { code, symbol });
+          const amountUsd =
+            !code || code === "USD" || symbol === "$" ? amount : 0;
 
           logger?.log?.("[DONO DEBUG]", {
             rawAmount: d?.amount,
@@ -379,6 +482,30 @@ export function registerAlertsModule({
           });
 
           const msg = `Thank you @${name} for the ${amountText} tip ${randomEmote()}`;
+          const donorLogin = String(
+            d?.twitch_username ??
+              d?.twitchUsername ??
+              d?.username ??
+              d?.from ??
+              d?.name ??
+              ""
+          ).trim();
+
+          queueContribution({
+            platform: "streamlabs",
+            login: donorLogin,
+            displayName: name,
+            aliases: [
+              d?.name,
+              d?.from,
+              d?.username,
+              d?.twitch_username,
+              d?.twitchUsername,
+            ],
+            amountUsd,
+            count: 1,
+            rawUnits: amount,
+          });
 
           let disableForMs = 0;
           if (amount >= 100) disableForMs = 60_000;
@@ -396,15 +523,6 @@ export function registerAlertsModule({
           const donoPoints = Math.max(0, Math.floor(amount * 1000));
           if (donoPoints > 0) {
             try {
-              const donorLogin = String(
-                d?.twitch_username ??
-                  d?.twitchUsername ??
-                  d?.username ??
-                  d?.from ??
-                  d?.name ??
-                  ""
-              ).trim();
-
               let targetId = null;
 
               if (donorLogin) {
@@ -464,6 +582,8 @@ export function registerAlertsModule({
       client.removeListener("raided", handlers.raided);
       client.removeListener("clearchat", handlers.clearchat);
       client.removeListener("cheer", handlers.cheer);
+      client.removeListener("subgift", handlers.subgift);
+      client.removeListener("submysterygift", handlers.submysterygift);
     } catch {}
 
     try {

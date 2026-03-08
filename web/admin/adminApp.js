@@ -6,11 +6,58 @@ import { applyStreamerThemeFromStatus } from "/static/theme.js";
 const html = htm.bind(React.createElement);
 
 const MODE_TO_TWITCH = {
-  "!join.on": { titleKey: "join", gameName: "Roblox" },
-  "!ticket.on": { titleKey: "ticket", gameName: "Roblox" },
-  "!link.on": { titleKey: "link", gameName: "Roblox" },
-  "!1v1.on": { titleKey: "1v1", gameName: "Roblox" },
+  "!join.on": {
+    titleKey: "join",
+    responseCommand: "!join",
+    timerMessage: "type !join to join the game",
+    title: "!JOIN IN {game}",
+    gameName: "Roblox",
+    keywordKey: "join",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!ticket.on": {
+    titleKey: "ticket",
+    responseCommand: "!ticket",
+    timerMessage: "type !ticket to join the game",
+    title: "!TICKET IN {game}",
+    gameName: "Roblox",
+    keywordKey: "ticket",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!link.on": {
+    titleKey: "link",
+    responseCommand: "!link",
+    timerMessage: "type !link to get the link to join",
+    title: "!LINK IN {game}",
+    gameName: "Roblox",
+    keywordKey: "link",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!1v1.on": {
+    titleKey: "1v1",
+    responseCommand: "!1v1",
+    timerMessage: "type 1v1 in chat once to get a chance to 1v1 the streamer",
+    title: "1V1S IN {game}",
+    gameName: "Roblox",
+    keywordKey: "1v1",
+    recapSpamCount: 0,
+    recapMessage: "",
+  },
+  "!reddit.on": {
+    titleKey: "reddit",
+    responseCommand: "!reddit",
+    timerMessage: "type !reddit for the recap",
+    title: "REDDIT RECAP",
+    gameName: "",
+    keywordKey: "reddit",
+    recapSpamCount: 3,
+    recapMessage: "REDDIT RECAP TIME: {url}",
+  },
 };
+const HARD_CODED_MODE_COMMANDS = Object.freeze(Object.keys(MODE_TO_TWITCH));
 
 const REQUIRED_BOT_SCOPES = [
   "user:read:chat",
@@ -165,10 +212,32 @@ function modeKeyFromCommand(modeCommand) {
   return normalizeModeCommand(modeCommand).replace(/^!/, "").replace(/\.on$/i, "");
 }
 
+function deriveModeResponseCommand(modeCommand, fallback = "") {
+  const existing = String(fallback || "").trim();
+  if (existing) return existing;
+  const modeKey = modeKeyFromCommand(modeCommand);
+  return modeKey ? `!${modeKey}` : "";
+}
+
+function deriveGenericModeTimerMessage(modeCommand, fallback = "") {
+  const existing = String(fallback || "").trim();
+  if (existing) return existing;
+  const responseCommand = deriveModeResponseCommand(modeCommand);
+  return responseCommand ? `type ${responseCommand} in chat` : "";
+}
+
+function deriveModeTitle(modeCommand, fallback = "") {
+  const existing = String(fallback || "").trim();
+  if (existing) return existing;
+  const modeKey = modeKeyFromCommand(modeCommand);
+  return modeKey ? `${modeKey.toUpperCase()} IN {game}` : "";
+}
+
 function normalizeModes(input = {}, fallback = {}) {
   const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   const out = {};
   const seed = new Set([
+    ...HARD_CODED_MODE_COMMANDS,
     ...Object.keys(fallback || {}),
     ...Object.keys(src || {}),
   ]);
@@ -176,17 +245,26 @@ function normalizeModes(input = {}, fallback = {}) {
   for (const rawMode of seed) {
     const command = normalizeModeCommand(rawMode);
     if (!command) continue;
+    const isHardcoded = HARD_CODED_MODE_COMMANDS.includes(command);
     const modeKey = modeKeyFromCommand(command);
     const f = fallback?.[command] && typeof fallback[command] === "object" ? fallback[command] : {};
     const r = src?.[rawMode] && typeof src[rawMode] === "object" ? src[rawMode] : {};
     out[command] = {
       command,
-      key: String(r.key || f.key || modeKey).trim() || modeKey,
-      responseCommand: String(r.responseCommand || r.command || f.responseCommand || "").trim(),
-      timerMessage: String(r.timerMessage || r.timer || f.timerMessage || "").trim(),
-      title: String(r.title || f.title || "").trim(),
+      key: isHardcoded ? modeKey : String(r.key || f.key || modeKey).trim() || modeKey,
+      responseCommand: deriveModeResponseCommand(
+        command,
+        r.responseCommand || r.command || f.responseCommand
+      ),
+      timerMessage: deriveGenericModeTimerMessage(
+        command,
+        r.timerMessage || r.timer || f.timerMessage
+      ),
+      title: deriveModeTitle(command, r.title || f.title),
       gameName: String(r.gameName || r.game || f.gameName || "").trim(),
-      keywordKey: String(r.keywordKey || r.keyword || f.keywordKey || modeKey).trim() || modeKey,
+      keywordKey: isHardcoded
+        ? String(f.keywordKey || modeKey).trim() || modeKey
+        : String(f.keywordKey || r.keywordKey || r.keyword || modeKey).trim() || modeKey,
       recapSpamCount: Math.max(0, Math.floor(Number(r.recapSpamCount ?? f.recapSpamCount ?? 0) || 0)),
       recapMessage: String(r.recapMessage || f.recapMessage || "").trim(),
     };
@@ -301,7 +379,7 @@ function normalizeSettings(raw) {
 
   const fallbackModes = {};
   const validModesRaw = asArray(src.validModes);
-  const seedModes = validModesRaw.length ? validModesRaw : Object.keys(MODE_TO_TWITCH);
+  const seedModes = validModesRaw.length ? validModesRaw : HARD_CODED_MODE_COMMANDS;
   for (const rawMode of seedModes) {
     const mode = normalizeModeCommand(rawMode);
     if (!mode) continue;
@@ -310,18 +388,27 @@ function normalizeSettings(raw) {
     fallbackModes[mode] = {
       command: mode,
       key: modeKey,
-      responseCommand: String(src.main?.[modeKey] || ""),
-      timerMessage: String(src.timer?.[modeKey] || ""),
-      title: String(src.titles?.[modeKey] || ""),
+      responseCommand: deriveModeResponseCommand(
+        mode,
+        src.main?.[modeKey] || baseCfg?.responseCommand || ""
+      ),
+      timerMessage: deriveGenericModeTimerMessage(
+        mode,
+        src.timer?.[modeKey] || baseCfg?.timerMessage || ""
+      ),
+      title: deriveModeTitle(mode, src.titles?.[modeKey] || baseCfg?.title || ""),
       gameName: String(src.modeGames?.[mode] || baseCfg?.gameName || ""),
       keywordKey: modeKey,
-      recapSpamCount: mode === "!reddit.on" ? 3 : 0,
-      recapMessage: mode === "!reddit.on" ? "REDDIT RECAP TIME: {url}" : "",
+      recapSpamCount: Math.max(0, Math.floor(Number(baseCfg?.recapSpamCount || 0) || 0)),
+      recapMessage: String(baseCfg?.recapMessage || "").trim(),
     };
   }
   src.modes = normalizeModes(src.modes, fallbackModes);
-  src.validModes = Object.keys(src.modes);
-  if (!src.validModes.length) src.validModes = Object.keys(fallbackModes);
+  src.validModes = [
+    ...HARD_CODED_MODE_COMMANDS,
+    ...Object.keys(src.modes).filter((mode) => !HARD_CODED_MODE_COMMANDS.includes(mode)),
+  ].filter((mode, index, arr) => arr.indexOf(mode) === index && src.modes[mode]);
+  if (!src.validModes.length) src.validModes = [...HARD_CODED_MODE_COMMANDS];
   if (!src.validModes.includes(src.currentMode)) {
     src.currentMode = src.validModes[0] || "!join.on";
   }
@@ -802,10 +889,10 @@ function App() {
           [modeCommand]: {
             command: modeCommand,
             key: modeKey,
-            responseCommand: "",
-            timerMessage: "",
-            title: "",
-            gameName: "",
+            responseCommand: deriveModeResponseCommand(modeCommand),
+            timerMessage: deriveGenericModeTimerMessage(modeCommand),
+            title: deriveModeTitle(modeCommand),
+            gameName: "Roblox",
             keywordKey: modeKey,
             recapSpamCount: 0,
             recapMessage: "",
@@ -819,6 +906,7 @@ function App() {
     setSettings((prev) => {
       const base = normalizeSettings(prev || {});
       const modeCmd = normalizeModeCommand(mode);
+      if (HARD_CODED_MODE_COMMANDS.includes(modeCmd)) return base;
       if (!modeCmd || !base.modes?.[modeCmd]) return base;
       const nextModes = { ...base.modes };
       delete nextModes[modeCmd];
@@ -837,17 +925,34 @@ function App() {
     setSettings((prev) => {
       const base = normalizeSettings(prev || {});
       const current = normalizeModeCommand(mode);
+      if (HARD_CODED_MODE_COMMANDS.includes(current)) return base;
       const next = normalizeModeCommand(nextModeCommand);
       if (!current || !next || !base.modes?.[current]) return base;
       if (current === next) return base;
       const nextModes = { ...base.modes };
       if (nextModes[next]) return base;
       const currentDef = { ...(nextModes[current] || {}) };
+      const oldDefaultReply = deriveModeResponseCommand(current);
+      const oldGenericTimer = deriveGenericModeTimerMessage(current);
+      const oldGenericTitle = deriveModeTitle(current);
       delete nextModes[current];
       nextModes[next] = {
         ...currentDef,
         command: next,
         key: String(currentDef.key || modeKeyFromCommand(next)).trim() || modeKeyFromCommand(next),
+        responseCommand:
+          String(currentDef.responseCommand || "").trim() === oldDefaultReply
+            ? deriveModeResponseCommand(next)
+            : currentDef.responseCommand,
+        timerMessage:
+          String(currentDef.timerMessage || "").trim() === oldGenericTimer
+            ? deriveGenericModeTimerMessage(next)
+            : currentDef.timerMessage,
+        title:
+          String(currentDef.title || "").trim() === oldGenericTitle
+            ? deriveModeTitle(next)
+            : currentDef.title,
+        keywordKey: modeKeyFromCommand(next),
       };
       return normalizeSettings({
         ...base,
@@ -874,12 +979,27 @@ function App() {
   const modeRows = useMemo(() => {
     if (!settings?.modes || typeof settings.modes !== "object") return [];
     return Object.keys(settings.modes)
-      .sort((a, b) => a.localeCompare(b))
+      .sort((a, b) => {
+        const aBuiltin = HARD_CODED_MODE_COMMANDS.includes(a);
+        const bBuiltin = HARD_CODED_MODE_COMMANDS.includes(b);
+        if (aBuiltin !== bBuiltin) return aBuiltin ? -1 : 1;
+        return a.localeCompare(b);
+      })
       .map((mode) => ({
         mode,
         def: settings.modes[mode] || {},
       }));
   }, [settings]);
+
+  const builtInModeRows = useMemo(
+    () => modeRows.filter((row) => HARD_CODED_MODE_COMMANDS.includes(row.mode)),
+    [modeRows]
+  );
+
+  const customModeRows = useMemo(
+    () => modeRows.filter((row) => !HARD_CODED_MODE_COMMANDS.includes(row.mode)),
+    [modeRows]
+  );
 
   async function saveSettings() {
     if (!settings) return;
@@ -1488,58 +1608,227 @@ function App() {
                 </div>
               </div>
 
-              <div className="panel">
-                <div className="panel__top">
-                  <div>
-                    <h2>Mode Manager</h2>
-                    <div className="meta">Create/edit modes without touching JSON files. Titles support <code>{"{game}"}</code>.</div>
+                <div className="panel">
+                  <div className="panel__top">
+                    <div>
+                      <h2>Mode Manager</h2>
+                      <div className="meta">Built-in modes stay hardcoded to the bot command they enable. Only the keyword command text, timer message, title, and recap fields should vary here. Titles support <code>{"{game}"}</code>.</div>
+                    </div>
+                    <button className="btn btn--sm btn--ghost" onClick=${addMode}>Add Custom Mode</button>
                   </div>
-                  <button className="btn btn--sm btn--ghost" onClick=${addMode}>Add Mode</button>
-                </div>
-                <div className="table-wrap" style=${{ marginTop: "10px" }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Mode</th>
-                        <th>Chat Command</th>
-                        <th>Timer Message</th>
-                        <th>Keyword Key</th>
-                        <th>Game</th>
-                        <th>Title</th>
-                        <th>Recap Spam</th>
-                        <th>Recap Message</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${modeRows.map((row) => {
+                  <div className="mode-section" style=${{ marginTop: "10px" }}>
+                    <div className="mode-section__header">
+                      <div className="mode-section__title">Built-in Modes</div>
+                      <div className="mode-section__hint">Join, ticket, link, 1v1, and reddit are fixed bot modes.</div>
+                    </div>
+                    <div className="mode-grid">
+                      ${builtInModeRows.map((row) => {
                         const mode = row.mode;
                         const def = row.def || {};
+                        const isCurrent = String(settings.currentMode || "") === mode;
+                        const showsRecap = mode === "!reddit.on";
                         return html`
-                          <tr key=${mode}>
-                            <td>
-                              <input
-                                className="in in--sm"
-                                defaultValue=${mode}
-                                onBlur=${(e) => renameModeCommand(mode, e.target.value)}
-                                placeholder="!join.on"
-                              />
-                            </td>
-                            <td><input className="in in--sm" value=${String(def.responseCommand || "")} onChange=${(e) => setModeField(mode, "responseCommand", e.target.value)} placeholder="!join" /></td>
-                            <td><input className="in in--sm" value=${String(def.timerMessage || "")} onChange=${(e) => setModeField(mode, "timerMessage", e.target.value)} placeholder="type !join to join the game" /></td>
-                            <td><input className="in in--sm" value=${String(def.keywordKey || "")} onChange=${(e) => setModeField(mode, "keywordKey", e.target.value)} placeholder="join" /></td>
-                            <td><input className="in in--sm" value=${String(def.gameName || "")} onChange=${(e) => setModeField(mode, "gameName", e.target.value)} placeholder="Roblox" /></td>
-                            <td><textarea className="textarea textarea--sm" value=${String(def.title || "")} onChange=${(e) => setModeField(mode, "title", e.target.value)} placeholder="Stream title..." /></td>
-                            <td><input className="in in--sm" type="number" min="0" step="1" value=${String(def.recapSpamCount || 0)} onChange=${(e) => setModeField(mode, "recapSpamCount", e.target.value)} /></td>
-                            <td><input className="in in--sm" value=${String(def.recapMessage || "")} onChange=${(e) => setModeField(mode, "recapMessage", e.target.value)} placeholder="REDDIT RECAP TIME: {url}" /></td>
-                            <td>
-                              <button className="btn btn--sm btn--danger" onClick=${() => removeMode(mode)} disabled=${modeRows.length <= 1}>Delete</button>
-                            </td>
-                          </tr>
+                          <section key=${mode} className=${`mode-card${isCurrent ? " mode-card--active" : ""}`}>
+                            <div className="mode-card__head">
+                              <div className="mode-card__identity">
+                                <div className="mode-card__label">Mode Command</div>
+                                <code className="mode-card__readonly">${mode}</code>
+                              </div>
+                              <div className="mode-card__head-actions">
+                                ${isCurrent ? html`<span className="pill">Current</span>` : null}
+                              </div>
+                            </div>
+
+                            <div className="mode-card__grid">
+                              <div className="mode-card__field">
+                                <div className="mode-card__field-label">Keyword Command</div>
+                                <div className="mode-card__field-hint">This is the command the keyword response points viewers toward.</div>
+                                <input
+                                  className="in in--sm"
+                                  value=${String(def.responseCommand || deriveModeResponseCommand(mode))}
+                                  onChange=${(e) => setModeField(mode, "responseCommand", e.target.value)}
+                                  placeholder={String(MODE_TO_TWITCH[mode]?.responseCommand || deriveModeResponseCommand(mode))}
+                                />
+                              </div>
+
+                              <div className="mode-card__field">
+                                <div className="mode-card__field-label">Game</div>
+                                <div className="mode-card__field-hint">Used for <code>{"{game}"}</code> replacement in titles.</div>
+                                <input
+                                  className="in in--sm"
+                                  value=${String(def.gameName || "")}
+                                  onChange=${(e) => setModeField(mode, "gameName", e.target.value)}
+                                  placeholder="Roblox"
+                                />
+                              </div>
+
+                              <div className="mode-card__field mode-card__field--wide">
+                                <div className="mode-card__field-label">Timer Message</div>
+                                <div className="mode-card__field-hint">Timer copy shown while this mode is active.</div>
+                                <input
+                                  className="in in--sm"
+                                  value=${String(def.timerMessage || "")}
+                                  onChange=${(e) => setModeField(mode, "timerMessage", e.target.value)}
+                                  placeholder="type !join in chat"
+                                />
+                              </div>
+
+                              <div className="mode-card__field mode-card__field--wide">
+                                <div className="mode-card__field-label">Stream Title</div>
+                                <div className="mode-card__field-hint">Supports <code>{"{game}"}</code>.</div>
+                                <textarea
+                                  className="textarea textarea--sm mode-card__textarea"
+                                  value=${String(def.title || "")}
+                                  onChange=${(e) => setModeField(mode, "title", e.target.value)}
+                                  placeholder="JOIN IN {game}"
+                                />
+                              </div>
+
+                              ${showsRecap
+                                ? html`
+                                    <div className="mode-card__field">
+                                      <div className="mode-card__field-label">Recap Spam Count</div>
+                                      <div className="mode-card__field-hint">How many recap lines to push when reddit mode gets enabled.</div>
+                                      <input
+                                        className="in in--sm"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value=${String(def.recapSpamCount || 0)}
+                                        onChange=${(e) => setModeField(mode, "recapSpamCount", e.target.value)}
+                                      />
+                                    </div>
+
+                                    <div className="mode-card__field mode-card__field--wide">
+                                      <div className="mode-card__field-label">Recap Message</div>
+                                      <div className="mode-card__field-hint">The recap URL itself still comes from <code>REDDIT_RECAP_URL</code> in config.</div>
+                                      <input
+                                        className="in in--sm"
+                                        value=${String(def.recapMessage || "")}
+                                        onChange=${(e) => setModeField(mode, "recapMessage", e.target.value)}
+                                        placeholder="REDDIT RECAP TIME: {url}"
+                                      />
+                                    </div>
+                                  `
+                                : null}
+                            </div>
+                          </section>
                         `;
                       })}
-                    </tbody>
-                  </table>
+                    </div>
+                  </div>
+
+                  <div className="mode-section" style=${{ marginTop: "16px" }}>
+                    <div className="mode-section__header">
+                      <div className="mode-section__title">Custom Modes</div>
+                      <div className="mode-section__hint">Optional extra modes. These are freeform and can be renamed or deleted.</div>
+                    </div>
+                    ${customModeRows.length
+                      ? html`
+                          <div className="mode-grid">
+                            ${customModeRows.map((row) => {
+                              const mode = row.mode;
+                              const def = row.def || {};
+                              const isCurrent = String(settings.currentMode || "") === mode;
+                              return html`
+                                <section key=${mode} className=${`mode-card${isCurrent ? " mode-card--active" : ""}`}>
+                                  <div className="mode-card__head">
+                                    <div className="mode-card__identity">
+                                      <div className="mode-card__label">Mode Command</div>
+                                      <input
+                                        className="in in--sm mode-card__mode-input"
+                                        defaultValue=${mode}
+                                        onBlur=${(e) => renameModeCommand(mode, e.target.value)}
+                                        placeholder="!custom1.on"
+                                      />
+                                    </div>
+                                    <div className="mode-card__head-actions">
+                                      ${isCurrent ? html`<span className="pill">Current</span>` : null}
+                                      <button
+                                        className="btn btn--sm btn--danger"
+                                        onClick=${() => removeMode(mode)}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="mode-card__grid">
+                                    <div className="mode-card__field">
+                                      <div className="mode-card__field-label">Keyword Command</div>
+                                      <div className="mode-card__field-hint">The command the keyword response points viewers toward.</div>
+                                      <input
+                                        className="in in--sm"
+                                        value=${String(def.responseCommand || deriveModeResponseCommand(mode))}
+                                        onChange=${(e) => setModeField(mode, "responseCommand", e.target.value)}
+                                        placeholder={String(deriveModeResponseCommand(mode))}
+                                      />
+                                    </div>
+
+                                    <div className="mode-card__field">
+                                      <div className="mode-card__field-label">Game</div>
+                                      <div className="mode-card__field-hint">Used for <code>{"{game}"}</code> replacement in titles.</div>
+                                      <input
+                                        className="in in--sm"
+                                        value=${String(def.gameName || "")}
+                                        onChange=${(e) => setModeField(mode, "gameName", e.target.value)}
+                                        placeholder="Roblox"
+                                      />
+                                    </div>
+
+                                    <div className="mode-card__field mode-card__field--wide">
+                                      <div className="mode-card__field-label">Timer Message</div>
+                                      <div className="mode-card__field-hint">Timer copy shown while this mode is active.</div>
+                                      <input
+                                        className="in in--sm"
+                                        value=${String(def.timerMessage || "")}
+                                        onChange=${(e) => setModeField(mode, "timerMessage", e.target.value)}
+                                        placeholder="type !custom in chat"
+                                      />
+                                    </div>
+
+                                    <div className="mode-card__field mode-card__field--wide">
+                                      <div className="mode-card__field-label">Stream Title</div>
+                                      <div className="mode-card__field-hint">Supports <code>{"{game}"}</code>.</div>
+                                      <textarea
+                                        className="textarea textarea--sm mode-card__textarea"
+                                        value=${String(def.title || "")}
+                                        onChange=${(e) => setModeField(mode, "title", e.target.value)}
+                                        placeholder="CUSTOM IN {game}"
+                                      />
+                                    </div>
+
+                                    <div className="mode-card__field">
+                                      <div className="mode-card__field-label">Recap Spam Count</div>
+                                      <div className="mode-card__field-hint">Optional. Only use this if the custom mode has a recap flow.</div>
+                                      <input
+                                        className="in in--sm"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value=${String(def.recapSpamCount || 0)}
+                                        onChange=${(e) => setModeField(mode, "recapSpamCount", e.target.value)}
+                                      />
+                                    </div>
+
+                                    <div className="mode-card__field mode-card__field--wide">
+                                      <div className="mode-card__field-label">Recap Message</div>
+                                      <div className="mode-card__field-hint">Optional. Use <code>{"{url}"}</code> if this mode needs a recap URL.</div>
+                                      <input
+                                        className="in in--sm"
+                                        value=${String(def.recapMessage || "")}
+                                        onChange=${(e) => setModeField(mode, "recapMessage", e.target.value)}
+                                        placeholder="REDDIT RECAP TIME: {url}"
+                                      />
+                                    </div>
+                                  </div>
+                                </section>
+                              `;
+                            })}
+                          </div>
+                        `
+                      : html`<div className="meta">No custom modes yet. Use Add Custom Mode if you actually need one.</div>`}
+                  </div>
                 </div>
               </div>
 

@@ -654,7 +654,11 @@ async function getActivityLogSnapshotFromDeps(limit = 120) {
   } catch {}
 
   try {
-    const res = await readActivityLogState({ limit: safeLimit });
+    const res = await readActivityLogState({
+      schema: CUSTOM_COMMANDS_SCHEMA,
+      instance: CUSTOM_COMMANDS_INSTANCE,
+      limit: safeLimit,
+    });
     return Array.isArray(res?.rows) ? res.rows : [];
   } catch {
     return [];
@@ -668,7 +672,11 @@ function queueActivityLog(entry = {}) {
         await deps.logActivity(entry);
         return;
       }
-      await appendActivityLogEntryState({ entry });
+      await appendActivityLogEntryState({
+        schema: CUSTOM_COMMANDS_SCHEMA,
+        instance: CUSTOM_COMMANDS_INSTANCE,
+        entry,
+      });
     })
     .catch(() => {});
 }

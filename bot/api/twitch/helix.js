@@ -1214,118 +1214,40 @@ export const getTwitchIdFromUsername = async (username) => {
 };
 
 export const timeoutUser = async (target, reason = null, duration) => {
-  if (reason != null) {
-    reason = '"' + reason + '"';
+  try {
+    await timeoutUserByLogin(
+      target,
+      Math.max(1, Math.floor(Number(duration) || 0)),
+      String(reason || "").trim(),
+      { preferredRole: "auto" }
+    );
+    return true;
+  } catch (e) {
+    console.warn(
+      "[TWITCH][TIMEOUT] failed:",
+      String(e?.message || e)
+    );
+    return false;
   }
-  const weeks = Math.floor(duration / (60 * 60 * 24 * 7));
-  const days = Math.floor(
-    (duration - weeks * 60 * 60 * 24 * 7) / (60 * 60 * 24)
-  );
-  const hours = Math.floor(
-    (duration - weeks * 60 * 60 * 24 * 7 - days * 60 * 60 * 24) / (60 * 60)
-  );
-  const minutes = Math.floor(
-    (duration -
-      weeks * 60 * 60 * 24 * 7 -
-      days * 60 * 60 * 24 -
-      hours * 60 * 60) /
-      60
-  );
-  const seconds = Math.floor(
-    duration -
-      weeks * 60 * 60 * 24 * 7 -
-      days * 60 * 60 * 24 -
-      hours * 60 * 60 -
-      minutes * 60
-  );
-
-  const formatted = {
-    weeks: [weeks, "w"],
-    days: [days, "d"],
-    hours: [hours, "h"],
-    minutes: [minutes, "m"],
-    seconds: [seconds, "s"],
-  };
-  var formattedDuration = "";
-
-  for (const key in formatted) {
-    if (formatted[key][0] == 0) {
-      delete formatted[key];
-    } else {
-      formattedDuration += formatted[key][0] + formatted[key][1];
-    }
-  }
-
-  const r = await fetch("https://gql.twitch.tv/gql#origin=twilight", {
-    headers: {
-      "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-      Authorization: `OAuth ${BOT_OAUTH}`,
-    },
-    body: `[{\"operationName\":\"Chat_BanUserFromChatRoom\",\"variables\":{\"input\":{\"channelID\":\"${CHANNEL_ID}\",\"bannedUserLogin\":\"${target}\",\"expiresIn\":\"${formattedDuration}\",\"reason\":${reason}}},\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"d7be2d2e1e22813c1c2f3d9d5bf7e425d815aeb09e14001a5f2c140b93f6fb67\"}}}]`,
-    method: "POST",
-  });
-
-  const isOk = await r.ok;
-
-  return isOk;
 };
 
 export function timeoutEXP(target, reason = null, duration, cb) {
-  if (reason != null) {
-    reason = '"' + reason + '"';
-  }
-  const weeks = Math.floor(duration / (60 * 60 * 24 * 7));
-  const days = Math.floor(
-    (duration - weeks * 60 * 60 * 24 * 7) / (60 * 60 * 24)
-  );
-  const hours = Math.floor(
-    (duration - weeks * 60 * 60 * 24 * 7 - days * 60 * 60 * 24) / (60 * 60)
-  );
-  const minutes = Math.floor(
-    (duration -
-      weeks * 60 * 60 * 24 * 7 -
-      days * 60 * 60 * 24 -
-      hours * 60 * 60) /
-      60
-  );
-  const seconds = Math.floor(
-    duration -
-      weeks * 60 * 60 * 24 * 7 -
-      days * 60 * 60 * 24 -
-      hours * 60 * 60 -
-      minutes * 60
-  );
-
-  const formatted = {
-    weeks: [weeks, "w"],
-    days: [days, "d"],
-    hours: [hours, "h"],
-    minutes: [minutes, "m"],
-    seconds: [seconds, "s"],
-  };
-  var formattedDuration = "";
-
-  for (const key in formatted) {
-    if (formatted[key][0] == 0) {
-      delete formatted[key];
-    } else {
-      formattedDuration += formatted[key][0] + formatted[key][1];
-    }
-  }
-
-  fetch("https://gql.twitch.tv/gql#origin=twilight", {
-    headers: {
-      "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-      Authorization: `OAuth ${BOT_OAUTH}`,
-    },
-    body: `[{\"operationName\":\"Chat_BanUserFromChatRoom\",\"variables\":{\"input\":{\"channelID\":\"${CHANNEL_ID}\",\"bannedUserLogin\":\"${target}\",\"expiresIn\":\"${formattedDuration}\",\"reason\":${reason}}},\"extensions\":{\"persistedQuery\":{\"version\":1,\"sha256Hash\":\"d7be2d2e1e22813c1c2f3d9d5bf7e425d815aeb09e14001a5f2c140b93f6fb67\"}}}]`,
-    method: "POST",
-  })
-    .then((r) => {
-      return r.json();
+  Promise.resolve()
+    .then(async () => {
+      await timeoutUserByLogin(
+        target,
+        Math.max(1, Math.floor(Number(duration) || 0)),
+        String(reason || "").trim(),
+        { preferredRole: "auto" }
+      );
+      safeInvoke(cb, true);
     })
-    .then((json) => {
-      cb(json[0].errors == null);
+    .catch((e) => {
+      console.warn(
+        "[TWITCH][TIMEOUT] failed:",
+        String(e?.message || e)
+      );
+      safeInvoke(cb, false);
     });
 }
 
@@ -1866,6 +1788,55 @@ export const getSubStatus = async (userId) => {
 
   return json;
 };
+
+export async function getBitsLeaderboardEntryByUser({ userId, login } = {}) {
+  const safeUserId = String(userId || "").trim();
+  const safeLogin = normalizeTwitchLogin(login || "");
+  if (!safeUserId && !safeLogin) return null;
+
+  const auth = await resolveHelixModeratorAuth({
+    preferred: "streamer",
+    requiredScopes: ["bits:read"],
+  });
+  if (!auth?.accessToken || !auth?.clientId) return null;
+
+  const url = new URL("https://api.twitch.tv/helix/bits/leaderboard");
+  url.searchParams.set("count", "100");
+  url.searchParams.set("period", "all");
+
+  const json = await fetchHelixJson({
+    url: url.toString(),
+    method: "GET",
+    clientId: auth.clientId,
+    accessToken: auth.accessToken,
+  });
+
+  const rows = Array.isArray(json?.data) ? json.data : [];
+  for (const row of rows) {
+    const rowUserId = String(row?.user_id || "").trim();
+    const rowLogin = normalizeTwitchLogin(row?.user_login || "");
+    if (safeUserId && rowUserId && rowUserId === safeUserId) {
+      return {
+        userId: rowUserId,
+        login: rowLogin || null,
+        displayName: String(row?.user_name || "").trim() || null,
+        score: Math.max(0, Math.floor(Number(row?.score) || 0)),
+        rank: Math.max(0, Math.floor(Number(row?.rank) || 0)),
+      };
+    }
+    if (safeLogin && rowLogin && rowLogin === safeLogin) {
+      return {
+        userId: rowUserId || null,
+        login: rowLogin,
+        displayName: String(row?.user_name || "").trim() || null,
+        score: Math.max(0, Math.floor(Number(row?.score) || 0)),
+        rank: Math.max(0, Math.floor(Number(row?.rank) || 0)),
+      };
+    }
+  }
+
+  return null;
+}
 
 export const getChannelEmotes = async () => {
   const r = await fetch(
