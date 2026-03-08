@@ -724,20 +724,21 @@ function seedInstanceStateFiles() {
   const playtimePath = String(process.env.PLAYTIME_PATH || "").trim();
   const gamepingRolesPath = String(process.env.GAMEPING_ROLES_PATH || "").trim();
 
-  // These stay JSON even when state is in Postgres.
+  // Quotes intentionally keep a JSON mirror even when state is in Postgres.
   if (quotesPath) {
     seedJsonFileIfMissing(quotesPath, buildEmptyQuotesState());
-  }
-  if (wordsPath) {
-    seedWordsFileIfMissing(wordsPath);
   }
   if (gamepingRolesPath) {
     seedJsonFileIfMissing(gamepingRolesPath, { pings: {}, gameChangeRoleId: null });
   }
 
   // When using postgres state backend, avoid creating per-instance JSON state files.
-  // State is stored in DB and fs reads/writes are intercepted by data/postgres/stateInterceptor.js.
+  // Settings are virtualized through data/postgres/stateInterceptor.js and keywords live in Postgres.
   if (backend === "postgres" || backend === "pg") return;
+
+  if (wordsPath) {
+    seedWordsFileIfMissing(wordsPath);
+  }
 
   // SETTINGS.json: prefer copying the repo root default for a valid shape.
   if (settingsPath) {

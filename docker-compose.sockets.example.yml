@@ -1,0 +1,87 @@
+x-mainsbot-base: &mainsbot-base
+  build:
+    context: .
+  image: mainsbot:3.0.0
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  volumes:
+    - ./config:/app/config
+    - ./data:/app/data
+    - mainsbot_run:/app/run
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mainsbot
+      POSTGRES_PASSWORD: mainsbot
+      POSTGRES_DB: mainsbot
+    volumes:
+      - mainsbot_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mainsbot -d mainsbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - mainsbot_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  bot_example:
+    <<: *mainsbot-base
+    command:
+      - sh
+      - -lc
+      - node main.js --config config/example.ini
+
+  web_example:
+    <<: *mainsbot-base
+    command:
+      - sh
+      - -lc
+      - node main-web.js --config config/example.ini
+
+  bot_second:
+    <<: *mainsbot-base
+    command:
+      - sh
+      - -lc
+      - node main.js --config config/second.ini
+
+  web_second:
+    <<: *mainsbot-base
+    command:
+      - sh
+      - -lc
+      - node main-web.js --config config/second.ini
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - web_example
+      - web_second
+    ports:
+      - "80:80"
+    volumes:
+      - mainsbot_run:/sock
+      - ./deploy/nginx-mainsbot-docker-socket.conf.example:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+volumes:
+  mainsbot_pg:
+  mainsbot_redis:
+  mainsbot_run:

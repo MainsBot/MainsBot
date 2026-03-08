@@ -1,6 +1,16 @@
 import fs from "fs";
 import path from "path";
 
+function resolveOptionalPath(value) {
+  const raw = String(value || "").trim();
+  return raw ? path.resolve(raw) : "";
+}
+
+function usesPostgresStateBackend() {
+  const backend = String(process.env.STATE_BACKEND || "postgres").trim().toLowerCase();
+  return backend === "postgres" || backend === "pg";
+}
+
 export function createKeywordStorage({
   wordsPath,
   defaultGlobalWordsPath,
@@ -9,15 +19,15 @@ export function createKeywordStorage({
   readKeywordsState,
   writeKeywordsState,
 } = {}) {
-  const WORDS_PATH = path.resolve(String(wordsPath || "").trim());
-  const DEFAULT_GLOBAL_WORDS_PATH = path.resolve(String(defaultGlobalWordsPath || "").trim());
-  const LEGACY_ARCHIVE_WORDS_PATH = path.resolve(String(legacyArchiveWordsPath || "").trim());
+  const WORDS_PATH = resolveOptionalPath(wordsPath);
+  const DEFAULT_GLOBAL_WORDS_PATH = resolveOptionalPath(defaultGlobalWordsPath);
+  const LEGACY_ARCHIVE_WORDS_PATH = resolveOptionalPath(legacyArchiveWordsPath);
 
   function readWordsFromDisk() {
     const candidates = [
       WORDS_PATH,
-      path.join(path.dirname(WORDS_PATH), "WORDS.json"),
-      path.join(path.dirname(WORDS_PATH), "words.json"),
+      WORDS_PATH ? path.join(path.dirname(WORDS_PATH), "WORDS.json") : "",
+      WORDS_PATH ? path.join(path.dirname(WORDS_PATH), "words.json") : "",
       DEFAULT_GLOBAL_WORDS_PATH,
       LEGACY_ARCHIVE_WORDS_PATH,
     ];
@@ -39,7 +49,7 @@ export function createKeywordStorage({
       } catch {}
     }
 
-    return { words: {}, sourcePath: WORDS_PATH };
+    return { words: {}, sourcePath: WORDS_PATH || "" };
   }
 
   async function loadKeywordsWithPostgresFallback() {
@@ -75,7 +85,10 @@ export function createKeywordStorage({
       console.warn("[KEYWORDS] postgres write failed:", String(e?.message || e));
     }
 
-    if (writeFileFallback) {
+    const shouldWriteFileMirror =
+      Boolean(writeFileFallback) && Boolean(WORDS_PATH) && !usesPostgresStateBackend();
+
+    if (shouldWriteFileMirror) {
       try {
         fs.mkdirSync(path.dirname(WORDS_PATH), { recursive: true });
         fs.writeFileSync(WORDS_PATH, JSON.stringify(normalized, null, 2), "utf8");

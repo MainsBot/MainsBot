@@ -2891,12 +2891,14 @@ function resolveModeTitleTemplate(template = "", gameName = "") {
   return title.replace(/\{game\}/gi, game || "Game");
 }
 
-async function applyModeToTwitch({ client, mode, userstate }) {
+async function applyModeToTwitch({ client, mode, userstate, settings = null }) {
   const normalizedMode = normalizeModeCommand(mode);
   if (!normalizedMode) return false;
 
-  // reload settings so we always use freshest titles
-  const s = withSettingsDefaults(JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8")));
+  const s =
+    settings && typeof settings === "object"
+      ? withSettingsDefaults(settings)
+      : withSettingsDefaults(SETTINGS);
   const modeCfg = getModeConfig(s, normalizedMode);
   if (!modeCfg) return false;
 
@@ -2945,8 +2947,9 @@ async function updateMode(client, message, twitchUsername, userstate) {
   if (!cmd.startsWith("!")) return;
   if (!cmd.endsWith(".on")) return;
 
-  // reload fresh settings
-  SETTINGS = withSettingsDefaults(JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8")));
+  SETTINGS = isPostgresStateBackend()
+    ? await syncSettingsFromSharedState({ force: true })
+    : readSettingsFromDisk();
 
   const isValidMode = SETTINGS.validModes.includes(normalizedCmd);
   const isIgnoreMode = SETTINGS.ignoreModes.includes(normalizedCmd);
@@ -2999,6 +3002,7 @@ async function updateMode(client, message, twitchUsername, userstate) {
     client,
     mode: normalizedCmd,
     userstate,
+    settings: SETTINGS,
   });
 
   const activeMode = getModeConfig(SETTINGS, normalizedCmd);

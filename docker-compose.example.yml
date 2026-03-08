@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mainsbot
+      POSTGRES_PASSWORD: mainsbot
+      POSTGRES_DB: mainsbot
+    volumes:
+      - mainsbot_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mainsbot -d mainsbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - mainsbot_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: .
+    image: mainsbot:3.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - sh
+      - -lc
+      - node main.js --config "config/${MAINSBOT_INSTANCE_CONFIG:-docker.ini}"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+    image: mainsbot:3.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - sh
+      - -lc
+      - node main-web.js --config "config/${MAINSBOT_INSTANCE_CONFIG:-docker.ini}"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+    ports:
+      - "8787:8787"
+    restart: unless-stopped
+
+volumes:
+  mainsbot_pg:
+  mainsbot_redis:

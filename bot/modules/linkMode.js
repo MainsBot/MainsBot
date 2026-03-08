@@ -175,7 +175,12 @@ export async function handleLinkModeMessage({
 
   fs.writeFileSync(settingsPath, JSON.stringify(latestSettings, null, 2));
 
-  await applyModeToTwitch({ client, mode: "!link.on", userstate });
+  await applyModeToTwitch({
+    client,
+    mode: "!link.on",
+    userstate,
+    settings: latestSettings,
+  });
 
   if (mode === 1) {
     const provider = readLinkProvider();

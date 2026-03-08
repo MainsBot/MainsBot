@@ -79,6 +79,109 @@ Config (INI keys in `[web]` or env vars):
 - Set `[web].listen=socket` + `[web].socket_path` and proxy to it in nginx.
 - Example: `deploy/nginx-mainsbot-socket.conf.example`
 
+## Docker
+
+Yes. A basic container path is now included:
+- `Dockerfile`
+- `docker-compose.example.yml`
+- `docker-compose.sockets.example.yml`
+- `deploy/nginx-mainsbot-docker-socket.conf.example`
+
+Recommended Docker shape:
+- one `bot` container running `main.js`
+- one `web` container running `main-web.js`
+- one `postgres` container
+- one `redis` container
+
+Use it like this:
+```bash
+cp docker-compose.example.yml docker-compose.yml
+cp config/instance.example.ini config/docker.ini
+docker compose up --build -d
+```
+
+For Docker, use TCP for the web service, not unix sockets. In `config/docker.ini`:
+```ini
+[modules]
+web = 0
+
+[web]
+listen = tcp
+host = 0.0.0.0
+port = 8787
+
+[state]
+backend = postgres
+
+[database]
+url = postgresql://mainsbot:mainsbot@postgres:5432/mainsbot
+schema = mainsbot_example
+
+[redis]
+url = redis://redis:6379/0
+```
+
+Then edit the rest of the INI normally:
+- `[instance].name`
+- `[twitch]`
+- `[spotify]`
+- `[roblox]`
+- `[web]`
+
+The compose example defaults to `config/docker.ini`. Override it with:
+```bash
+MAINSBOT_INSTANCE_CONFIG=myinstance.ini docker compose up --build -d
+```
+
+### Docker + unix sockets + nginx + multi-instance
+
+If you want the container stack to mirror the split production layout:
+- use `docker-compose.sockets.example.yml`
+- keep one `bot_<instance>` container and one `web_<instance>` container per streamer
+- let nginx proxy to unix sockets on a shared volume
+
+Example:
+```bash
+cp docker-compose.sockets.example.yml docker-compose.yml
+cp config/instance.example.ini config/example.ini
+cp config/instance.example.ini config/second.ini
+docker compose up --build -d
+```
+
+For each instance INI, use socket mode:
+```ini
+[modules]
+web = 0
+
+[web]
+listen = socket
+socket_path = /app/run/example/web.sock
+overlay_socket_path = /app/run/example/overlay.sock
+
+[state]
+backend = postgres
+
+[database]
+url = postgresql://mainsbot:mainsbot@postgres:5432/mainsbot
+schema = mainsbot_example
+
+[redis]
+url = redis://redis:6379/0
+```
+
+Inside the containers:
+- web binds sockets under `/app/run/<instance>/`
+- nginx sees the same shared volume at `/sock/<instance>/`
+
+The nginx side example is:
+- `deploy/nginx-mainsbot-docker-socket.conf.example`
+
+That example shows two instances:
+- `example.local` -> `/sock/example/web.sock`
+- `second.local` -> `/sock/second/web.sock`
+
+If you want TLS in Docker too, keep the same socket layout and replace the sample nginx server blocks with your normal `listen 443 ssl` setup.
+
 ## systemd split services
 
 - Bot only service template: `deploy/systemd/mainsbot@.service.example`

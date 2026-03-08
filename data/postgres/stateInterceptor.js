@@ -6,6 +6,7 @@ import { resolveInstanceName } from "../../bot/functions/instance.js";
 
 const LEGACY_FILENAMES_BY_KEY = {
   settings: ["./SETTINGS.json", "SETTINGS.json"],
+  quotes: ["./QUOTES.json", "QUOTES.json"],
   streams: ["./STREAMS.json", "STREAMS.json"],
   playtime: ["./playtime.json", "playtime.json"],
   userdata: ["./USERDATA.json", "USERDATA.json"],
@@ -17,6 +18,7 @@ const LEGACY_FILENAMES_BY_KEY = {
 
 const ENV_PATH_BY_KEY = {
   settings: "SETTINGS_PATH",
+  quotes: "QUOTES_PATH",
   streams: "STREAMS_PATH",
   playtime: "PLAYTIME_PATH",
   userdata: "USERDATA_PATH",
@@ -176,6 +178,10 @@ function buildDefaultStreams() {
   };
 }
 
+function buildDefaultQuotes() {
+  return { nextId: 1, quotes: [] };
+}
+
 function buildEmptyPlaytime() {
   return {
     totals: {},
@@ -207,6 +213,7 @@ function defaultValueForKey(key) {
     return buildDefaultStreams();
   }
 
+  if (key === "quotes") return buildDefaultQuotes();
   if (key === "playtime") return buildEmptyPlaytime();
   if (key === "predictiondata") return [];
 
@@ -287,6 +294,22 @@ function scheduleFlush() {
   }, 750);
 }
 
+function mirrorJsonToDiskUsingOriginal(filePath, value) {
+  const target = String(filePath || "").trim();
+  if (!target) return;
+
+  try {
+    const resolved = abs(target);
+    const dir = path.dirname(resolved);
+    if (dir && dir !== "." && !original.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    original.writeFileSync(resolved, JSON.stringify(value, null, 2), "utf8");
+  } catch (e) {
+    console.warn("[state] mirror write failed:", String(e?.message || e));
+  }
+}
+
 async function ensureSchemaAndTable({ schema } = {}) {
   const safeSchema = normalizePgIdentifier(schema || "") || "public";
   const pool = getPgPool();
@@ -348,6 +371,10 @@ async function flushDirtyToDb({ schema, instance } = {}) {
         `on conflict (instance, key) do update set value=excluded.value, updated_at=now()`,
       [inst, key, value]
     );
+
+    if (key === "quotes") {
+      mirrorJsonToDiskUsingOriginal(process.env.QUOTES_PATH, value);
+    }
   }
 }
 
