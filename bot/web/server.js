@@ -1537,9 +1537,10 @@ async function sendJsResponse(
   statusCode,
   js,
   sourceLabel = "inline-js",
-  extraHeaders = {}
+  extraHeaders = {},
+  { minify = true } = {}
 ) {
-  const output = await minifyJs(js, sourceLabel);
+  const output = minify ? await minifyJs(js, sourceLabel) : String(js ?? "");
   res.writeHead(Number(statusCode) || 200, {
     "content-type": "text/javascript; charset=utf-8",
     "cache-control": "no-store",
@@ -6678,7 +6679,9 @@ const webServer = http.createServer(async (req, res) => {
         return sendCssResponse(res, 200, data.toString("utf8"), filePath);
       }
       if (ext === ".js") {
-        return await sendJsResponse(res, 200, data.toString("utf8"), filePath);
+        return await sendJsResponse(res, 200, data.toString("utf8"), filePath, {}, {
+          minify: false,
+        });
       }
 
       res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream" });

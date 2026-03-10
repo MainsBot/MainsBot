@@ -51,7 +51,10 @@ import {
   isSpotifyModuleEnabled,
 } from "./modules/spotifyCommands.js";
 import { isGamepingModuleEnabled, registerGamepingModule } from "./modules/gameping.js";
-import { isPubsubModuleEnabled, startTwitchPubsub } from "./modules/twitchPubsub.js";
+import {
+  isEventsubModuleEnabled,
+  startTwitchEventsub,
+} from "./modules/twitchPubsub.js";
 import { isAlertsModuleEnabled, registerAlertsModule } from "./modules/alerts.js";
 import { tryHandlePermitCommand } from "./modules/permit.js";
 import { handleFilterToggles } from "./modules/filterToggles.js";
@@ -303,8 +306,12 @@ const STREAMER_TOKEN =
   normalizeAuthToken(TWITCH_STREAMER_STORE.access_token) ||
   process.env.STRAMER_TOKEN ||
   process.env.STREAMER_TOKEN;
+const TWITCH_CHAT_EVENTSUB_ENABLED = flagFromEnv(
+  process.env.MODULE_EVENTSUB ?? process.env.MODULE_PUBSUB ?? "true"
+);
 const TWITCH_CHAT_CONNECT_IRC = flagFromEnv(
-  process.env.TWITCH_CHAT_CONNECT_IRC ?? "true"
+  process.env.TWITCH_CHAT_CONNECT_IRC ??
+    (TWITCH_CHAT_EVENTSUB_ENABLED ? "false" : "true")
 );
 const TWITCH_CHAT_CAN_USE_IRC_FALLBACK = false;
 const TWITCH_CHAT_CAN_CONNECT_IRC =
@@ -1474,9 +1481,15 @@ var streamNumber = Object.keys(STREAMS).length;
 
 // ---------- TWITCH / IRC (tmi.js) ----------
 if (!TWITCH_CHAT_CONNECT_IRC) {
-  console.log(
-    "[TWITCH][IRC] intake disabled; Twitch chat intake, Twitch chat logging, and Twitch-side commands are off."
-  );
+  if (TWITCH_CHAT_EVENTSUB_ENABLED) {
+    console.log(
+      "[TWITCH][CHAT] IRC intake disabled; inbound Twitch chat will come from EventSub."
+    );
+  } else {
+    console.log(
+      "[TWITCH][IRC] intake disabled; Twitch chat intake, Twitch chat logging, and Twitch-side commands are off."
+    );
+  }
 } else if (!CHANNEL_NAME) {
   console.warn(
     "[TWITCH][IRC] channel login is missing; cannot join Twitch chat."
@@ -3729,10 +3742,10 @@ async function liveDownHandler() {
   }
 }
 
-let pubsubController = null;
+let eventsubController = null;
 try {
-  if (isPubsubModuleEnabled()) {
-    pubsubController = startTwitchPubsub({
+  if (isEventsubModuleEnabled()) {
+    eventsubController = startTwitchEventsub({
       client,
       twitchFunctions: TWITCH_FUNCTIONS,
       botOauth: BOT_OAUTH,
@@ -3746,12 +3759,12 @@ try {
       liveUpHandler,
       liveDownHandler,
     });
-    console.log("[modules] pubsub=on");
+    console.log("[modules] eventsub=on");
   } else {
-    console.log("[modules] pubsub=off");
+    console.log("[modules] eventsub=off");
   }
 } catch (e) {
-  console.warn("[modules] pubsub init failed:", String(e?.message || e));
+  console.warn("[modules] eventsub init failed:", String(e?.message || e));
 }
 
 // Alerts moved to bot/modules/alerts.js
@@ -4148,7 +4161,7 @@ async function gracefulShutdown(signal = "shutdown") {
       alertsController?.stop?.();
     } catch {}
     try {
-      pubsubController?.stop?.();
+      eventsubController?.stop?.();
     } catch {}
     try {
       TIMERS?.stop?.();

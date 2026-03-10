@@ -337,7 +337,11 @@ function applyModulesConfig(ini) {
   if (mods.roblox != null) setEnvOverride("MODULE_ROBLOX", mods.roblox);
   if (mods.discord != null) setEnvOverride("MODULE_DISCORD", mods.discord);
   if (mods.gameping != null) setEnvOverride("MODULE_GAMEPING", mods.gameping);
-  if (mods.pubsub != null) setEnvOverride("MODULE_PUBSUB", mods.pubsub);
+  if (mods.eventsub != null) setEnvOverride("MODULE_EVENTSUB", mods.eventsub);
+  if (mods.pubsub != null) {
+    setEnvOverride("MODULE_PUBSUB", mods.pubsub);
+    if (mods.eventsub == null) setEnvOverride("MODULE_EVENTSUB", mods.pubsub);
+  }
   if (mods.alerts != null) setEnvOverride("MODULE_ALERTS", mods.alerts);
   if (mods.tab != null) setEnvOverride("MODULE_TAB", mods.tab);
   // backward compatible name (deprecated)
@@ -474,6 +478,9 @@ function applyTwitchSection(ini) {
   }
   if (tw.chat_connect_irc != null || tw.chatConnectIrc != null) {
     setEnvOverride("TWITCH_CHAT_CONNECT_IRC", tw.chat_connect_irc ?? tw.chatConnectIrc);
+  }
+  if (tw.chat_use_eventsub != null || tw.chatUseEventsub != null) {
+    setEnvOverride("MODULE_EVENTSUB", tw.chat_use_eventsub ?? tw.chatUseEventsub);
   }
   if (tw.chat_use_app_token != null || tw.chatUseAppToken != null) {
     setEnvOverride("TWITCH_CHAT_USE_APP_TOKEN", tw.chat_use_app_token ?? tw.chatUseAppToken);

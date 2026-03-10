@@ -1,10 +1,12 @@
 import fs from "fs";
+import fetch from "node-fetch";
 import WebSocket from "ws";
 import { setTimeout as delay } from "timers/promises";
 
 import * as FILTER_FUNCTIONS from "../functions/filters.js";
 import * as ROBLOX_FUNCTIONS from "../api/roblox/index.js";
 import * as SPOTIFY from "../api/spotify/index.js";
+import { getRoleAccessToken, TWITCH_ROLES } from "../api/twitch/auth.js";
 import { isSpotifyModuleEnabled } from "./spotifyCommands.js";
 import {
   addTrackedRobloxFriend,
@@ -46,6 +48,10 @@ const DEFAULT_POLL_COMPLETE_LOSS_TEMPLATE =
   "RIPBOZO @{user} just lost {channelPoints} {channelPointsName} thats {farmTime} of farming";
 const DEFAULT_POLL_COMPLETE_WIN_TEMPLATE =
   "PogU @{user} just spent {channelPoints} {channelPointsName}";
+const EVENTSUB_WS_URL = "wss://eventsub.wss.twitch.tv/ws";
+const EVENTSUB_SUBSCRIPTION_URL =
+  "https://api.twitch.tv/helix/eventsub/subscriptions";
+const DEFAULT_EVENTSUB_KEEPALIVE_MS = 45_000;
 
 function normalizeAutoFocOffDelayMs(value, fallback = MIN_AUTO_FOC_OFF_DELAY_MS) {
   const n = Number(value);
@@ -53,13 +59,17 @@ function normalizeAutoFocOffDelayMs(value, fallback = MIN_AUTO_FOC_OFF_DELAY_MS)
   return Math.max(MIN_AUTO_FOC_OFF_DELAY_MS, Math.floor(n));
 }
 
-export function isPubsubModuleEnabled() {
-  const raw = String(process.env.MODULE_PUBSUB ?? "").trim();
+export function isEventsubModuleEnabled() {
+  const raw = String(
+    process.env.MODULE_EVENTSUB ?? process.env.MODULE_PUBSUB ?? ""
+  ).trim();
   if (raw) return flagFromValue(raw);
   return true; // default on (backward compatible)
 }
 
-export function startTwitchPubsub({
+export const isPubsubModuleEnabled = isEventsubModuleEnabled;
+
+export function startTwitchEventsub({
   client,
   twitchFunctions,
   botOauth,
@@ -84,9 +94,6 @@ export function startTwitchPubsub({
   const TWITCH_FUNCTIONS = twitchFunctions;
   const BOT_OAUTH = normalizeAuthToken(botOauth);
   const STREAMER_OAUTH = normalizeAuthToken(streamerOauth);
-  if (!BOT_OAUTH && !STREAMER_OAUTH) {
-    throw new Error("startTwitchPubsub: missing botOauth/streamerOauth");
-  }
   const CHANNEL_ID = channelId;
   const BOT_ID = String(botId || "").trim();
   const CHANNEL_NAME = String(channelName).replace(/^#/, "");
@@ -114,8 +121,6 @@ export function startTwitchPubsub({
   let streamNumber = 0;
 
 var pubsub;
-const myname = CHANNEL_NAME;
-const pendingListens = new Map();
 let reconnectTimer = null;
 let reconnectAttempt = 0;
 let pollFallbackTimer = null;
@@ -123,6 +128,14 @@ let lastProcessedPollSignature = "";
 let lastAnnouncedPollCreateSignature = "";
 let lastProcessedPredictionResolutionId = "";
 const subTierCache = new Map();
+
+let eventsubSessionId = "";
+let eventsubKeepaliveMs = DEFAULT_EVENTSUB_KEEPALIVE_MS;
+let eventsubKeepaliveTimer = null;
+let eventsubReuseSession = false;
+let eventsubReconnectUrl = "";
+let lastFollowersOnlyEnabled = null;
+let autoFocOffTimer = null;
 
 function asNumber(value, fallback = 0) {
   const n = Number(value);
@@ -688,106 +701,868 @@ function startPollFallbackMonitor() {
 function scheduleReconnect(reason = "") {
   if (stopped || reconnectTimer) return;
   reconnectAttempt = Math.min(reconnectAttempt + 1, 8);
-  const waitMs = Math.min(30_000, 1_000 * 2 ** (reconnectAttempt - 1));
-  logger.warn(`[pubsub] reconnecting in ${waitMs}ms${reason ? ` (${reason})` : ""}`);
+  const waitMs = eventsubReconnectUrl
+    ? 250
+    : Math.min(30_000, 1_000 * 2 ** (reconnectAttempt - 1));
+  logger.warn(`[eventsub] reconnecting in ${waitMs}ms${reason ? ` (${reason})` : ""}`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    StartListener();
+    StartListener(eventsubReconnectUrl || EVENTSUB_WS_URL);
   }, waitMs);
 }
 
-var ping = {};
-ping.pinger = false;
-ping.start = function () {
-  ping.stop();
-  ping.sendPing();
+function clearEventsubKeepaliveTimer() {
+  if (eventsubKeepaliveTimer) {
+    clearTimeout(eventsubKeepaliveTimer);
+    eventsubKeepaliveTimer = null;
+  }
+}
 
-  ping.pinger = setInterval(function () {
-    setTimeout(function () {
-      ping.sendPing();
-    }, Math.floor(Math.random() * 1000 + 1));
-  }, 4 * 60 * 1000);
-};
-ping.stop = function () {
-  if (ping.pinger) {
-    clearInterval(ping.pinger);
-    ping.pinger = false;
+function touchEventsubKeepalive() {
+  clearEventsubKeepaliveTimer();
+  eventsubKeepaliveTimer = setTimeout(() => {
+    logger.warn("[eventsub] keepalive timeout; forcing reconnect");
+    try {
+      pubsub?.close?.();
+    } catch {}
+  }, eventsubKeepaliveMs);
+  if (typeof eventsubKeepaliveTimer?.unref === "function") {
+    eventsubKeepaliveTimer.unref();
   }
-  if (ping.pingtimeout) {
-    clearTimeout(ping.pingtimeout);
-    ping.pingtimeout = null;
+}
+
+function normalizeBadgeMap(badges = []) {
+  const out = {};
+  const list = Array.isArray(badges) ? badges : [];
+  for (const badge of list) {
+    const key = String(badge?.set_id || "").trim().toLowerCase();
+    if (!key) continue;
+    out[key] = String(badge?.id || "1").trim() || "1";
   }
-};
-ping.sendPing = function () {
-  try {
-    if (pubsub?.readyState !== WebSocket.OPEN) return;
-    pubsub.send(
-      JSON.stringify({
-        type: "PING",
-      })
+  return out;
+}
+
+function buildEventSubMessageText(event = {}) {
+  const direct = String(event?.message?.text || "").trim();
+  if (direct) return direct;
+
+  const fragments = Array.isArray(event?.message?.fragments)
+    ? event.message.fragments
+    : [];
+
+  return fragments
+    .map((fragment) => {
+      if (fragment == null) return "";
+      if (typeof fragment?.text === "string") return fragment.text;
+      if (typeof fragment?.mention?.text === "string") return fragment.mention.text;
+      if (typeof fragment?.cheermote?.text === "string") return fragment.cheermote.text;
+      if (typeof fragment?.emote?.text === "string") return fragment.emote.text;
+      return "";
+    })
+    .join("")
+    .trim();
+}
+
+function buildEventSubUserstate(event = {}) {
+  const badges = normalizeBadgeMap(event?.badges || []);
+  const username = String(
+    event?.chatter_user_login || event?.user_login || ""
+  )
+    .trim()
+    .toLowerCase();
+  const displayName =
+    String(
+      event?.chatter_user_name ||
+        event?.user_name ||
+        event?.display_name ||
+        username
+    ).trim() || username;
+  const userId = String(
+    event?.chatter_user_id || event?.user_id || ""
+  ).trim();
+  const bits = Math.max(0, Math.floor(Number(event?.cheer?.bits || 0) || 0));
+
+  return {
+    username,
+    "display-name": displayName,
+    "user-id": userId,
+    badges,
+    mod:
+      badges.moderator === "1" ||
+      badges.broadcaster === "1" ||
+      badges.moderator === "moderator" ||
+      badges.broadcaster === "1",
+    subscriber: Boolean(badges.subscriber || badges.founder),
+    "first-msg": false,
+    id: String(event?.message_id || event?.id || "").trim(),
+    "client-nonce": "",
+    color: String(event?.color || "").trim(),
+    turbo: Boolean(badges.turbo),
+    bits,
+  };
+}
+
+function buildSubMethods(details = {}) {
+  const rawPlan = String(
+    details?.sub_tier ||
+      details?.tier ||
+      details?.plan ||
+      details?.sub_plan ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+  const plan = rawPlan === "prime" ? "prime" : rawPlan.replace(/^tier\s*/i, "");
+  return {
+    plan,
+    prime: plan === "prime",
+  };
+}
+
+function buildSubTags(event = {}, badgeMap = {}, methods = {}) {
+  return {
+    "display-name":
+      String(event?.chatter_user_name || event?.user_name || "").trim() ||
+      String(event?.chatter_user_login || event?.user_login || "").trim(),
+    "user-id": String(event?.chatter_user_id || event?.user_id || "").trim(),
+    badges: badgeMap,
+    "msg-param-sub-plan": String(methods?.plan || "").trim(),
+  };
+}
+
+function clearAutoFocOffTimer(reason = "") {
+  if (!autoFocOffTimer) return;
+  clearTimeout(autoFocOffTimer);
+  autoFocOffTimer = null;
+  logger.log?.(
+    `[eventsub] auto FOC OFF timer cleared${reason ? ` (${reason})` : ""}`
+  );
+}
+
+function scheduleAutoFocOff(reason = "", delayMs = WAIT_UNTIL_FOC_OFF) {
+  clearAutoFocOffTimer("reschedule");
+  const waitMs = normalizeAutoFocOffDelayMs(delayMs, WAIT_UNTIL_FOC_OFF);
+  logger.log?.(
+    `[eventsub] auto FOC OFF waiting ${Math.round(waitMs / 1000)}s before disabling followers-only${reason ? ` (${reason})` : ""}`
+  );
+  autoFocOffTimer = setTimeout(async () => {
+    autoFocOffTimer = null;
+    await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, {
+      preferredRole: "bot",
+    }).catch((e) => {
+      console.warn(
+        "[helix] failed to disable followers-only (eventsub delayed):",
+        String(e?.message || e)
+      );
+    });
+  }, waitMs);
+  if (typeof autoFocOffTimer?.unref === "function") autoFocOffTimer.unref();
+}
+
+async function handleEventSubChatSettingsUpdate(event = {}) {
+  const followerMode = Boolean(event?.follower_mode);
+  if (lastFollowersOnlyEnabled === followerMode) return;
+  lastFollowersOnlyEnabled = followerMode;
+
+  if (!followerMode) {
+    clearAutoFocOffTimer("followers-only disabled");
+    return;
+  }
+
+  const autoFocEnabled = SETTINGS?.autoFocOffEnabled !== false;
+  const autoFocDelayMs = normalizeAutoFocOffDelayMs(
+    SETTINGS?.autoFocOffDelayMs,
+    WAIT_UNTIL_FOC_OFF
+  );
+  if (!autoFocEnabled || SETTINGS?.ks) {
+    logger.log?.(
+      "[eventsub] followers-only enabled but auto FOC OFF is disabled or killswitch is on"
     );
-    ping.awaitPong();
-  } catch (e) {
-    logger.warn("[pubsub] ping send failed:", String(e?.message || e));
-    try {
-      pubsub?.close?.();
-    } catch {}
-  }
-};
-ping.awaitPong = function () {
-  clearTimeout(ping.pingtimeout);
-  ping.pingtimeout = setTimeout(function () {
-    logger.warn("[pubsub] pong timeout");
-    try {
-      pubsub?.close?.();
-    } catch {}
-  }, 10_000);
-};
-
-ping.gotPong = function () {
-  clearTimeout(ping.pingtimeout);
-  ping.pingtimeout = null;
-};
-
-var requestListen = function (topics, token, label = "topics") {
-  if (!Array.isArray(topics) || topics.length === 0) return;
-  if (!token) {
-    logger.warn(`[pubsub] missing auth token for ${label}; skipping LISTEN`);
     return;
   }
-  if (pubsub?.readyState !== WebSocket.OPEN) {
-    logger.warn(`[pubsub] socket not open for ${label}; skipping LISTEN`);
-    return;
-  }
-  const nonce = `${myname}-${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
-  const pck = {
-    type: "LISTEN",
-    nonce,
-    data: {
-      topics,
-      auth_token: token,
+
+  const live = await TWITCH_FUNCTIONS.isLive().catch(() => false);
+  if (!live) return;
+  scheduleAutoFocOff("chat_settings_update", autoFocDelayMs);
+}
+
+function normalizeRewardRedemptionPayload(event = {}) {
+  const rewardRaw =
+    event?.reward && typeof event.reward === "object" ? event.reward : {};
+  return {
+    user_input: String(event?.user_input || "").trim(),
+    user: {
+      id: String(event?.user_id || event?.user?.id || "").trim(),
+      login:
+        String(event?.user_login || event?.user?.login || "").trim() || "unknown",
+      display_name: String(
+        event?.user_name ||
+          event?.user?.display_name ||
+          event?.user?.displayName ||
+          event?.user?.name ||
+          event?.user_login ||
+          event?.user?.login ||
+          "unknown"
+      ).trim(),
+    },
+    reward: {
+      id: String(event?.reward_id || rewardRaw?.id || "").trim(),
+      title: String(event?.reward_title || rewardRaw?.title || "").trim(),
+      cost: Math.max(
+        0,
+        Math.floor(
+          Number(event?.reward_cost || rewardRaw?.cost || 0) || 0
+        )
+      ),
     },
   };
-  pendingListens.set(nonce, { topics, label });
-  pubsub.send(JSON.stringify(pck));
-};
+}
 
-const requestTopics = function (topics, token, label) {
-  const deduped = [...new Set((topics || []).filter(Boolean))];
-  for (const topic of deduped) {
-    requestListen([topic], token, `${label}:${topic}`);
+async function handleRewardRedemptionAdded(event = {}, source = "eventsub") {
+  const vipEntry = "42693bf2-9dea-40a5-8a7c-7d088d220d21";
+  const timeout = "efa070b5-6d12-4cc6-8ef8-160eded1fdec";
+  const subonly = "f799d602-205b-4865-94a3-18b939d4c8ae";
+  const emoteonly = "27e600a4-1b2e-4ce3-b969-55e7cf89421f";
+  const remotesuboremote = "d08999ad-8338-4270-b306-f28d893a3676";
+  const removeoraddhat = "77ac0ea867ac50fb6e65f3839af51a31";
+  const skipSong = "c1177786-2fec-47bd-9500-530c239220da";
+  const first = "0c4a5827-15f4-4a58-885e-14d785024e5b";
+
+  const redemption = normalizeRewardRedemptionPayload(event);
+  const redemptionId = redemption?.reward?.id;
+  const userInputRaw = String(redemption?.user_input || "").trim();
+  const twitchUsername = String(redemption?.user?.login || "").trim() || "unknown";
+  const twitchUserId = String(redemption?.user?.id || "").trim();
+  const twitchDisplayName = String(
+    redemption?.user?.display_name || twitchUsername
+  ).trim();
+  const rewardCost = Math.max(
+    0,
+    Math.floor(Number(redemption?.reward?.cost || 0) || 0)
+  );
+
+  if (rewardCost > 0) {
+    const tier = await getSubTierFromTwitch(twitchUserId);
+    queueChannelPointEvents({
+      ts: new Date().toISOString(),
+      source,
+      type: "reward_redeem",
+      userId: twitchUserId,
+      login: twitchUsername,
+      displayName: twitchDisplayName,
+      pointsSpent: rewardCost,
+      pointsLost: 0,
+      subTier: Number.isFinite(tier) ? Number(tier) : 0,
+      meta: {
+        rewardId: String(redemptionId || "").trim() || null,
+        rewardTitle: String(redemption?.reward?.title || "").trim() || null,
+        channelId: CHANNEL_ID,
+      },
+    });
   }
-};
 
-var StartListener = function () {
+  if (redemptionId == vipEntry) {
+    SETTINGS = readJsonFile(SETTINGS_PATH, SETTINGS || {});
+    if (SETTINGS.currentMode == "!ticket.on") {
+      const userInput = userInputRaw.split(/\s+/)[0];
+
+      if (!userInput) {
+        return client.say(
+          CHANNEL_NAME,
+          `@${twitchUsername}, please include a Roblox username in your ticket redemption.`
+        );
+      }
+
+      const cooldownRemainingMs = Math.max(
+        0,
+        getRobloxFriendCooldownRemainingMs()
+      );
+      if (cooldownRemainingMs > 0) {
+        const seconds = Math.max(1, Math.ceil(cooldownRemainingMs / 1000));
+        return client.say(
+          CHANNEL_NAME,
+          `@${twitchUsername}, friend requests are on cooldown (${seconds}s left), please retry.`
+        );
+      }
+
+      const result = await addTrackedRobloxFriend({
+        targetName: userInput,
+        requestedBy: twitchUsername,
+        permanent: false,
+        source: "ticket_redemption",
+      });
+
+      if (
+        result.status === "invalid_username" ||
+        result.status === "missing_username"
+      ) {
+        return client.say(
+          CHANNEL_NAME,
+          `@${twitchUsername}, '${userInput}' is not a valid Roblox username.`
+        );
+      }
+
+      if (result.status === "validate_error") {
+        return client.say(
+          CHANNEL_NAME,
+          `@${twitchUsername}, username validation failed, please retry.`
+        );
+      }
+
+      if (result.status === "rate_limited") {
+        return client.say(
+          CHANNEL_NAME,
+          `@${twitchUsername}, Roblox rate limited me, please retry in a bit.`
+        );
+      }
+
+      if (result.status === "send_error") {
+        return client.say(
+          CHANNEL_NAME,
+          `@${twitchUsername}, could not send friend request right now.`
+        );
+      }
+
+      if (result.status === "already") {
+        return client.say(
+          CHANNEL_NAME,
+          `@${twitchUsername}, '${result.username}' is already friended and has been tracked for cleanup.`
+        );
+      }
+
+      client.say(
+        CHANNEL_NAME,
+        `@${twitchUsername}, sent a friend request to ${result.username}.`
+      );
+    }
+  }
+
+  if (redemptionId == subonly) {
+    await TWITCH_FUNCTIONS.setSubscriberMode(true).catch((e) => {
+      console.warn(
+        "[helix] failed to enable subscriber-only mode:",
+        String(e?.message || e)
+      );
+    });
+    client.say(CHANNEL_NAME, "EZY Clap non-subs");
+    await delay(5 * 60 * 1000);
+    await TWITCH_FUNCTIONS.setSubscriberMode(false).catch((e) => {
+      console.warn(
+        "[helix] failed to disable subscriber-only mode:",
+        String(e?.message || e)
+      );
+    });
+    client.say(
+      CHANNEL_NAME,
+      "The chat is no longer in sub only. THE NON SUBS ARE FREE PagMan"
+    );
+  }
+
+  if (redemptionId == emoteonly) {
+    await TWITCH_FUNCTIONS.setEmoteMode(true).catch((e) => {
+      console.warn(
+        "[helix] failed to enable emote-only mode:",
+        String(e?.message || e)
+      );
+    });
+    client.say(CHANNEL_NAME, "The chat is now in emote only for 5 minutes.");
+    await delay(5 * 60 * 1000);
+    await TWITCH_FUNCTIONS.setEmoteMode(false).catch((e) => {
+      console.warn(
+        "[helix] failed to disable emote-only mode:",
+        String(e?.message || e)
+      );
+    });
+    client.say(CHANNEL_NAME, "The chat is no longer in emote only.");
+  }
+
+  if (redemptionId == remotesuboremote) {
+    await TWITCH_FUNCTIONS.setEmoteMode(false).catch((e) => {
+      console.warn(
+        "[helix] failed to disable emote-only mode:",
+        String(e?.message || e)
+      );
+    });
+    await TWITCH_FUNCTIONS.setSubscriberMode(false).catch((e) => {
+      console.warn(
+        "[helix] failed to disable subscriber-only mode:",
+        String(e?.message || e)
+      );
+    });
+  }
+
+  if (redemptionId == timeout) {
+    const userInputSplit = userInputRaw.split(/\s+/).filter(Boolean);
+    const timeoutTarget = userInputSplit[0];
+    if (!timeoutTarget) {
+      client.say(
+        CHANNEL_NAME,
+        `@${twitchUsername}, include a username to timeout.`
+      );
+      return;
+    }
+
+    client.say(
+      CHANNEL_NAME,
+      `${timeoutTarget} was timed out for 60 seconds by ${twitchUsername} via timeout redemption.`
+    );
+    await TWITCH_FUNCTIONS.timeoutUserByLogin(
+      timeoutTarget,
+      60,
+      `[AUTOMATIC] ${twitchUsername} redeemed a timeout on you.`
+    ).catch((e) => {
+      console.warn("[helix] timeout failed:", String(e?.message || e));
+    });
+  }
+
+  if (redemptionId == removeoraddhat) {
+    await delay(30 * 60 * 1000);
+    client.say(
+      CHANNEL_NAME,
+      `@${CHANNEL_NAME} 30 minutes has passed since ${twitchUsername} redeemed the hat redemption.`
+    );
+  }
+
+  if (redemptionId == skipSong) {
+    if (isSpotifyModuleEnabled()) {
+      SPOTIFY.skipNext().catch(() => null);
+      client.say(CHANNEL_NAME, `${twitchUsername}, song skipped.`);
+    } else {
+      client.say(CHANNEL_NAME, `${twitchUsername}, Spotify module is disabled.`);
+    }
+  }
+
+  if (redemptionId == first) {
+    if (!twitchUserId) {
+      logger.warn("[eventsub] first redemption missing user id");
+    } else {
+      await TWITCH_FUNCTIONS.addPajbotPointsById(twitchUserId, 25_000);
+      client.say(
+        CHANNEL_NAME,
+        `@${twitchDisplayName} got 25,000 basement points for being first!`
+      );
+    }
+  }
+}
+
+function emitEventSubChatMessage(event = {}) {
+  const text = buildEventSubMessageText(event);
+  if (!text) return;
+  const userstate = buildEventSubUserstate(event);
+  client.emit("message", `#${CHANNEL_NAME}`, userstate, text, false);
+  const bits = Math.max(0, Math.floor(Number(userstate?.bits || 0) || 0));
+  if (bits > 0) {
+    client.emit("cheer", `#${CHANNEL_NAME}`, userstate, text);
+  }
+}
+
+function emitEventSubChatNotification(event = {}) {
+  const badgeMap = normalizeBadgeMap(event?.badges || []);
+  const username = String(event?.chatter_user_login || "").trim().toLowerCase();
+  const channel = `#${CHANNEL_NAME}`;
+  const noticeType = String(
+    event?.notice_type || event?.notification_type || ""
+  )
+    .trim()
+    .toLowerCase();
+  const messageText = buildEventSubMessageText(event);
+
+  if (!noticeType || !username) return;
+
+  if (noticeType === "sub" || noticeType === "subscription") {
+    const details = event?.sub && typeof event.sub === "object" ? event.sub : {};
+    const methods = buildSubMethods(details);
+    const tags = buildSubTags(event, badgeMap, methods);
+    client.emit("subscription", channel, username, methods, messageText, tags);
+    return;
+  }
+
+  if (noticeType === "resub" || noticeType === "subscription_message") {
+    const details =
+      event?.resub && typeof event.resub === "object"
+        ? event.resub
+        : event?.subscription_message &&
+            typeof event.subscription_message === "object"
+          ? event.subscription_message
+          : {};
+    const methods = buildSubMethods(details);
+    const tags = buildSubTags(event, badgeMap, methods);
+    const streakMonths = Number(
+      details?.streak_months || details?.cumulative_months || 0
+    );
+    client.emit(
+      "resub",
+      channel,
+      username,
+      Number.isFinite(streakMonths) ? streakMonths : 0,
+      messageText,
+      tags,
+      methods
+    );
+    return;
+  }
+
+  if (noticeType === "sub_gift") {
+    const details =
+      event?.sub_gift && typeof event.sub_gift === "object" ? event.sub_gift : {};
+    const methods = buildSubMethods(details);
+    const tags = buildSubTags(event, badgeMap, methods);
+    const recipient =
+      String(
+        details?.recipient_user_name ||
+          details?.recipient_display_name ||
+          details?.recipient_user_login ||
+          ""
+      ).trim() || "recipient";
+    client.emit("subgift", channel, username, 0, recipient, methods, tags);
+    return;
+  }
+
+  if (noticeType === "community_sub_gift") {
+    const details =
+      event?.community_sub_gift &&
+      typeof event.community_sub_gift === "object"
+        ? event.community_sub_gift
+        : {};
+    const methods = buildSubMethods(details);
+    const tags = buildSubTags(event, badgeMap, methods);
+    const giftCount = Math.max(
+      1,
+      Math.floor(
+        Number(
+          details?.total ||
+            details?.count ||
+            details?.cumulative_total ||
+            details?.total_gifted_subs ||
+            0
+        ) || 0
+      )
+    );
+    client.emit("submysterygift", channel, username, giftCount, methods, tags);
+    return;
+  }
+
+  if (noticeType === "gift_paid_upgrade") {
+    client.emit("giftpaidupgrade", channel, username);
+  }
+}
+
+async function handleEventSubNotification(subscription = {}, event = {}) {
+  const type = String(subscription?.type || "").trim();
+  if (!type) return;
+
+  if (type === "stream.online") {
+    await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, {
+      preferredRole: "bot",
+    }).catch((e) => {
+      console.warn(
+        "[helix] failed to disable followers-only (stream-up):",
+        String(e?.message || e)
+      );
+    });
+    await liveUpHandler();
+    return;
+  }
+
+  if (type === "stream.offline") {
+    await TWITCH_FUNCTIONS.setFollowersOnlyMode(true, 0, {
+      preferredRole: "bot",
+    }).catch((e) => {
+      console.warn(
+        "[helix] failed to enable followers-only (stream-down):",
+        String(e?.message || e)
+      );
+    });
+    await TWITCH_FUNCTIONS.setSlowMode(true, 5, {
+      preferredRole: "bot",
+    }).catch((e) => {
+      console.warn(
+        "[helix] failed to enable slow mode (stream-down):",
+        String(e?.message || e)
+      );
+    });
+    await liveDownHandler();
+    return;
+  }
+
+  if (type === "channel.chat.message") {
+    emitEventSubChatMessage(event);
+    return;
+  }
+
+  if (type === "channel.chat.notification") {
+    emitEventSubChatNotification(event);
+    return;
+  }
+
+  if (type === "channel.chat_settings.update") {
+    await handleEventSubChatSettingsUpdate(event);
+    return;
+  }
+
+  if (type === "channel.poll.begin") {
+    void maybeAnnouncePollCreated(event, "eventsub");
+    return;
+  }
+
+  if (type === "channel.poll.end") {
+    void processPollTerminalPayload(
+      event,
+      String(event?.status || "COMPLETED"),
+      "eventsub"
+    );
+    return;
+  }
+
+  if (type === "channel.prediction.end") {
+    await processPredictionResolvedEvent(event, "eventsub");
+    return;
+  }
+
+  if (type === "channel.channel_points_custom_reward_redemption.add") {
+    await handleRewardRedemptionAdded(event, "eventsub");
+    return;
+  }
+
+  if (type === "channel.raid") {
+    const fromLogin = String(
+      event?.from_broadcaster_user_login || event?.from_broadcaster_user_name || ""
+    )
+      .trim()
+      .toLowerCase();
+    const viewers = Math.max(0, Number(event?.viewers || 0) || 0);
+    if (fromLogin && viewers > 0) {
+      client.emit("raided", `#${CHANNEL_NAME}`, fromLogin, viewers);
+    }
+    return;
+  }
+
+  if (type === "channel.moderate") {
+    const action = String(event?.action || "").trim().toLowerCase();
+    if (action === "untimeout" || action === "unban") {
+      FILTER_FUNCTIONS.onUntimedOut(
+        String(
+          event?.target_user_login || event?.user_login || ""
+        ).trim()
+      );
+    }
+  }
+}
+
+async function resolveEventSubRoleAuth(role, fallbackToken = "", fallbackUserId = "") {
+  const auth = await getRoleAccessToken({ role, minTtlSec: 300 }).catch(
+    () => null
+  );
+  if (auth?.accessToken && auth?.clientId && auth?.userId) {
+    return auth;
+  }
+
+  const accessToken = normalizeAuthToken(fallbackToken);
+  const clientId = String(process.env.CLIENT_ID || "").trim();
+  const userId = String(fallbackUserId || "").trim();
+  if (!accessToken || !clientId || !userId) return null;
+
+  return {
+    role,
+    accessToken,
+    clientId,
+    userId,
+    login: "",
+    scopes: [],
+    source: "fallback",
+  };
+}
+
+async function createEventSubSubscription({
+  auth,
+  type,
+  version = "1",
+  condition = {},
+  label = type,
+} = {}) {
+  if (!eventsubSessionId) return false;
+  if (!auth?.accessToken || !auth?.clientId) {
+    logger.warn(
+      `[eventsub] missing auth for ${label}; skipping subscription ${type}`
+    );
+    return false;
+  }
+
+  const response = await fetch(EVENTSUB_SUBSCRIPTION_URL, {
+    method: "POST",
+    headers: {
+      "Client-Id": String(auth.clientId).trim(),
+      Authorization: `Bearer ${String(auth.accessToken).trim()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      type,
+      version,
+      condition,
+      transport: {
+        method: "websocket",
+        session_id: eventsubSessionId,
+      },
+    }),
+  }).catch((error) => ({ ok: false, status: 0, _error: error }));
+
+  if (response?._error) {
+    logger.warn(
+      `[eventsub] subscription failed (${label}): ${String(
+        response._error?.message || response._error
+      )}`
+    );
+    return false;
+  }
+
+  const text = await response.text().catch(() => "");
+  const payload = safeJsonParse(text, null);
+
+  if (response.status === 202) {
+    logger.log(`[eventsub] subscribed ${label}`);
+    return true;
+  }
+
+  if (response.status === 409) {
+    logger.log(`[eventsub] already subscribed ${label}`);
+    return true;
+  }
+
+  logger.warn(
+    `[eventsub] subscribe failed (${label}) HTTP ${response.status}: ${String(
+      payload?.message || text || response.statusText || "request_failed"
+    )}`
+  );
+  return false;
+}
+
+async function syncEventSubSubscriptions() {
+  const streamerAuth = await resolveEventSubRoleAuth(
+    TWITCH_ROLES.STREAMER,
+    STREAMER_OAUTH || BOT_OAUTH,
+    CHANNEL_ID
+  );
+  const botAuth = await resolveEventSubRoleAuth(
+    TWITCH_ROLES.BOT,
+    BOT_OAUTH || STREAMER_OAUTH,
+    BOT_ID
+  );
+
+  const botUserId = String(botAuth?.userId || BOT_ID || "").trim();
+
+  const streamerSubs = [
+    {
+      type: "stream.online",
+      condition: { broadcaster_user_id: CHANNEL_ID },
+      label: "stream.online",
+    },
+    {
+      type: "stream.offline",
+      condition: { broadcaster_user_id: CHANNEL_ID },
+      label: "stream.offline",
+    },
+    {
+      type: "channel.poll.begin",
+      condition: { broadcaster_user_id: CHANNEL_ID },
+      label: "channel.poll.begin",
+    },
+    {
+      type: "channel.poll.end",
+      condition: { broadcaster_user_id: CHANNEL_ID },
+      label: "channel.poll.end",
+    },
+    {
+      type: "channel.prediction.end",
+      condition: { broadcaster_user_id: CHANNEL_ID },
+      label: "channel.prediction.end",
+    },
+    {
+      type: "channel.channel_points_custom_reward_redemption.add",
+      condition: { broadcaster_user_id: CHANNEL_ID },
+      label: "channel.channel_points_custom_reward_redemption.add",
+    },
+    {
+      type: "channel.raid",
+      condition: { to_broadcaster_user_id: CHANNEL_ID },
+      label: "channel.raid.to",
+    },
+  ];
+
+  const botSubs = botUserId
+    ? [
+        {
+          type: "channel.chat.message",
+          condition: {
+            broadcaster_user_id: CHANNEL_ID,
+            user_id: botUserId,
+          },
+          label: "channel.chat.message",
+        },
+        {
+          type: "channel.chat.notification",
+          condition: {
+            broadcaster_user_id: CHANNEL_ID,
+            user_id: botUserId,
+          },
+          label: "channel.chat.notification",
+        },
+        {
+          type: "channel.chat_settings.update",
+          condition: {
+            broadcaster_user_id: CHANNEL_ID,
+            user_id: botUserId,
+          },
+          label: "channel.chat_settings.update",
+        },
+        {
+          type: "channel.moderate",
+          version: "2",
+          condition: {
+            broadcaster_user_id: CHANNEL_ID,
+            moderator_user_id: botUserId,
+          },
+          label: "channel.moderate",
+        },
+      ]
+    : [];
+
+  for (const sub of streamerSubs) {
+    await createEventSubSubscription({
+      auth: streamerAuth,
+      type: sub.type,
+      version: sub.version || "1",
+      condition: sub.condition,
+      label: sub.label,
+    });
+  }
+
+  for (const sub of botSubs) {
+    await createEventSubSubscription({
+      auth: botAuth,
+      type: sub.type,
+      version: sub.version || "1",
+      condition: sub.condition,
+      label: sub.label,
+    });
+  }
+}
+
+var StartListener = function (socketUrl = EVENTSUB_WS_URL) {
   if (stopped) return;
-  pubsub = new WebSocket("wss://pubsub-edge.twitch.tv");
+  pubsub = new WebSocket(socketUrl);
   pubsub
     .on("close", function (code, reason) {
-      ping.stop();
+      clearEventsubKeepaliveTimer();
       if (stopped) return;
-      const reasonText = Buffer.isBuffer(reason) ? reason.toString("utf8") : String(reason || "");
-      logger.warn(`[pubsub] disconnected (code=${code || "unknown"}${reasonText ? `, reason=${reasonText}` : ""})`);
+      eventsubSessionId = "";
+      const reasonText = Buffer.isBuffer(reason)
+        ? reason.toString("utf8")
+        : String(reason || "");
+      logger.warn(
+        `[eventsub] disconnected (code=${code || "unknown"}${
+          reasonText ? `, reason=${reasonText}` : ""
+        })`
+      );
       scheduleReconnect("socket closed");
     })
     .on("open", function () {
@@ -796,13 +1571,11 @@ var StartListener = function () {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
-      logger.log("[pubsub] connected");
-      ping.start();
-      runAuth();
+      logger.log("[eventsub] websocket connected");
       startPollFallbackMonitor();
     })
     .on("error", function (err) {
-      logger.warn("[pubsub] websocket error:", String(err?.message || err));
+      logger.warn("[eventsub] websocket error:", String(err?.message || err));
     });
   pubsub.on("message", async function (raw_data) {
     refreshRuntimeState();
@@ -812,463 +1585,74 @@ var StartListener = function () {
       : String(raw_data ?? "");
     const packet = safeJsonParse(text, null);
     if (!packet || typeof packet !== "object") {
-      logger.warn(`[pubsub] invalid packet: ${text.slice(0, 200)}`);
+      logger.warn(`[eventsub] invalid packet: ${text.slice(0, 200)}`);
       return;
     }
 
-    if (packet.type == "RECONNECT") {
-      logger.log("[pubsub] RECONNECT requested by Twitch");
+    const messageType = String(packet?.metadata?.message_type || "")
+      .trim()
+      .toLowerCase();
+    const payload = packet?.payload && typeof packet.payload === "object"
+      ? packet.payload
+      : {};
+
+    touchEventsubKeepalive();
+
+    if (messageType === "session_welcome") {
+      eventsubSessionId = String(payload?.session?.id || "").trim();
+      eventsubReconnectUrl = "";
+      eventsubKeepaliveMs = Math.max(
+        10_000,
+        Math.floor(
+          (Number(payload?.session?.keepalive_timeout_seconds || 0) || 0) * 1000
+        ) || DEFAULT_EVENTSUB_KEEPALIVE_MS
+      );
+      logger.log(
+        `[eventsub] session ready id=${eventsubSessionId || "unknown"} keepalive=${Math.round(
+          eventsubKeepaliveMs / 1000
+        )}s`
+      );
+      if (eventsubReuseSession) {
+        eventsubReuseSession = false;
+      } else {
+        await syncEventSubSubscriptions();
+      }
+      return;
+    }
+
+    if (messageType === "session_keepalive") {
+      return;
+    }
+
+    if (messageType === "session_reconnect") {
+      const reconnectUrl = String(payload?.session?.reconnect_url || "").trim();
+      logger.log(
+        `[eventsub] reconnect requested${reconnectUrl ? ` -> ${reconnectUrl}` : ""}`
+      );
+      eventsubReuseSession = true;
+      eventsubReconnectUrl = reconnectUrl;
       try {
         pubsub?.close?.();
       } catch {}
-    } else if (packet.type == "PONG") {
-      ping.gotPong();
-    } else if (packet.type == "RESPONSE") {
-      const nonce = String(packet?.nonce || "");
-      const listenMeta = pendingListens.get(nonce);
-      if (nonce) pendingListens.delete(nonce);
-      const label = listenMeta?.label || nonce || "unknown-listen";
-      if (packet?.error) {
-        logger.warn(`[pubsub] LISTEN failed (${label}): ${packet.error}`);
-      } else {
-        logger.log(`[pubsub] LISTEN ok (${label})`);
-      }
-    } else if (packet.type == "MESSAGE") {
-      const packetData = packet?.data || {};
-      const pubTopic = String(packetData?.topic || "");
-      const pubMessage = packetData?.message;
-      const messageData =
-        typeof pubMessage === "string"
-          ? safeJsonParse(pubMessage, {})
-          : pubMessage && typeof pubMessage === "object"
-            ? pubMessage
-            : {};
-      const rawType =
-        String(
-          messageData?.type ||
-            messageData?.event?.type ||
-            messageData?.data?.event?.type ||
-            ""
-        ).trim();
-      const type = normalizeEventType(rawType);
+      return;
+    }
 
-      if (type === "STREAM_UP") {
-        // TO DO = first person to go to stream gets free channel points
-        await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, { preferredRole: "bot" }).catch((e) => {
-          console.warn(
-            "[helix] failed to disable followers-only (stream-up):",
-            String(e?.message || e)
-          );
-        });
-        liveUpHandler();
-      } else if (type === "STREAM_DOWN") {
-        await TWITCH_FUNCTIONS.setFollowersOnlyMode(true, 0, { preferredRole: "bot" }).catch((e) => {
-          console.warn(
-            "[helix] failed to enable followers-only (stream-down):",
-            String(e?.message || e)
-          );
-        });
-        await TWITCH_FUNCTIONS.setSlowMode(true, 5, { preferredRole: "bot" }).catch((e) => {
-          console.warn(
-            "[helix] failed to enable slow mode (stream-down):",
-            String(e?.message || e)
-          );
-        });
-        liveDownHandler();
-      } else if (type === "VIEWCOUNT") {
-        const streamData = STREAMS?.[streamNumber];
-        if (streamData && typeof streamData === "object") {
-          const viewers = Number(messageData?.viewers);
-          const samples = Array.isArray(streamData.averageViewersPer30Seconds)
-            ? streamData.averageViewersPer30Seconds
-            : [];
-          if (Number.isFinite(viewers)) {
-            samples.push(viewers);
-          }
-          streamData.averageViewersPer30Seconds = samples.slice(-240);
-          if (streamData.averageViewersPer30Seconds.length > 0) {
-            let sum = 0;
-            for (const sample of streamData.averageViewersPer30Seconds) {
-              sum += Number(sample) || 0;
-            }
-            streamData.averageviewers =
-              sum / streamData.averageViewersPer30Seconds.length;
-          }
-          fs.writeFileSync(STREAMS_PATH, JSON.stringify(STREAMS));
-        }
-      } else if (type === "AD_POLL_CREATE") {
-        TWITCH_FUNCTIONS.onMultiplayerAdStart();
-      } else if (type === "AD_POLL_COMPLETE") {
-        const adData = messageData?.data?.poll || null;
-        TWITCH_FUNCTIONS.onMultiplayerAdEnd(adData);
-      } else if (type === "MODERATION_ACTION") {
-        const followData = messageData?.data || {};
-        const followChange = followData.moderation_action;
-        const autoFocEnabled = SETTINGS?.autoFocOffEnabled !== false;
-        const autoFocDelayMs = normalizeAutoFocOffDelayMs(
-          SETTINGS?.autoFocOffDelayMs,
-          WAIT_UNTIL_FOC_OFF
-        );
+    if (messageType === "revocation") {
+      logger.warn(
+        `[eventsub] subscription revoked type=${String(
+          payload?.subscription?.type || "unknown"
+        )} status=${String(payload?.subscription?.status || "unknown")}`
+      );
+      return;
+    }
 
-        if (followChange == "followers") {
-          // follow only mode gets enabled
-          if (
-            SETTINGS.ks == false &&
-            (await TWITCH_FUNCTIONS.isLive()) == true
-          ) {
-            if (!autoFocEnabled) {
-              logger.log("[pubsub] auto FOC OFF disabled; leaving followers-only enabled");
-            } else {
-              logger.log?.(
-                `[pubsub] auto FOC OFF waiting ${Math.round(autoFocDelayMs / 1000)}s before disabling followers-only`
-              );
-              await delay(autoFocDelayMs);
-              await TWITCH_FUNCTIONS.setFollowersOnlyMode(false, 0, { preferredRole: "bot" }).catch((e) => {
-                console.warn(
-                  "[helix] failed to disable followers-only (delayed):",
-                  String(e?.message || e)
-                );
-              });
-            }
-          }
-        } else if (followChange == "followersoff") {
-          if (!SETTINGS.ks) {
-          }
-          // follow only mode gets disabled
-        }
-        if (followData.moderation_action == "untimeout") {
-          const untimedoutUser = followData.target_user_login;
-          FILTER_FUNCTIONS.onUntimedOut(untimedoutUser);
-        }
-      } else if (pubTopic == `stream-chat-room-v1.${CHANNEL_ID}`) {
-        // // if(pubMessage.data.room.modes.followers_)
-        // var modeData = JSON.parse(pubMessage).data.room.modes
-        // if (modeData.emote_only_mode_enabled == true) {
-        //   console.log('emote only enabled')
-        // } else if (modeData.subscribers_only_mode_enabled == true) {
-        //   console.log('sub only mode enabled')
-        // }
-      } else if (pubTopic == `ads.${CHANNEL_ID}`) {
-        if (SETTINGS.ks == false) {
-          client.say(
-            CHANNEL_NAME,
-            `An ad has been ran, subscribe with prime for free and enjoy watching with 0 ads all month for free, !prime for more info EZ PogU .`
-          );
-        }
-      } else if (pubTopic == `community-moments-channel-v1.${CHANNEL_ID}`) {
-        if (SETTINGS.ks == false) {
-          const text = `${bot} A new moment PagMan everyone claim it while you can PogU .`;
-          await TWITCH_FUNCTIONS.sendHelixAnnouncement(text).catch((e) => {
-            console.warn("[helix] announcement failed:", String(e?.message || e));
-            client.say(CHANNEL_NAME, text);
-          });
-        }
-      } else if (
-        pubTopic == `polls.${CHANNEL_ID}` &&
-        (type === "POLL_CREATE" ||
-          type === "POLL_CREATED" ||
-          type === "EVENT_CREATED" ||
-          type === "CREATE")
-      ) {
-        void maybeAnnouncePollCreated(
-          extractPollPayloadFromMessage(messageData),
-          "pubsub_event"
-        );
-      } else if (
-        type === "POLL_COMPLETE" ||
-        type === "POLL_TERMINATE" ||
-        type === "POLL_ARCHIVE"
-      ) {
-        logger.log?.(
-          `[pubsub][poll] terminal event received: ${rawType || "(unknown)"} topic=${pubTopic}`
-        );
-        void processLatestTerminalPoll(type, "pubsub_event");
-      } else if (pubTopic == `predictions-channel-v1.${CHANNEL_ID}`) {
-        if (type === "EVENT_CREATED") {
-        } else if (type === "EVENT_UPDATED") {
-          const event = messageData?.data?.event || {};
-
-          const status = event.status;
-
-          if (status == "RESOLVED") {
-            const handled = await processPredictionResolvedEvent(
-              event,
-              "pubsub_event_payload"
-            );
-
-            if (!handled) {
-              const predictionData =
-                await TWITCH_FUNCTIONS.getLatestPredictionData().catch(() => null);
-              const latestEvent =
-                predictionData?.data?.community?.channel?.prediction?.event ||
-                predictionData?.data?.community?.channel?.prediction?.activeEvent ||
-                predictionData?.data?.prediction?.event ||
-                null;
-              if (latestEvent && typeof latestEvent === "object") {
-                await processPredictionResolvedEvent(
-                  latestEvent,
-                  "pubsub_prediction_context"
-                );
-              }
-            }
-          }
-        }
-      } else if (pubTopic == `community-points-channel-v1.${CHANNEL_ID}`) {
-        if (type === "REWARD_REDEEMED") {
-          const vipEntry = "42693bf2-9dea-40a5-8a7c-7d088d220d21";
-          const timeout = "efa070b5-6d12-4cc6-8ef8-160eded1fdec";
-          const subonly = "f799d602-205b-4865-94a3-18b939d4c8ae";
-          const emoteonly = "27e600a4-1b2e-4ce3-b969-55e7cf89421f";
-          const remotesuboremote = "d08999ad-8338-4270-b306-f28d893a3676";
-          const removeoraddhat = "77ac0ea867ac50fb6e65f3839af51a31";
-          const skipSong = "c1177786-2fec-47bd-9500-530c239220da";
-          const first = "0c4a5827-15f4-4a58-885e-14d785024e5b";
-
-          const redemption = messageData?.data?.redemption || {};
-          const redemptionId = redemption?.reward?.id;
-          const userInputRaw = String(redemption?.user_input || "").trim();
-          const twitchUsername = String(redemption?.user?.login || "").trim() || "unknown";
-          const twitchUserId = String(redemption?.user?.id || "").trim();
-          const twitchDisplayName = String(
-            redemption?.user?.display_name ||
-              redemption?.user?.displayName ||
-              twitchUsername
-          ).trim();
-          const rewardCost = Math.max(
-            0,
-            Math.floor(Number(redemption?.reward?.cost || 0) || 0)
-          );
-
-          if (rewardCost > 0) {
-            const tier = await getSubTierFromTwitch(twitchUserId);
-            queueChannelPointEvents({
-              ts: new Date().toISOString(),
-              source: "pubsub",
-              type: "reward_redeem",
-              userId: twitchUserId,
-              login: twitchUsername,
-              displayName: twitchDisplayName,
-              pointsSpent: rewardCost,
-              pointsLost: 0,
-              subTier: Number.isFinite(tier) ? Number(tier) : 0,
-              meta: {
-                rewardId: String(redemptionId || "").trim() || null,
-                rewardTitle: String(redemption?.reward?.title || "").trim() || null,
-                channelId: CHANNEL_ID,
-              },
-            });
-          }
-
-          if (redemptionId == vipEntry) {
-            SETTINGS = readJsonFile(SETTINGS_PATH, SETTINGS || {});
-            if (SETTINGS.currentMode == '!ticket.on') {
-                const userInput = userInputRaw.split(/\s+/)[0];
-
-                if (!userInput) {
-                  return client.say(
-                    CHANNEL_NAME,
-                    `@${twitchUsername}, please include a Roblox username in your ticket redemption.`
-                  );
-                }
-
-                const cooldownRemainingMs = Math.max(
-                  0,
-                  getRobloxFriendCooldownRemainingMs()
-                );
-                if (cooldownRemainingMs > 0) {
-                  const seconds = Math.max(1, Math.ceil(cooldownRemainingMs / 1000));
-                  return client.say(
-                    CHANNEL_NAME,
-                    `@${twitchUsername}, friend requests are on cooldown (${seconds}s left), please retry.`
-                  );
-                }
-
-                const result = await addTrackedRobloxFriend({
-                  targetName: userInput,
-                  requestedBy: twitchUsername,
-                  permanent: false,
-                  source: "ticket_redemption",
-                });
-
-                if (
-                  result.status === "invalid_username" ||
-                  result.status === "missing_username"
-                ) {
-                  return client.say(
-                    CHANNEL_NAME,
-                    `@${twitchUsername}, '${userInput}' is not a valid Roblox username.`
-                  );
-                }
-
-                if (result.status === "validate_error") {
-                  return client.say(
-                    CHANNEL_NAME,
-                    `@${twitchUsername}, username validation failed, please retry.`
-                  );
-                }
-
-                if (result.status === "rate_limited") {
-                  return client.say(
-                    CHANNEL_NAME,
-                    `@${twitchUsername}, Roblox rate limited me, please retry in a bit.`
-                  );
-                }
-
-                if (result.status === "send_error") {
-                  return client.say(
-                    CHANNEL_NAME,
-                    `@${twitchUsername}, could not send friend request right now.`
-                  );
-                }
-
-                if (result.status === "already") {
-                  return client.say(
-                    CHANNEL_NAME,
-                    `@${twitchUsername}, '${result.username}' is already friended and has been tracked for cleanup.`
-                  );
-                }
-
-                client.say(CHANNEL_NAME, `@${twitchUsername}, sent a friend request to ${result.username}.`);
-              }
-            }
-
-          if (redemptionId == subonly) {
-            await TWITCH_FUNCTIONS.setSubscriberMode(true).catch((e) => {
-              console.warn(
-                "[helix] failed to enable subscriber-only mode:",
-                String(e?.message || e)
-              );
-            });
-            client.say(CHANNEL_NAME, "EZY Clap non-subs");
-            await delay(5 * 60 * 1000);
-            await TWITCH_FUNCTIONS.setSubscriberMode(false).catch((e) => {
-              console.warn(
-                "[helix] failed to disable subscriber-only mode:",
-                String(e?.message || e)
-              );
-            });
-            client.say(CHANNEL_NAME, `The chat is no longer in sub only. THE NON SUBS ARE FREE PagMan`);
-          }
-
-          if (redemptionId == emoteonly) {
-            await TWITCH_FUNCTIONS.setEmoteMode(true).catch((e) => {
-              console.warn(
-                "[helix] failed to enable emote-only mode:",
-                String(e?.message || e)
-              );
-            });
-            client.say(CHANNEL_NAME, `The chat is now in emote only for 5 minutes.`);
-            await delay(5 * 60 * 1000);
-            await TWITCH_FUNCTIONS.setEmoteMode(false).catch((e) => {
-              console.warn(
-                "[helix] failed to disable emote-only mode:",
-                String(e?.message || e)
-              );
-            });
-            client.say(CHANNEL_NAME, `The chat is no longer in emote only.`);
-          }
-          
-          if (redemptionId == remotesuboremote) {
-            await TWITCH_FUNCTIONS.setEmoteMode(false).catch((e) => {
-              console.warn(
-                "[helix] failed to disable emote-only mode:",
-                String(e?.message || e)
-              );
-            });
-            await TWITCH_FUNCTIONS.setSubscriberMode(false).catch((e) => {
-              console.warn(
-                "[helix] failed to disable subscriber-only mode:",
-                String(e?.message || e)
-              );
-            });
-          }
-
-          if (redemptionId == timeout) {
-            const userInputSplit = userInputRaw.split(/\s+/).filter(Boolean);
-            const timeoutTarget = userInputSplit[0];
-            if (!timeoutTarget) {
-              client.say(CHANNEL_NAME, `@${twitchUsername}, include a username to timeout.`);
-              return;
-            }
-
-            client.say(
-              CHANNEL_NAME,
-              `${timeoutTarget} was timed out for 60 seconds by ${twitchUsername} via timeout redemption.`
-            );
-            await TWITCH_FUNCTIONS.timeoutUserByLogin(
-              timeoutTarget,
-              60,
-              `[AUTOMATIC] ${twitchUsername} redeemed a timeout on you.`
-            ).catch((e) => {
-              console.warn(
-                "[helix] timeout failed:",
-                String(e?.message || e)
-              );
-            });
-          }
-
-          if (redemptionId == removeoraddhat) {
-            await delay(30 * 60 * 1000);
-            client.say(CHANNEL_NAME, `@${CHANNEL_NAME} 30 minutes has passed since ${twitchUsername} redeemed the hat redemption.`);
-          }
-
-          if (redemptionId == skipSong) {
-            if (isSpotifyModuleEnabled()) {
-              SPOTIFY.skipNext().catch(() => null);
-              client.say(CHANNEL_NAME, `${twitchUsername}, song skipped.`);
-            } else {
-              client.say(CHANNEL_NAME, `${twitchUsername}, Spotify module is disabled.`);
-            }
-          }
-
-          if (redemptionId == first) {
-            if (!twitchUserId) {
-              logger.warn("[pubsub] first redemption missing user id");
-            } else {
-              await TWITCH_FUNCTIONS.addPajbotPointsById(twitchUserId, 25_000);
-              client.say(CHANNEL_NAME, `@${twitchDisplayName} got 25,000 basement points for being first!`);
-            }
-          }
-        }
-      }
+    if (messageType === "notification") {
+      await handleEventSubNotification(
+        payload?.subscription || {},
+        payload?.event || {}
+      );
     }
   });
-};
-
-var runAuth = function () {
-  pendingListens.clear();
-
-  const streamerTopics = [
-    `ads.${CHANNEL_ID}`,
-    `leaderboard-events-v1.${CHANNEL_ID}`,
-    `community-moments-channel-v1.${CHANNEL_ID}`,
-    `community-points-channel-v1.${CHANNEL_ID}`,
-    `predictions-channel-v1.${CHANNEL_ID}`,
-    `polls.${CHANNEL_ID}`,
-    `stream-chat-room-v1.${CHANNEL_ID}`,
-    `upload.${CHANNEL_ID}`,
-    `video-playback.${CHANNEL_ID}`,
-    `video-playback-by-id.${CHANNEL_ID}`,
-  ];
-
-  const botTopics = [
-    BOT_ID ? `chat_moderator_actions.${BOT_ID}.${CHANNEL_ID}` : "",
-    BOT_ID ? `channel-unban-requests.${BOT_ID}.${CHANNEL_ID}` : "",
-    BOT_ID ? `whispers.${BOT_ID}` : "",
-  ];
-
-  const streamerToken = STREAMER_OAUTH || BOT_OAUTH;
-  const botToken = BOT_OAUTH || STREAMER_OAUTH;
-
-  if (!STREAMER_OAUTH && BOT_OAUTH) {
-    logger.warn("[pubsub] streamerOauth missing, falling back to botOauth for channel topics");
-  }
-  if (!BOT_OAUTH && STREAMER_OAUTH) {
-    logger.warn("[pubsub] botOauth missing, falling back to streamerOauth for bot topics");
-  }
-
-  requestTopics(streamerTopics, streamerToken, "streamer");
-  requestTopics(botTopics, botToken, "bot");
 };
 StartListener();
 
@@ -1276,7 +1660,8 @@ StartListener();
   return {
     stop() {
       stopped = true;
-      ping.stop();
+      clearEventsubKeepaliveTimer();
+      clearAutoFocOffTimer("module stop");
       if (pollFallbackTimer) {
         clearInterval(pollFallbackTimer);
         pollFallbackTimer = null;
@@ -1285,10 +1670,11 @@ StartListener();
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
-      pendingListens.clear();
       try {
         pubsub?.close?.();
       } catch {}
     },
   };
 }
+
+export const startTwitchPubsub = startTwitchEventsub;
