@@ -16,7 +16,7 @@
     "string-similarity": "^4.0.4",
     "terser": "^5.46.0",
     "tmi.js": "^1.8.5",
-    "undici": "^7.20.0",
+    "undici": "^7.24.0",
     "ws": "^8.11.0"
   },
   "type": "module",
