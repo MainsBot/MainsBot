@@ -5,7 +5,7 @@
   "requires": true,
   "dependencies": {
     "clean-css": "^5.3.3",
-    "discord.js": "^14.7.1",
+    "discord.js": "^14.26.3",
     "dotenv": "^16.0.3",
     "fs": "^0.0.1-security",
     "node-fetch": "^3.3.0",
